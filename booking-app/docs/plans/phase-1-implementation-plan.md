@@ -3130,7 +3130,7 @@ migration, so every later task has real tables to work against.
 contract, and test from here on imports model and enum types from
 `@prisma/client`.
 
-**Database changes.** All 29 tables, all 20 enums, every index and unique
+**Database changes.** All 29 tables, all 18 enums, every index and unique
 constraint listed in §4.4. **API changes.** None. **Frontend changes.** None.
 
 **Tests first.**
@@ -3209,7 +3209,7 @@ describe('schema.prisma', () => {
 - [ ] `prisma migrate diff --from-migrations --to-schema-datamodel` reports no drift.
 
 **Steps.**
-- [ ] Add all 20 enums exactly as listed in §4.2.
+- [ ] Add all 18 enums exactly as listed in §4.2.
 - [ ] Add each model with the fields, relations, indexes, and unique constraints
   from §4.3, using `@@map` to snake_case table names and `@map` on every camelCase
   column. Work through them in dependency order, one checkbox each:
