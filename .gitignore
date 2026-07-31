@@ -1,0 +1,4 @@
+.DS_Store
+.tokensave/
+.claude/settings.local.json
+
