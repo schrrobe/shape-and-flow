@@ -5,6 +5,12 @@
 # dependencies
 node_modules/
 
+# generated code — recreated by `prisma generate` on install.
+# The leading **/ matters: a pattern containing a middle separator is anchored
+# to this file's directory, so a bare `src/generated/` would only ever match at
+# the repository root.
+**/src/generated/
+
 # build output
 dist/
 build/

@@ -65,11 +65,12 @@ export function createEslintConfig(options = {}) {
       extends: [...tseslint.configs.strictTypeChecked, ...tseslint.configs.stylisticTypeChecked],
       languageOptions: {
         parserOptions: {
-          // allowDefaultProject covers root-level tool configs that no
-          // tsconfig "include" glob picks up.
-          projectService: {
-            allowDefaultProject: ['*.ts', '*.mts', '*.js', '*.mjs'],
-          },
+          // Every TypeScript file a package lints must be reachable from that
+          // package's tsconfig "include" — tool configs included. There is
+          // deliberately no allowDefaultProject escape hatch: a file outside
+          // the project should be a loud error and a one-line tsconfig fix,
+          // not silently linted without type information.
+          projectService: true,
           tsconfigRootDir,
           ...(vue ? { parser: tseslint.parser, extraFileExtensions: ['.vue'] } : {}),
         },

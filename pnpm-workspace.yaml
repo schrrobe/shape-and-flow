@@ -9,3 +9,11 @@ onlyBuiltDependencies:
   # Native module resolver used by eslint-plugin-import-x; without its
   # prebuilt binary, import-x/order cannot classify external vs internal.
   - unrs-resolver
+  # Downloads the Prisma query engine binary for this platform. Without it
+  # the client cannot connect to Postgres at all.
+  - '@prisma/engines'
+  # Native Rust binary. Vitest uses SWC to transform decorators so NestJS
+  # DI metadata survives into tests; esbuild alone does not emit it.
+  - '@swc/core'
+  # Native transform binary behind Vite and Vitest.
+  - esbuild

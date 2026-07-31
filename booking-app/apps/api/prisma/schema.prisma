@@ -1,0 +1,30 @@
+// Prisma schema for the Shape and Flow booking app.
+//
+// Models are added in Task 1.2; this file currently establishes only the
+// generator and the datasource.
+//
+// The generator is `prisma-client` (Prisma 7), not the legacy
+// `prisma-client-js`. It emits real ESM with `.js` import specifiers and
+// derives __dirname from import.meta.url, which is what allows this package to
+// be `"type": "module"` without any CommonJS interop shim. The generated
+// client is imported through the `#prisma` subpath declared in package.json,
+// so the output location is named in exactly one place.
+
+// `importFileExtension = "js"` is required, not cosmetic. The generator's
+// default emits `./enums.ts` specifiers, which tsc copies verbatim into dist
+// and Node then cannot resolve at runtime. Emitting `.js` is what NodeNext
+// expects: TypeScript resolves `./enums.js` to `enums.ts` while compiling, and
+// the built output points at the real emitted file.
+generator client {
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  moduleFormat        = "esm"
+  importFileExtension = "js"
+}
+
+// Prisma 7 no longer accepts a connection URL here. Migrate reads it from
+// prisma.config.ts, and the runtime client receives a driver adapter built
+// from the validated configuration (see src/prisma/prisma.service.ts).
+datasource db {
+  provider = "postgresql"
+}

@@ -1,0 +1,5 @@
+# Prisma generator output — recreated on every `prisma generate`.
+src/generated/
+
+dist/
+coverage/

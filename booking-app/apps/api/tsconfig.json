@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "extends": "@shape-and-flow/booking-config/tsconfig.node.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "declaration": false,
+    "declarationMap": false
+  },
+  // Deliberately wide: this is the project ESLint's type-aware rules and
+  // `tsc --noEmit` resolve against, so tests and tool configs must be visible
+  // to it. Emit is configured separately in tsconfig.build.json.
+  "include": ["src/**/*.ts", "test/**/*.ts", "*.config.ts"],
+  "exclude": ["dist", "node_modules"]
+}

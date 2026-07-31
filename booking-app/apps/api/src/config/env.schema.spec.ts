@@ -1,0 +1,156 @@
+import { describe, expect, it } from 'vitest';
+
+import { envSchema, parseConfig } from './env.schema.js';
+
+/** A minimal environment that must validate. Anything omitted has a default. */
+const valid: Record<string, string> = {
+  NODE_ENV: 'test',
+  APP_ROLE: 'api',
+  PORT: '3000',
+  LOG_LEVEL: 'error',
+  DATABASE_URL: 'postgresql://booking:booking@localhost:5434/booking_test?schema=public',
+  REDIS_URL: 'redis://localhost:6381',
+  DEFAULT_ORGANIZATION_SLUG: 'shape-and-flow',
+  PUBLIC_WEB_ORIGIN: 'http://localhost:5173',
+  PUBLIC_API_ORIGIN: 'http://localhost:3000',
+  PAYMENT_PROVIDER: 'fake',
+  EMAIL_PROVIDER: 'fake',
+  EMAIL_FROM_ADDRESS: 'buchung@example.com',
+  EMAIL_FROM_NAME: 'Shape and Flow',
+  SMS_PROVIDER: 'fake',
+  SESSION_COOKIE_NAME: 'sf_office_session',
+  SESSION_IDLE_TTL_MINUTES: '720',
+  SESSION_ABSOLUTE_TTL_MINUTES: '10080',
+  ENABLE_API_DOCS: 'false',
+};
+
+const paths = (result: ReturnType<typeof parseConfig>): string[] =>
+  result.success ? [] : result.error.issues.map((issue) => issue.path.join('.'));
+
+describe('envSchema', () => {
+  it('accepts a minimal valid environment', () => {
+    expect(parseConfig(valid).success).toBe(true);
+  });
+
+  it('coerces numeric strings to numbers', () => {
+    const parsed = envSchema.parse(valid);
+    expect(parsed.PORT).toBe(3000);
+    expect(parsed.SESSION_IDLE_TTL_MINUTES).toBe(720);
+    expect(typeof parsed.PORT).toBe('number');
+  });
+
+  it('coerces boolean-ish strings to booleans', () => {
+    expect(envSchema.parse({ ...valid, ENABLE_API_DOCS: 'true' }).ENABLE_API_DOCS).toBe(true);
+    expect(envSchema.parse({ ...valid, ENABLE_API_DOCS: '0' }).ENABLE_API_DOCS).toBe(false);
+  });
+
+  it('applies documented defaults for omitted optional variables', () => {
+    const parsed = envSchema.parse(valid);
+    expect(parsed.WORKER_CONCURRENCY).toBe(5);
+    expect(parsed.ENABLE_TEST_SUPPORT).toBe(false);
+  });
+
+  it('rejects an unknown APP_ROLE and names the variable', () => {
+    const result = parseConfig({ ...valid, APP_ROLE: 'both' });
+    expect(result.success).toBe(false);
+    expect(paths(result)).toContain('APP_ROLE');
+  });
+
+  it('rejects a non-postgres DATABASE_URL', () => {
+    expect(parseConfig({ ...valid, DATABASE_URL: 'mysql://x/y' }).success).toBe(false);
+  });
+
+  it('rejects a non-redis REDIS_URL', () => {
+    expect(parseConfig({ ...valid, REDIS_URL: 'http://localhost:6379' }).success).toBe(false);
+  });
+
+  it('rejects a malformed origin and a malformed sender address', () => {
+    expect(parseConfig({ ...valid, PUBLIC_WEB_ORIGIN: 'not-a-url' }).success).toBe(false);
+    expect(parseConfig({ ...valid, EMAIL_FROM_ADDRESS: 'nope' }).success).toBe(false);
+  });
+
+  it('requires RESEND_API_KEY when EMAIL_PROVIDER is resend', () => {
+    const result = parseConfig({ ...valid, EMAIL_PROVIDER: 'resend' });
+    expect(result.success).toBe(false);
+    expect(result.success ? [] : result.error.issues.map((issue) => issue.message)).toEqual(
+      expect.arrayContaining([expect.stringContaining('RESEND_API_KEY')]),
+    );
+  });
+
+  it('treats a replace_me placeholder as absent', () => {
+    const result = parseConfig({
+      ...valid,
+      EMAIL_PROVIDER: 'resend',
+      RESEND_API_KEY: 're_replace_me',
+      RESEND_WEBHOOK_SECRET: 'whsec_replace_me',
+    });
+    expect(result.success).toBe(false);
+    expect(paths(result)).toContain('RESEND_API_KEY');
+  });
+
+  it('accepts resend once real credentials are supplied', () => {
+    expect(
+      parseConfig({
+        ...valid,
+        EMAIL_PROVIDER: 'resend',
+        RESEND_API_KEY: 're_live_abc123',
+        RESEND_WEBHOOK_SECRET: 'whsec_live_abc123',
+      }).success,
+    ).toBe(true);
+  });
+
+  it('requires every Twilio credential when SMS_PROVIDER is twilio', () => {
+    const result = parseConfig({ ...valid, SMS_PROVIDER: 'twilio' });
+    expect(result.success).toBe(false);
+    expect(paths(result)).toEqual(
+      expect.arrayContaining([
+        'TWILIO_ACCOUNT_SID',
+        'TWILIO_AUTH_TOKEN',
+        'TWILIO_FROM_NUMBER',
+        'TWILIO_STATUS_CALLBACK_URL',
+      ]),
+    );
+  });
+
+  it('requires Stripe credentials when PAYMENT_PROVIDER is stripe', () => {
+    const result = parseConfig({ ...valid, PAYMENT_PROVIDER: 'stripe' });
+    expect(paths(result)).toEqual(
+      expect.arrayContaining(['STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET']),
+    );
+  });
+
+  it('refuses fake providers in production', () => {
+    const result = parseConfig({
+      ...valid,
+      NODE_ENV: 'production',
+      PAYMENT_PROVIDER: 'fake',
+      EMAIL_PROVIDER: 'fake',
+      SMS_PROVIDER: 'fake',
+    });
+    expect(paths(result)).toEqual(
+      expect.arrayContaining(['PAYMENT_PROVIDER', 'EMAIL_PROVIDER', 'SMS_PROVIDER']),
+    );
+  });
+
+  it('refuses the test-support router in production', () => {
+    const result = parseConfig({
+      ...valid,
+      NODE_ENV: 'production',
+      PAYMENT_PROVIDER: 'stripe',
+      STRIPE_SECRET_KEY: 'sk_live_x',
+      STRIPE_WEBHOOK_SECRET: 'whsec_live_x',
+      EMAIL_PROVIDER: 'resend',
+      RESEND_API_KEY: 're_live_x',
+      RESEND_WEBHOOK_SECRET: 'whsec_live_y',
+      SMS_PROVIDER: 'fake',
+      ENABLE_TEST_SUPPORT: 'true',
+    });
+    expect(paths(result)).toContain('ENABLE_TEST_SUPPORT');
+  });
+
+  it('reports every missing variable at once rather than only the first', () => {
+    const result = parseConfig({ NODE_ENV: 'test' });
+    expect(result.success).toBe(false);
+    expect(result.success ? 0 : result.error.issues.length).toBeGreaterThan(5);
+  });
+});
