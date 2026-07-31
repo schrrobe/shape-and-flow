@@ -1,0 +1,3 @@
+packages:
+  - 'booking-app/apps/*'
+  - 'booking-app/packages/*'
