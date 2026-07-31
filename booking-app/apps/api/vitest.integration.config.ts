@@ -2,6 +2,11 @@ import { baseVitestConfig } from '@shape-and-flow/booking-config/vitest';
 import swc from 'unplugin-swc';
 import { defineConfig, mergeConfig } from 'vitest/config';
 
+const TEST_DATABASE_URL =
+  process.env.DATABASE_URL ??
+  'postgresql://booking:booking@localhost:5434/booking_test?schema=public';
+const TEST_REDIS_URL = process.env.REDIS_URL ?? 'redis://localhost:6381';
+
 export default mergeConfig(
   baseVitestConfig,
   defineConfig({
@@ -22,14 +27,19 @@ export default mergeConfig(
       name: 'integration',
       environment: 'node',
       include: ['test/integration/**/*.int.spec.ts'],
-      // Integration tests talk to a real database, so they need more than the
-      // default five seconds and must not be aborted mid-transaction.
+      setupFiles: ['./test/setup.integration.ts'],
+      // One database, truncated between tests. Several of these tests
+      // deliberately provoke lock contention and constraint violations, and a
+      // single serialised database makes those outcomes unambiguous.
+      fileParallelism: false,
+      // Real database round trips, and some tests hold advisory locks.
       testTimeout: 30_000,
       hookTimeout: 30_000,
-      // The first integration tests arrive with the database harness in
-      // Task 1.3. Until then there are legitimately none, and CI must stay
-      // green; Task 1.3 flips this back to false.
-      passWithNoTests: true,
+      env: {
+        NODE_ENV: 'test',
+        DATABASE_URL: TEST_DATABASE_URL,
+        REDIS_URL: TEST_REDIS_URL,
+      },
       coverage: { enabled: false },
     },
   }),
