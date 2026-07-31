@@ -1,0 +1,49 @@
+{
+  "name": "@shape-and-flow/booking-config",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Shared TypeScript, ESLint, Prettier and Vitest configuration for the booking app.",
+  "exports": {
+    "./tsconfig.base.json": "./tsconfig.base.json",
+    "./tsconfig.node.json": "./tsconfig.node.json",
+    "./tsconfig.vue.json": "./tsconfig.vue.json",
+    "./eslint": "./eslint.config.js",
+    "./prettier": "./prettier.config.js",
+    "./vitest": {
+      "types": "./vitest.base.d.ts",
+      "default": "./vitest.base.js"
+    }
+  },
+  "files": [
+    "tsconfig.base.json",
+    "tsconfig.node.json",
+    "tsconfig.vue.json",
+    "eslint.config.js",
+    "prettier.config.js",
+    "vitest.base.js",
+    "vitest.base.d.ts"
+  ],
+  "scripts": {
+    "lint": "eslint .",
+    "format": "prettier --check .",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "echo \"@shape-and-flow/booking-config has no runtime code to test\" && exit 0"
+  },
+  "dependencies": {
+    "@eslint/js": "10.0.1",
+    "eslint-config-prettier": "10.1.8",
+    "eslint-plugin-import-x": "4.17.1",
+    "eslint-plugin-vue": "10.10.0",
+    "globals": "17.8.0",
+    "typescript-eslint": "8.65.0"
+  },
+  "devDependencies": {
+    "@types/node": "26.1.2",
+    "@vitest/coverage-v8": "4.1.10",
+    "eslint": "10.8.0",
+    "prettier": "3.9.6",
+    "typescript": "6.0.3",
+    "vitest": "4.1.10"
+  }
+}
