@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard } from '@nestjs/throttler';
 
+import { BookingModule } from './booking/booking.module.js';
 import { GlobalExceptionFilter } from './common/errors/global-exception.filter.js';
 import { AuthGuard } from './common/guards/auth.guard.js';
 import { LoggingModule } from './common/logging/logger.module.js';
@@ -34,6 +35,7 @@ import { PublicModule } from './public/public.module.js';
     ProvidersModule,
     HealthModule,
     PublicModule,
+    BookingModule,
   ],
   providers: [
     // Registered as a provider rather than with useGlobalFilters so it can take

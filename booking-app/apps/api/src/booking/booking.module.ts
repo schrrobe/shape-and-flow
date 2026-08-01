@@ -1,7 +1,9 @@
 import { Module } from '@nestjs/common';
 
+import { PublicBookingsController } from '../public/public-bookings.controller.js';
 import { PublicModule } from '../public/public.module.js';
 
+import { BookingCheckoutService } from './booking-checkout.service.js';
 import { CustomerUpsertService } from './customer-upsert.service.js';
 import { ReservationService } from './reservation.service.js';
 
@@ -11,10 +13,15 @@ import { ReservationService } from './reservation.service.js';
  * Imports PublicModule for `AvailabilitySnapshotService`, which is the point — the
  * reservation re-check must use the same loader the availability endpoint does, or
  * "free" would eventually mean two different things.
+ *
+ * `POST /public/bookings` is registered here rather than in PublicModule even though it
+ * sits under that path, because everything it calls lives here. The alternative is two
+ * mutually dependent modules and a payment provider in every catalog test.
  */
 @Module({
   imports: [PublicModule],
-  providers: [ReservationService, CustomerUpsertService],
-  exports: [ReservationService, CustomerUpsertService],
+  controllers: [PublicBookingsController],
+  providers: [ReservationService, CustomerUpsertService, BookingCheckoutService],
+  exports: [ReservationService, CustomerUpsertService, BookingCheckoutService],
 })
 export class BookingModule {}
