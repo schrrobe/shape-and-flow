@@ -1,5 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router';
 
+import { installOfficeSessionHandling } from './office-guard.js';
+
 import type { RouteRecordRaw } from 'vue-router';
 
 /**
@@ -66,12 +68,67 @@ const routes: RouteRecordRaw[] = [
     component: () => import('../pages/public/ManageReschedule.vue'),
   },
 
+  /**
+   * The office area.
+   *
+   * `meta.area` marks it so the application shell renders the office chrome instead of the
+   * customer header, and `meta.requiresSession` is what the guard reads. The three
+   * authentication screens sit outside the layout: it builds a sidebar from capabilities,
+   * and there is no user to build one from until one of them has done its job.
+   */
+  {
+    path: '/office/login',
+    name: 'office-login',
+    component: () => import('../pages/office/OfficeLogin.vue'),
+    meta: { area: 'office' },
+  },
+  {
+    path: '/office/forgot-password',
+    name: 'office-forgot-password',
+    component: () => import('../pages/office/OfficeForgotPassword.vue'),
+    meta: { area: 'office' },
+  },
+  {
+    path: '/office/reset-password',
+    name: 'office-reset-password',
+    component: () => import('../pages/office/OfficeResetPassword.vue'),
+    meta: { area: 'office' },
+  },
+  {
+    path: '/office',
+    component: () => import('../pages/office/OfficeLayout.vue'),
+    meta: { area: 'office', requiresSession: true },
+    children: [
+      // No `meta` of its own: vue-router merges every matched record's meta into
+      // `route.meta`, so a child inherits the parent's `area` and `requiresSession`.
+      //
+      // Named `office-dashboard` already, though it renders a landing page rather than the
+      // dashboard: task 10.2 replaces the component and the name, the path and the sidebar
+      // entry all stay put.
+      {
+        path: '',
+        name: 'office-dashboard',
+        component: () => import('../pages/office/OfficeStart.vue'),
+      },
+    ],
+  },
+
   {
     path: '/:pathMatch(.*)*',
     name: 'not-found',
     component: () => import('../pages/public/NotFoundPage.vue'),
   },
 ];
+
+/**
+ * A fragment on these routes is a credential, not an anchor.
+ *
+ * `{ el: to.hash }` hands the fragment to `document.querySelector`, and a token is not a
+ * valid CSS selector the moment it starts with a digit — which throws rather than missing.
+ * Both routes that receive a token this way are listed, so scrolling stays on for the
+ * anchors it is actually for.
+ */
+const CREDENTIAL_IN_FRAGMENT: readonly string[] = ['/manage', '/office/reset-password'];
 
 export const router = createRouter({
   history: createWebHistory(),
@@ -80,7 +137,9 @@ export const router = createRouter({
     // Restore on back, jump to the top otherwise: a wizard step that opens halfway down the
     // previous step's scroll position looks broken.
     if (savedPosition !== null) return savedPosition;
-    if (to.hash !== '') return { el: to.hash };
+    if (to.hash !== '' && !CREDENTIAL_IN_FRAGMENT.includes(to.path)) return { el: to.hash };
     return { top: 0 };
   },
 });
+
+installOfficeSessionHandling(router);

@@ -3,6 +3,8 @@ import { z } from 'zod';
 import { officeUserRoleSchema } from '../enums.js';
 import { cuidSchema } from '../primitives.js';
 
+export * from './capabilities.js';
+
 /**
  * Office authentication.
  *
@@ -90,12 +92,18 @@ export type LoginResponse = z.infer<typeof loginResponseSchema>;
 
 export const passwordResetRequestSchema = z.object({ email: z.email().max(320) });
 
+export type PasswordResetRequest = z.infer<typeof passwordResetRequestSchema>;
+
 export const passwordResetConfirmSchema = z.object({
   token: z.string().min(1).max(200),
   newPassword: newPasswordSchema,
 });
 
+export type PasswordResetConfirmRequest = z.infer<typeof passwordResetConfirmSchema>;
+
 export const changePasswordRequestSchema = z.object({
   currentPassword: z.string().min(1).max(200),
   newPassword: newPasswordSchema,
 });
+
+export type ChangePasswordRequest = z.infer<typeof changePasswordRequestSchema>;

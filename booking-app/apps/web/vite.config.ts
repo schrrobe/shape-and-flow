@@ -19,8 +19,13 @@ export default defineConfig({
       output: {
         // The function form, because Rollup 5 — which Vite 8 uses — removed the object form.
         // Framework code changes on an upgrade, application code changes on every deploy, so
-        // separating them means a deploy does not invalidate the cached framework chunk. The
-        // office area splits itself: its routes are dynamic imports.
+        // separating them means a deploy does not invalidate the cached framework chunk.
+        //
+        // Vendor is the only manual chunk, and a named `office` chunk was tried and removed:
+        // adding one made Rollup fold `vendor` into it, producing a single 316 kB file that
+        // the entry depends on — so every customer would have downloaded the staff interface
+        // to get Vue. The office area splits itself through its route-level dynamic imports,
+        // which `office/isolation.spec.ts` pins.
         manualChunks: (id: string) => (id.includes('node_modules') ? 'vendor' : undefined),
       },
     },

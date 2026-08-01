@@ -4,12 +4,17 @@ import type {
   AvailabilityQuery,
   AvailabilityResponse,
   BookingBySessionResponse,
+  ChangePasswordRequest,
   CreateBookingRequest,
   CreateBookingResponse,
+  LoginRequest,
+  LoginResponse,
   ManageBookingResponse,
   ManageCancelResponse,
   ManageRescheduleResponse,
   OrganizationCurrentResponse,
+  PasswordResetConfirmRequest,
+  PasswordResetRequest,
   ServiceCategoryListResponse,
   ServiceEmployeesResponse,
   ServiceListResponse,
@@ -51,12 +56,36 @@ const BASE = '/api';
 const GET_RETRIES = 1;
 
 interface RequestOptions {
-  method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
+  method?: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
   body?: unknown;
   /** Extra headers. `Idempotency-Key` and `Authorization` arrive this way. */
   headers?: Record<string, string>;
   signal?: AbortSignal | undefined;
   query?: Record<string, string | number | undefined>;
+  /**
+   * This call depends on the office session cookie.
+   *
+   * Set only where a `401` means "your session went away", which is why it is a flag
+   * rather than something inferred from the path: `POST /auth/login` answers `401` for a
+   * wrong password, and treating that as an expiry would bounce somebody who is trying
+   * to sign in to the page they are already on.
+   */
+  session?: boolean;
+}
+
+/**
+ * What to do when an office session turns out to be gone.
+ *
+ * Registered by the office area rather than imported by it, because the client must not
+ * depend on the router — and a public page has no handler, so a stray `401` there stays
+ * an ordinary error instead of navigating somebody away from a booking.
+ */
+type UnauthorizedHandler = () => void;
+
+let unauthorizedHandler: UnauthorizedHandler | null = null;
+
+export function setUnauthorizedHandler(handler: UnauthorizedHandler | null): void {
+  unauthorizedHandler = handler;
 }
 
 function url(path: string, query: RequestOptions['query']): string {
@@ -132,7 +161,13 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
       lastError = error;
     } catch (error) {
       if (error instanceof ApiError) {
-        if (error.status < 500 || attempt === attempts - 1) throw error;
+        if (error.status < 500 || attempt === attempts - 1) {
+          // Every `ApiError` leaves through here — the `throw` above is inside this
+          // `try`, so it lands in this branch too. One exit means one place to notice
+          // that the session is gone.
+          if (options.session === true && error.status === 401) unauthorizedHandler?.();
+          throw error;
+        }
         lastError = error;
       } else {
         // An abort is the caller's own doing; a network failure is worth one retry.
@@ -186,6 +221,35 @@ export const api = {
       request<BookingBySessionResponse>(`/public/bookings/by-session/${checkoutSessionId}`, {
         signal,
       }),
+  },
+
+  /**
+   * Office authentication.
+   *
+   * Only `changePassword` carries `session: true`, and the omissions are each deliberate.
+   * Login and the password-reset pair answer `401` for a wrong credential, not an expiry —
+   * treating that as one would navigate a failed sign-in away from the message it was about
+   * to show. And `/auth/me` is the call that *asks* whether a session exists, so its `401`
+   * is the answer rather than a failure: routing it through the expiry handler made the
+   * guard redirect twice and told a first-time visitor their session had ended.
+   */
+  auth: {
+    login: (body: LoginRequest, signal?: AbortSignal) =>
+      request<LoginResponse>('/auth/login', { method: 'POST', body, signal }),
+
+    logout: (signal?: AbortSignal) =>
+      request<undefined>('/auth/logout', { method: 'POST', signal }),
+
+    me: (signal?: AbortSignal) => request<LoginResponse>('/auth/me', { signal }),
+
+    requestPasswordReset: (body: PasswordResetRequest, signal?: AbortSignal) =>
+      request<undefined>('/auth/password-reset/request', { method: 'POST', body, signal }),
+
+    confirmPasswordReset: (body: PasswordResetConfirmRequest, signal?: AbortSignal) =>
+      request<undefined>('/auth/password-reset/confirm', { method: 'POST', body, signal }),
+
+    changePassword: (body: ChangePasswordRequest, signal?: AbortSignal) =>
+      request<undefined>('/auth/password', { method: 'POST', body, session: true, signal }),
   },
 
   manage: {
