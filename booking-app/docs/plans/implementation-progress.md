@@ -7,9 +7,9 @@ while implementing that the plan could not have known.
 |                   |                                                                                   |
 | ----------------- | --------------------------------------------------------------------------------- |
 | Branch            | `feat/phase-1-booking-app` (nothing pushed)                                       |
-| Tasks complete    | 20 of 49                                                                          |
+| Tasks complete    | 24 of 49                                                                          |
 | Unit tests        | 379 passing (364 api + 15 contracts)                                              |
-| Integration tests | 175 passing                                                                       |
+| Integration tests | 260 passing                                                                       |
 | Gates             | `pnpm lint`, `format`, `typecheck`, `test`, `test:integration`, `build` all green |
 
 ## Execution order — vertical slice
@@ -59,7 +59,13 @@ constraint → Stripe Checkout → webhook confirms.
 | 5.4     | Stripe webhook ingress and booking confirmation       |
 | 5.5     | Two-phase expiry saga                                 |
 
-Deferred out of the slice: 3.4, and all of stages 6–11.
+**The vertical slice is complete.** A customer can browse the catalog, see real slots,
+reserve one, pay through Stripe Checkout, and have the booking confirmed by webhook —
+with the slot released again if they do not. Verified end to end against a booted
+server, not only by tests: two customers load-balance across the two employees, the
+third gets `409 SLOT_UNAVAILABLE`, and the slot disappears from availability.
+
+Deferred out of the slice: 3.4 (email and SMS adapters), and all of stages 6–11.
 
 ## Version drift from the plan, and why
 
@@ -225,6 +231,24 @@ constructable`. The named import gives both the class and the type.
     slug from the validated environment at bootstrap) and the clock. `ThrottlerGuard`
     is deliberately absent from it, so `@Throttle` is inert in tests.
 
+31. `PublicBookingsController` lives under `src/public/` but is registered by
+    `BookingModule`. Registering it in `PublicModule` made the two modules mutually
+    dependent and dragged the payment provider into every test that only wanted to
+    read a catalog — which is how the catalog and availability suites started failing
+    to construct.
+32. A bad webhook signature returns `VALIDATION_FAILED`, not a code of its own. The
+    consumer is Stripe, which reads only the status; adding a public error code widens
+    the contract every browser client sees for a machine that would not look at it.
+    Note that an _internal_ code could not be used here — the exception filter turns
+    those into a generic 500, and this needs a 400.
+33. The raw webhook body comes from Nest's `rawBody: true`, not from a path-scoped raw
+    parser. See the bug below.
+34. Inbox job ids for the webhook use the inbox row id, matching Task 4.3, rather than
+    the plan's `stripe:<eventId>`.
+35. A replayed booking response is _semantically_ identical, not byte-identical as the
+    plan says: `responseSnapshot` is JSONB and PostgreSQL does not preserve object key
+    order. Nothing consumes key order, and `JSON.parse` yields the same object.
+
 ## Plan errors found while implementing
 
 - **§8.4 error handling was wrong, in our favour.** It assumed `23P01` arrives as
@@ -284,6 +308,23 @@ connecting/connected` on a second `connect()`. The hook does a `PING` instead,
   to handle. The helper now normalises both spellings. Every pre-existing call site
   passed snake_case constraint names and was unaffected; only Task 4.3's new ones
   hit it.
+
+- **A path-scoped raw-body parser cannot work.** The plan mounts one on
+  `/api/webhooks/*` to preserve the bytes a signature covers. Nest's global JSON parser
+  runs before module middleware and has already consumed the stream, so the raw parser
+  sees a parsed body and skips — silently. Nest's `rawBody: true` keeps the buffer
+  aside while still parsing JSON everywhere, which is what actually works.
+- **The fake payment provider's ids collided across process restarts.** Its counter
+  restarted at 1, and `stripe_checkout_session_id` is unique, so a restarted dev server
+  re-issued `cs_fake_1` and every booking failed with a 502 until the counter passed
+  what was already stored. Invisible to the test suite, which truncates per run —
+  found by driving the flow against a booted server. Fixed with a per-process suffix.
+- **Making a reservation overdue by advancing the fixed clock broke the stuck-EXPIRING
+  sweep.** `updatedAt` is written at real time, so a clock moved six minutes ahead made
+  every EXPIRING row look stale and the sweep claimed one that was in flight. The
+  reservation is now made overdue by backdating `expiresAt` — moving the row, not the
+  clock. Third time this class of bug has appeared; the rule is now explicit: when a
+  comparison is against a database-written column, control time by writing the column.
 
 ## Bugs caught by verifying rather than assuming
 
