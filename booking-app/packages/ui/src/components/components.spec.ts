@@ -215,7 +215,7 @@ describe('SfModal', () => {
     wrapper.unmount();
   });
 
-  it('closes on Escape', async () => {
+  it('closes on Escape', () => {
     const wrapper = mount(SfModal, {
       props: { open: true, title: 'x' },
       attachTo: document.body,
@@ -270,14 +270,14 @@ describe('SfModal', () => {
     trigger.remove();
   });
 
-  it('emits confirm from the confirm button', async () => {
+  it('emits confirm from the confirm button', () => {
     const wrapper = mount(SfModal, {
       props: { open: true, title: 'x', confirmLabel: 'Ja' },
       attachTo: document.body,
     });
 
     const confirm = [...document.body.querySelectorAll('button')].find(
-      (button) => button.textContent?.trim() === 'Ja',
+      (button) => button.textContent.trim() === 'Ja',
     );
     confirm?.click();
 

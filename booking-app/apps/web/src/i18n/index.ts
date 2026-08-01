@@ -50,34 +50,36 @@ export function detectLocale(
   return DEFAULT_LOCALE;
 }
 
-const dateTimeFormats = Object.fromEntries(
-  LOCALES.map((locale) => [
-    locale,
-    {
-      date: { timeZone: DISPLAY_ZONE, day: '2-digit', month: '2-digit', year: 'numeric' },
-      time: { timeZone: DISPLAY_ZONE, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' },
-      weekdayLong: { timeZone: DISPLAY_ZONE, weekday: 'long' },
-      dayMonth: { timeZone: DISPLAY_ZONE, weekday: 'short', day: '2-digit', month: '2-digit' },
-      full: {
-        timeZone: DISPLAY_ZONE,
-        weekday: 'long',
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-        hourCycle: 'h23',
-      },
-    },
-  ]),
-);
+/**
+ * The named formats every screen uses.
+ *
+ * `as const` matters: vue-i18n types these options as literal unions, and building the object with
+ * `Object.fromEntries` widens `'2-digit'` to `string` and stops type-checking the whole shape.
+ * Written out per locale for the same reason — the duplication is what keeps the types.
+ */
+const FORMATS = {
+  date: { timeZone: DISPLAY_ZONE, day: '2-digit', month: '2-digit', year: 'numeric' },
+  time: { timeZone: DISPLAY_ZONE, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' },
+  weekdayLong: { timeZone: DISPLAY_ZONE, weekday: 'long' },
+  dayMonth: { timeZone: DISPLAY_ZONE, weekday: 'short', day: '2-digit', month: '2-digit' },
+  full: {
+    timeZone: DISPLAY_ZONE,
+    weekday: 'long',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  },
+} as const;
 
-const numberFormats = Object.fromEntries(
-  LOCALES.map((locale) => [
-    locale,
-    { currency: { style: 'currency', currency: 'EUR', currencyDisplay: 'symbol' } },
-  ]),
-);
+const CURRENCY = {
+  currency: { style: 'currency', currency: 'EUR', currencyDisplay: 'symbol' },
+} as const;
+
+const dateTimeFormats = { de: FORMATS, en: FORMATS };
+const numberFormats = { de: CURRENCY, en: CURRENCY };
 
 /**
  * Composition mode, no legacy API, and German as the fallback.
@@ -99,7 +101,9 @@ export const i18n = createI18n({
 
 /** Apply a locale everywhere it is visible: the app, the document, and the next visit. */
 export function applyLocale(locale: Locale): void {
-  i18n.global.locale.value = locale;
+  // `legacy: false` makes this a writable ref, but the exported `global` is typed as the union of
+  // both APIs, so the narrowing has to be explicit.
+  (i18n.global.locale as unknown as { value: Locale }).value = locale;
 
   // `lang` drives screen-reader pronunciation and the browser's own hyphenation. Forgetting it
   // makes German copy read aloud with English phonetics.

@@ -6,17 +6,37 @@ import type {
   BookingBySessionResponse,
   CreateBookingRequest,
   CreateBookingResponse,
-  ManageAvailabilityQuery,
   ManageBookingResponse,
-  ManageCancelRequest,
   ManageCancelResponse,
-  ManageRescheduleRequest,
   ManageRescheduleResponse,
   OrganizationCurrentResponse,
   ServiceCategoryListResponse,
   ServiceEmployeesResponse,
   ServiceListResponse,
 } from '@shape-and-flow/booking-contracts';
+
+/**
+ * The `/manage` request shapes.
+ *
+ * Declared here because the contracts package exports these schemas but not their inferred
+ * types — and importing a name a package does not export resolves to `any`, which is how a typed
+ * client quietly stops being typed. The exports belong in contracts; until they exist, being
+ * explicit here is better than three silent `any`s.
+ */
+interface ManageAvailabilityQuery {
+  from: string;
+  to: string;
+}
+
+interface ManageCancelRequest {
+  reason?: string;
+}
+
+interface ManageRescheduleRequest {
+  requestedStartsAt: string;
+  requestedEmployeeId?: string;
+  reason?: string;
+}
 
 /**
  * Same origin, always.

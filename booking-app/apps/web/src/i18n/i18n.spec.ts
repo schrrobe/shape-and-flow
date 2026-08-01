@@ -1,12 +1,14 @@
 import { errorCodeSchema } from '@shape-and-flow/booking-contracts';
 import { describe, expect, it } from 'vitest';
 
-import { detectLocale, DEFAULT_LOCALE, isLocale, LOCALES } from './index.js';
-
 import de from './de.json';
 import en from './en.json';
 
-type Tree = { [key: string]: string | Tree };
+import { detectLocale, DEFAULT_LOCALE, isLocale, LOCALES } from './index.js';
+
+interface Tree {
+  [key: string]: string | Tree;
+}
 
 function flatten(tree: Tree, prefix = ''): string[] {
   return Object.entries(tree).flatMap(([key, value]) =>
