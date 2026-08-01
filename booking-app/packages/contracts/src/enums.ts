@@ -61,6 +61,26 @@ export const weekdaySchema = z.enum([
 export type Weekday = z.infer<typeof weekdaySchema>;
 
 /**
+ * A one-off override of an employee's recurring hours.
+ *
+ * `EXTRA_HOURS` *replaces* the weekday's hours rather than adding to them — an office
+ * setting special Saturday hours means "these hours", not "these plus the usual" — and
+ * `CLOSED` empties the day. The two carry different fields, which is why the request
+ * schema is a discriminated union rather than one object with nullable minutes.
+ */
+export const availabilityExceptionKindSchema = z.enum(['EXTRA_HOURS', 'CLOSED']);
+export type AvailabilityExceptionKind = z.infer<typeof availabilityExceptionKindSchema>;
+
+/**
+ * Where a leave request stands.
+ *
+ * Only `APPROVED` removes the days from availability. `REQUESTED` deliberately does
+ * not: a request nobody has decided must not quietly free an employee's calendar.
+ */
+export const timeOffStatusSchema = z.enum(['REQUESTED', 'APPROVED', 'REJECTED']);
+export type TimeOffStatus = z.infer<typeof timeOffStatusSchema>;
+
+/**
  * What a notification is about.
  *
  * Here rather than only in Prisma because the notification-templates package is

@@ -6,7 +6,13 @@ import {
   displayStatusSchema,
   weekdaySchema,
 } from '../enums.js';
-import { cuidSchema, isoInstantSchema, localDateSchema, moneySchema } from '../primitives.js';
+import {
+  booleanQuery,
+  cuidSchema,
+  isoInstantSchema,
+  localDateSchema,
+  moneySchema,
+} from '../primitives.js';
 
 /**
  * The office calendar.
@@ -42,10 +48,7 @@ export const officeCalendarQuerySchema = z
      * Off by default, because a calendar showing expired and cancelled appointments
      * beside live ones is how somebody double-books a slot they thought was taken.
      */
-    includeInactive: z
-      .enum(['true', 'false'])
-      .default('false')
-      .transform((value) => value === 'true'),
+    includeInactive: booleanQuery(false),
   })
   .refine((query) => query.from <= query.to, {
     message: 'from must not be after to',

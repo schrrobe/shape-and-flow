@@ -180,6 +180,23 @@ enum AuditAction {
   OFFICE_USER_CREATED
   OFFICE_USER_UPDATED
   OFFICE_USER_ARCHIVED
+  // The availability and catalog surface. Added in Task 8.4 rather than at the start
+  // because it is only now reachable: "who shortened Friday" and "who closed the 24th"
+  // are exactly the questions an office asks after a customer complains, and a
+  // configuration change with no trace answers none of them.
+  WORKING_HOURS_REPLACED
+  EMPLOYEE_SERVICES_REPLACED
+  AVAILABILITY_EXCEPTION_CREATED
+  AVAILABILITY_EXCEPTION_DELETED
+  TIME_OFF_CREATED
+  TIME_OFF_UPDATED
+  BLOCKED_TIME_CREATED
+  BLOCKED_TIME_DELETED
+  CLOSED_DAY_CREATED
+  CLOSED_DAY_DELETED
+  SERVICE_CATEGORY_CREATED
+  SERVICE_CATEGORY_UPDATED
+  SERVICE_CATEGORY_ARCHIVED
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

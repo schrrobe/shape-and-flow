@@ -1,4 +1,5 @@
 import {
+  availabilityExceptionKindSchema,
   bookingOriginSchema,
   bookingStatusSchema,
   cancellationFeePolicySchema,
@@ -7,11 +8,13 @@ import {
   notificationKindSchema,
   notificationStatusSchema,
   officeUserRoleSchema,
+  timeOffStatusSchema,
   weekdaySchema,
 } from '@shape-and-flow/booking-contracts';
 import { describe, expect, it } from 'vitest';
 
 import {
+  AvailabilityExceptionKind,
   BookingOrigin,
   BookingStatus,
   CancellationFeePolicy,
@@ -20,6 +23,7 @@ import {
   NotificationKind,
   NotificationStatus,
   OfficeUserRole,
+  TimeOffStatus,
   Weekday,
 } from './client.js';
 
@@ -39,6 +43,8 @@ const PAIRS = [
   ['Locale', Locale, localeSchema.options],
   ['OfficeUserRole', OfficeUserRole, officeUserRoleSchema.options],
   ['Weekday', Weekday, weekdaySchema.options],
+  ['AvailabilityExceptionKind', AvailabilityExceptionKind, availabilityExceptionKindSchema.options],
+  ['TimeOffStatus', TimeOffStatus, timeOffStatusSchema.options],
   ['NotificationKind', NotificationKind, notificationKindSchema.options],
   ['NotificationChannel', NotificationChannel, notificationChannelSchema.options],
   ['NotificationStatus', NotificationStatus, notificationStatusSchema.options],

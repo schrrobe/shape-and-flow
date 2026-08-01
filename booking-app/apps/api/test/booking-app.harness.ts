@@ -25,7 +25,7 @@ import { SMS_PROVIDER } from '../src/providers/sms/sms-provider.js';
 import { PublicModule } from '../src/public/public.module.js';
 
 import { prisma } from './database.harness.js';
-import { countingPrisma } from './public-app.harness.js';
+import { countingPrisma, loadOrganization } from './public-app.harness.js';
 
 import type { AppConfig } from '../src/config/env.schema.js';
 import type { QueueRegistry } from '../src/messaging/queues/enqueue.service.js';
@@ -65,6 +65,17 @@ function organizationStub(): Partial<OrganizationContextService> {
     getOrganizationId: () => read().id,
     getSettings: () => read().settings,
     getTimezone: () => read().timezone,
+    /**
+     * The one method the stub implements for real.
+     *
+     * `PATCH /office/settings` calls it, and the reason it exists in production — the
+     * cached policy must not survive the row that produced it — is exactly what the
+     * settings test asserts. A stub that answered `undefined` here would make that
+     * assertion pass against a service that never refreshed anything.
+     */
+    refresh: async () => {
+      currentOrganization = await loadOrganization(read().id);
+    },
   };
 }
 

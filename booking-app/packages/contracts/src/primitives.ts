@@ -55,6 +55,19 @@ export const idempotencyKeySchema = z.uuid();
 /** Minutes from local midnight. 1440 is legal and means the next midnight. */
 export const minuteOfDaySchema = z.number().int().min(0).max(1440);
 
+/**
+ * A boolean carried in a query string.
+ *
+ * Query values are always strings, so the accepted forms are the two literals and
+ * nothing else — `?flag`, `?flag=1` and `?flag=yes` are rejected rather than guessed
+ * at, because a flag that silently reads as `false` is worse than one that 400s.
+ */
+export const booleanQuery = (fallback: boolean) =>
+  z
+    .enum(['true', 'false'])
+    .default(fallback ? 'true' : 'false')
+    .transform((value) => value === 'true');
+
 /** A customer-facing locale. Lowercase, because it appears in URLs and paths. */
 export const localeSchema = z.enum(['de', 'en']);
 export type Locale = z.infer<typeof localeSchema>;
