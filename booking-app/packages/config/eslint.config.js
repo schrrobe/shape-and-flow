@@ -111,6 +111,19 @@ export function createEslintConfig(options = {}) {
             selector: 'MemberExpression[property.name=/^\\$(queryRawUnsafe|executeRawUnsafe)$/]',
             message: 'Raw unsafe SQL is banned. Use Prisma.sql tagged templates.',
           },
+          // Money arithmetic belongs to the Money value object, which is the one
+          // place rounding and currency rules are defined and tested. Both
+          // selectors are needed: a bare identifier (`amountCents - fee`) and a
+          // property access (`payment.amountCents - fee`) are different nodes.
+          {
+            selector: 'BinaryExpression[operator=/^[*/+-]$/] > Identifier[name=/Cents$/]',
+            message: 'Do not do arithmetic on cents directly. Use the Money value object.',
+          },
+          {
+            selector:
+              'BinaryExpression[operator=/^[*/+-]$/] > MemberExpression[property.name=/Cents$/]',
+            message: 'Do not do arithmetic on cents directly. Use the Money value object.',
+          },
         ],
         'no-restricted-properties': [
           'error',
@@ -138,6 +151,13 @@ export function createEslintConfig(options = {}) {
     },
 
     { files: PROCESS_ENV_ALLOWED, rules: { 'no-restricted-properties': 'off' } },
+
+    {
+      // The Money value object is where cent arithmetic is defined, so it is the
+      // one place allowed to perform it.
+      files: ['**/domain/money/**'],
+      rules: { 'no-restricted-syntax': 'off' },
+    },
 
     // Must stay last so formatting-related rules are switched off.
     eslintConfigPrettier,
