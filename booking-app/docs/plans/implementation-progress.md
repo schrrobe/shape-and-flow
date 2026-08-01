@@ -7,9 +7,9 @@ while implementing that the plan could not have known.
 |                   |                                                                                   |
 | ----------------- | --------------------------------------------------------------------------------- |
 | Branch            | `feat/phase-1-booking-app` (nothing pushed)                                       |
-| Tasks complete    | 18 of 49                                                                          |
-| Unit tests        | 364 passing (349 api + 15 contracts)                                              |
-| Integration tests | 109 passing                                                                       |
+| Tasks complete    | 19 of 49                                                                          |
+| Unit tests        | 379 passing (364 api + 15 contracts)                                              |
+| Integration tests | 140 passing                                                                       |
 | Gates             | `pnpm lint`, `format`, `typecheck`, `test`, `test:integration`, `build` all green |
 
 ## Execution order — vertical slice
@@ -45,6 +45,7 @@ constraint → Stripe Checkout → webhook confirms.
 | 4.1  | Five BullMQ queues, 20 validated job payloads, `EnqueueService`                |
 | 4.2  | Transactional outbox: recorder, dispatcher, reconciler                         |
 | 4.3  | Webhook inbox: recorder, reconciler                                            |
+| 4.4  | Idempotency: canonical request hash, service, global interceptor, sweeper      |
 
 ## Next
 
@@ -184,6 +185,22 @@ constructable`. The named import gives both the class and the type.
     than the plan's bare count, and there is a separate `health()`, mirroring
     `OutboxReconciler`.
 
+22. An in-progress idempotency key is a **lease**, not a permanent claim. The plan
+    has no in-progress expiry, which would leave a key blocked forever when a
+    process is killed mid-request — `abandon` covers the ordinary failure but not a
+    hard crash. An expired in-progress row can be taken over, conditionally, so
+    exactly one of several waiting retries takes it.
+23. The interceptor reads the success status from the route's `@HttpCode` metadata,
+    falling back to Nest's rule (POST 201, otherwise 200), because
+    `response.statusCode` has not been set when an interceptor runs.
+24. `IdempotencyInterceptor` is bound globally via `APP_INTERCEPTOR` and is inert
+    without `@Idempotent`. Per-controller binding would mean every new
+    money-moving route needs two things remembered instead of one, and a forgotten
+    binding fails silently — by accepting retries.
+25. A replayed response carries an `Idempotent-Replay: true` header. Not in the
+    plan; it costs one line and turns "did this re-run?" into something an operator
+    can read off the response.
+
 ## Plan errors found while implementing
 
 - **§8.4 error handling was wrong, in our favour.** It assumed `23P01` arrives as
@@ -280,6 +297,19 @@ Each of these would have passed a casual "it works" check.
   pino may not flush before the process dies. Shutdown behaviour is asserted
   through a real Nest container in the integration suite instead of by reading a
   log.
+
+## Known Phase 1 limitations
+
+- **The idempotency lease has a residual race.** If an attempt outlives its
+  two-minute lease, a second attempt can take the key over and both run. What makes
+  that safe is not the lease but `bookings_no_overlap`: the second reservation
+  cannot overlap the first, so one attempt fails with `SLOT_UNAVAILABLE` rather than
+  double-booking. Closing it properly needs an owner token on the row, which the
+  schema has no column for.
+- **BullMQ job-id deduplication only holds while the job exists in Redis.**
+  Completed jobs are removed after a day, so a crash that leaves an outbox row
+  unmarked for longer than that can enqueue a second time. Every processor has to be
+  idempotent regardless, which is what the inbox and the idempotency key are for.
 
 ## Operational notes
 
