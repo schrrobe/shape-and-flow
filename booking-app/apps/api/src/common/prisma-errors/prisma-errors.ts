@@ -96,10 +96,21 @@ export function isCheckViolation(error: unknown, constraintName?: string): boole
   return databaseMessage(error).includes(constraintName);
 }
 
+/** `providerEventId` → `provider_event_id`, so either spelling can be matched. */
+function toSnakeCase(value: string): string {
+  return value.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
+}
+
 /**
- * True for a unique violation. `target` is matched against the constraint's
- * field list and the underlying message, so either a column name or an index
- * name works.
+ * True for a unique violation, optionally for one named constraint or column.
+ *
+ * `target` may be a column name, an index name, or the Prisma **field** name. The
+ * last one needs saying because it does not appear anywhere in the error: Prisma 7's
+ * pg adapter reports `constraint.fields` as database columns (`stripe_event_id`) and
+ * its own message says the same, so a call passing `stripeEventId` matched nothing
+ * and the violation was rethrown as a 500 instead of being handled. Both spellings
+ * are normalised here rather than at each call site, because the failure is silent
+ * in exactly the case the caller was trying to handle.
  */
 export function isUniqueViolation(error: unknown, target?: string): boolean {
   const isUnique =
@@ -115,11 +126,14 @@ export function isUniqueViolation(error: unknown, target?: string): boolean {
     : [];
   const index = typeof cause?.constraint?.index === 'string' ? cause.constraint.index : '';
 
+  const snake = toSnakeCase(target);
+  const haystack = `${index} ${databaseMessage(error)} ${error instanceof Error ? error.message : ''}`;
+
   return (
     fields.includes(target) ||
-    index.includes(target) ||
-    databaseMessage(error).includes(target) ||
-    (error instanceof Error && error.message.includes(target))
+    fields.includes(snake) ||
+    haystack.includes(target) ||
+    haystack.includes(snake)
   );
 }
 

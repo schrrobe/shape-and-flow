@@ -57,6 +57,21 @@ const uniqueViolation = driverError('P2002', {
   constraint: { fields: ['organization_id', 'name'] },
 });
 
+/**
+ * Captured verbatim from Prisma 7 + `@prisma/adapter-pg`.
+ *
+ * The detail that matters: `constraint.fields` holds **database columns**, and the
+ * Prisma message repeats them, so nothing in the error mentions the Prisma field
+ * name a caller would naturally reach for.
+ */
+const compositeUniqueViolation = driverError('P2002', {
+  originalCode: '23505',
+  originalMessage:
+    'duplicate key value violates unique constraint "messaging_webhook_events_provider_provider_event_id_key"',
+  kind: 'UniqueConstraintViolation',
+  constraint: { fields: ['provider', 'provider_event_id'] },
+});
+
 describe('sqlState', () => {
   it('reads the SQLSTATE from the driver adapter cause', () => {
     expect(sqlState(exclusionViolation)).toBe('23P01');
@@ -117,8 +132,17 @@ describe('isUniqueViolation', () => {
     );
   });
 
+  it('matches a Prisma field name, which appears nowhere in the error', () => {
+    // `constraint.fields` reports database columns. A caller passing the Prisma
+    // field name used to match nothing, so the violation was rethrown as a 500 in
+    // exactly the case the caller wrote the check to handle.
+    expect(isUniqueViolation(compositeUniqueViolation, 'providerEventId')).toBe(true);
+    expect(isUniqueViolation(compositeUniqueViolation, 'provider_event_id')).toBe(true);
+  });
+
   it('does not match an unrelated target', () => {
     expect(isUniqueViolation(uniqueViolation, 'token_hash')).toBe(false);
+    expect(isUniqueViolation(compositeUniqueViolation, 'stripeEventId')).toBe(false);
   });
 
   it('does not match an exclusion or check violation', () => {
