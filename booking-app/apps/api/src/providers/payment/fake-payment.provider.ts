@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 
 import { Injectable } from '@nestjs/common';
 
@@ -66,6 +66,17 @@ export class FakePaymentProvider implements PaymentProvider {
   private nextFailure: Error | null = null;
   private counter = 0;
 
+  /**
+   * Distinguishes one process's ids from another's.
+   *
+   * The counter alone is not enough. `stripe_checkout_session_id` is unique in the
+   * database, and a restarted dev server would begin again at `cs_fake_1` and collide
+   * with a row the previous run created — every booking failing with a 502 until the
+   * counter passed whatever was already stored. Real Stripe ids are globally unique;
+   * this makes the fake's the same, while keeping them recognisable and ordered.
+   */
+  private readonly instance = randomBytes(4).toString('hex');
+
   // ── test affordances ──────────────────────────────────────────────────────
 
   /** Make exactly the next provider call fail, then behave normally again. */
@@ -79,8 +90,8 @@ export class FakePaymentProvider implements PaymentProvider {
     this.counter += 1;
     session.status = 'complete';
     session.paymentStatus = 'paid';
-    session.paymentIntentId = `pi_fake_${String(this.counter)}`;
-    session.chargeId = `ch_fake_${String(this.counter)}`;
+    session.paymentIntentId = `pi_fake_${this.instance}_${String(this.counter)}`;
+    session.chargeId = `ch_fake_${this.instance}_${String(this.counter)}`;
     session.paymentMethodType = 'card';
   }
 
@@ -144,7 +155,7 @@ export class FakePaymentProvider implements PaymentProvider {
     }
 
     this.counter += 1;
-    const sessionId = `cs_fake_${String(this.counter)}`;
+    const sessionId = `cs_fake_${this.instance}_${String(this.counter)}`;
 
     const session: FakeSession = {
       sessionId,
@@ -245,7 +256,7 @@ export class FakePaymentProvider implements PaymentProvider {
 
     this.counter += 1;
     const refund: FakeRefund = {
-      refundId: `re_fake_${String(this.counter)}`,
+      refundId: `re_fake_${this.instance}_${String(this.counter)}`,
       chargeId: input.chargeId,
       amount: input.amount,
       idempotencyKey: input.idempotencyKey,
