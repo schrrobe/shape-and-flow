@@ -4,13 +4,13 @@ Companion to `phase-1-implementation-plan.md`. That document is the spec and doe
 not change; this one records what is built, what is next, and the decisions taken
 while implementing that the plan could not have known.
 
-| | |
-| --- | --- |
-| Branch | `feat/phase-1-booking-app` (nothing pushed) |
-| Tasks complete | 15 of 49 |
-| Unit tests | 330 passing (315 api + 15 contracts) |
-| Integration tests | 47 passing |
-| Gates | `pnpm lint`, `format`, `typecheck`, `test`, `test:integration`, `build` all green |
+|                   |                                                                                   |
+| ----------------- | --------------------------------------------------------------------------------- |
+| Branch            | `feat/phase-1-booking-app` (nothing pushed)                                       |
+| Tasks complete    | 16 of 49                                                                          |
+| Unit tests        | 355 passing (340 api + 15 contracts)                                              |
+| Integration tests | 61 passing                                                                        |
+| Gates             | `pnpm lint`, `format`, `typecheck`, `test`, `test:integration`, `build` all green |
 
 ## Execution order — vertical slice
 
@@ -25,37 +25,37 @@ constraint → Stripe Checkout → webhook confirms.
 
 ## Done
 
-| Task | What landed |
-| --- | --- |
-| 0.1 | pnpm workspace at repo root, Node and pnpm pinned by the repository |
-| 0.2 | `booking-config`: shared tsconfig, ESLint factory, Prettier, Vitest base |
-| 0.3 | Dev and test Compose stacks, isolated (5433/6380 and 5434/6381) |
-| 0.4 | CI: lint, test, integration, e2e, build — degrades gracefully as packages land |
-| 1.1 | NestJS app, validated env, Prisma 7 + pg driver adapter, `/api/health/live` |
-| 1.2 | 29 models, 18 enums, 107 indexes, initial migration |
-| 1.3 | Exclusion constraints, CHECKs, partial unique indexes, integration harness |
-| 1.4 | Organization context, tenant Prisma guard, idempotent seed |
-| 2.1 | `Money` value object, locale formatting, cent-arithmetic ban |
-| 2.2 | DST-safe wall-clock conversion, interval algebra, injectable `Clock` |
-| 2.3 | Availability engine — pure slot generation, 48 tests |
-| 2.4 | Pricing, cancellation-fee policy, deterministic employee selection |
-| 3.1 | Contracts package, error envelope, correlation, redacted logging |
-| 3.2 | Provider ports (payment, email, SMS) with in-memory fakes |
-| 3.3 | Stripe Checkout adapter |
+| Task | What landed                                                                    |
+| ---- | ------------------------------------------------------------------------------ |
+| 0.1  | pnpm workspace at repo root, Node and pnpm pinned by the repository            |
+| 0.2  | `booking-config`: shared tsconfig, ESLint factory, Prettier, Vitest base       |
+| 0.3  | Dev and test Compose stacks, isolated (5433/6380 and 5434/6381)                |
+| 0.4  | CI: lint, test, integration, e2e, build — degrades gracefully as packages land |
+| 1.1  | NestJS app, validated env, Prisma 7 + pg driver adapter, `/api/health/live`    |
+| 1.2  | 29 models, 18 enums, 107 indexes, initial migration                            |
+| 1.3  | Exclusion constraints, CHECKs, partial unique indexes, integration harness     |
+| 1.4  | Organization context, tenant Prisma guard, idempotent seed                     |
+| 2.1  | `Money` value object, locale formatting, cent-arithmetic ban                   |
+| 2.2  | DST-safe wall-clock conversion, interval algebra, injectable `Clock`           |
+| 2.3  | Availability engine — pure slot generation, 48 tests                           |
+| 2.4  | Pricing, cancellation-fee policy, deterministic employee selection             |
+| 3.1  | Contracts package, error envelope, correlation, redacted logging               |
+| 3.2  | Provider ports (payment, email, SMS) with in-memory fakes                      |
+| 3.3  | Stripe Checkout adapter                                                        |
+| 4.1  | Five BullMQ queues, 20 validated job payloads, `EnqueueService`                |
 
 ## Next
 
-| Task | What it is |
-| --- | --- |
-| **4.1** | **Queue and job-payload contracts. Next.** |
-| 4.2 | Transactional outbox: recorder, dispatcher, reconciler |
-| 4.3 | Webhook inbox: recorder, reconciler |
-| 4.4 | Idempotency service and interceptor |
-| 5.1 | Public catalog and availability endpoints |
-| 5.2 | Reservation transaction under the advisory lock |
-| 5.3 | Booking endpoint, Checkout session, idempotent replay |
-| 5.4 | Stripe webhook ingress and booking confirmation |
-| 5.5 | Two-phase expiry saga |
+| Task    | What it is                                                        |
+| ------- | ----------------------------------------------------------------- |
+| **4.2** | **Transactional outbox: recorder, dispatcher, reconciler. Next.** |
+| 4.3     | Webhook inbox: recorder, reconciler                               |
+| 4.4     | Idempotency service and interceptor                               |
+| 5.1     | Public catalog and availability endpoints                         |
+| 5.2     | Reservation transaction under the advisory lock                   |
+| 5.3     | Booking endpoint, Checkout session, idempotent replay             |
+| 5.4     | Stripe webhook ingress and booking confirmation                   |
+| 5.5     | Two-phase expiry saga                                             |
 
 Deferred out of the slice: 3.4, and all of stages 6–11.
 
@@ -82,6 +82,13 @@ decision, not a mechanical bump.
   is needed and pnpm's build-script allowlist stays short.
 - **`vitest.base.js` + `.d.ts`, not `.ts`.** Vite's config loader externalises
   linked workspace packages rather than transforming them.
+- **ioredis 6, imported as `{ Redis }`.** ioredis 6 ships CJS types with no
+  `exports` map, so under NodeNext a default import resolves to the module
+  namespace: `Cannot use namespace 'Redis' as a type` and `This expression is not
+constructable`. The named import gives both the class and the type.
+- **BullMQ 6.** Queues are typed `Queue<AnyJobPayload>` rather than left at
+  BullMQ's default of `any`; an untyped `job.data` would defeat type-aware
+  checking exactly where a wrong field name costs the most.
 
 ## Deliberate deviations from the plan
 
@@ -125,6 +132,28 @@ decision, not a mechanical bump.
     available outcome. Refusing `fake` in production stays in the env schema — one
     place, not two.
 
+12. Job contracts live in the API (`src/messaging/queues/job-contracts.ts`), not in
+    the shared contracts package. Nothing in the browser enqueues a job, and
+    tenant payloads must carry `organizationId` — which is precisely what the
+    contracts package's guard test forbids. Keeping them apart preserves that
+    guard at full strength instead of weakening it to a name-pattern heuristic.
+13. `organizationId` is required by **queue**, not by every job: booking, payment
+    and notification payloads require it; webhook and maintenance do not. A Stripe
+    event arrives before the tenant is known, and a sweep is global by design —
+    requiring it there would force callers to invent one.
+14. `REDIS_QUEUE_PREFIX` was added to the env schema, which the plan did not have.
+    It lets one Redis serve two environments, and it makes the integration
+    suite's queue reset (`obliterate`) structurally unable to reach an
+    application's queues; `test/redis.harness.ts` refuses to run unless the
+    prefix starts with `test-`.
+15. The plaintext management token transiently lives in the `booking.confirmed`
+    job payload — and therefore, from Task 4.2 on, in `outbox_events.payload` —
+    even though `management_tokens` stores only a hash. The alternative is
+    re-issuing a token when the email is rendered, which would mean the link in
+    the email and the row in the database could disagree. The trade-off is
+    accepted and bounded: the payload is deleted when the outbox row is swept,
+    and `managementToken` is in the log redaction list.
+
 ## Plan errors found while implementing
 
 - **§8.4 error handling was wrong, in our favour.** It assumed `23P01` arrives as
@@ -133,9 +162,9 @@ decision, not a mechanical bump.
   SQLSTATE as structured data at `meta.driverAdapterError.cause.originalCode`.
 - **Task 2.2's ambiguity check looked one hour early.** That never fires: Luxon
   already resolves an ambiguous local time to the earlier offset, so the check
-  must look one hour *later*.
+  must look one hour _later_.
 - **Task 2.4's `insideFreeWindow` flag was named backwards.** The plan's own
-  examples set it true when the appointment is *close* — which is when
+  examples set it true when the appointment is _close_ — which is when
   cancellation is not free. Implemented as `feeApplies`.
 - **"20 enums" should read 18.** Corrected in the plan.
 - **Task 3.3 assumed Stripe's `expires_at` could equal the 5-minute reservation
@@ -143,11 +172,23 @@ decision, not a mechanical bump.
   minimum and our own expiry saga enforces the real deadline by calling
   `sessions.expire`. Stripe's value is only a backstop.
 - **Task 3.3 assumed a hard-coded API version string.** Since stripe-node 22,
-  `apiVersion` is a *literal* type accepting only the SDK's pinned version, so it
+  `apiVersion` is a _literal_ type accepting only the SDK's pinned version, so it
   cannot drift by configuration. A test pins the value instead, so an SDK upgrade
   fails and forces a review.
 - **The plan's Connect option was `stripeAccount`.** stripe-node documents that as
   on its way out in favour of `stripeContext`; the adapter sends the latter.
+- **Task 4.1's `RedisLifecycle` could not have booted.** The plan has the lifecycle
+  hook call `connect()` on the shared client. BullMQ connects that client itself as
+  soon as a `Queue` is constructed, and ioredis throws `Redis is already
+connecting/connected` on a second `connect()`. The hook does a `PING` instead,
+  which connects a lazy client, waits out an in-flight connection, and proves the
+  server actually answers.
+- **BullMQ rejects the job-id scheme the outbox was heading for.** A custom `jobId`
+  may not contain `:` (it accepts a three-part id only for legacy repeatable jobs,
+  and its own source says that is going away) and may not parse as an integer. The
+  natural `outbox:<id>` is therefore invalid. `assertValidJobId` fails at the
+  enqueue boundary and `jobIdFor()` builds ids that pass — without it the symptom
+  would have been silently lost deduplication, i.e. duplicate confirmation emails.
 
 ## Bugs caught by verifying rather than assuming
 
@@ -169,6 +210,16 @@ Each of these would have passed a casual "it works" check.
 - `**/src/generated/` needed the leading `**/`: a pattern with a middle separator
   is anchored to the `.gitignore`'s directory, so generated code was being staged.
 - `prisma/seed.ts` was in no tsconfig and had never been typechecked.
+- The queue lifecycle looked broken and was not: `ioredis` flips `status` to `end`
+  on the socket close event, which lands _after_ `quit()` resolves, so reading the
+  property straight after `app.close()` races the transition. A canary provider
+  proved Nest's hook was firing all along. The test now awaits the `end` event.
+  Worth remembering the general shape: a shutdown assertion that reads state
+  synchronously can report a clean teardown as a leak, and vice versa.
+- A booted process logged nothing on shutdown, which is not evidence either way —
+  pino may not flush before the process dies. Shutdown behaviour is asserted
+  through a real Nest container in the integration suite instead of by reading a
+  log.
 
 ## Operational notes
 
@@ -181,3 +232,21 @@ Each of these would have passed a casual "it works" check.
   does not reset it.
 - `vitest.integration.config.ts` refuses to run unless `DATABASE_URL` names a
   database containing `booking_test`.
+- `test/redis.harness.ts` refuses to run unless `REDIS_QUEUE_PREFIX` starts with
+  `test-`, because its reset calls `obliterate` on every queue. The API and its
+  workers must agree on this variable; if they disagree the workers consume
+  nothing and say nothing.
+- `test/test-config.module.ts` provides `ENV` for integration tests that boot a
+  real Nest container. It deliberately does not use the real `ConfigModule`, which
+  calls `process.exit` on a missing variable — a poor diagnostic inside a test
+  worker, and unrelated to what such a test is checking. Add variables to it as
+  modules under test start reading them.
+- Request handlers must never call `EnqueueService` directly. They write an
+  `OutboxEvent` in the same transaction as the state change, and the dispatcher
+  enqueues from there. Legitimate callers: the outbox dispatcher, webhook
+  controllers (which have already recorded the event durably), the reconcilers,
+  and the scheduler.
+- Lint is normally ~5 seconds for the whole workspace. One run took 6m37s at 2%
+  CPU and another was killed as out-of-memory — machine memory pressure, not the
+  code; the same command was clean and fast immediately afterwards. If lint
+  suddenly crawls, check free memory before suspecting a type.
