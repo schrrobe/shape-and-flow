@@ -5,6 +5,7 @@ import { PaymentModule } from '../payment/payment.module.js';
 import { PublicBookingsController } from '../public/public-bookings.controller.js';
 import { PublicModule } from '../public/public.module.js';
 
+import { AttendanceService } from './attendance.service.js';
 import { AuditService } from './audit.service.js';
 import { BookingCheckoutService } from './booking-checkout.service.js';
 import { BookingConfirmationService } from './booking-confirmation.service.js';
@@ -43,6 +44,7 @@ import { ReservationService } from './reservation.service.js';
     AuditService,
     CancellationService,
     RescheduleService,
+    AttendanceService,
   ],
   exports: [
     ReservationService,
@@ -56,6 +58,7 @@ import { ReservationService } from './reservation.service.js';
     AuditService,
     CancellationService,
     RescheduleService,
+    AttendanceService,
   ],
 })
 export class BookingModule {}
