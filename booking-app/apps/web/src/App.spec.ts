@@ -1,7 +1,9 @@
 import { mount } from '@vue/test-utils';
+import { createPinia } from 'pinia';
 import { describe, expect, it } from 'vitest';
 
 import App from './App.vue';
+import { i18n } from './i18n/index.js';
 import { router } from './router/index.js';
 
 describe('the application shell', () => {
@@ -9,7 +11,7 @@ describe('the application shell', () => {
     await router.push('/');
     await router.isReady();
 
-    const wrapper = mount(App, { global: { plugins: [router] } });
+    const wrapper = mount(App, { global: { plugins: [router, i18n, createPinia()] } });
     const skip = wrapper.get('a[href="#main"]');
 
     // Visually hidden until focused, and first in the DOM — otherwise a keyboard user tabs
@@ -22,7 +24,7 @@ describe('the application shell', () => {
     await router.push('/');
     await router.isReady();
 
-    const wrapper = mount(App, { global: { plugins: [router] } });
+    const wrapper = mount(App, { global: { plugins: [router, i18n, createPinia()] } });
 
     expect(wrapper.get('main').attributes('id')).toBe('main');
   });

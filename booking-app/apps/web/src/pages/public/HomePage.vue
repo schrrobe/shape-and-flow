@@ -1,30 +1,56 @@
 <script setup lang="ts">
 import { SfButton, SfCard, SfIcon } from '@shape-and-flow/booking-ui';
+import { onMounted, ref } from 'vue';
+import { useI18n } from 'vue-i18n';
+
+import { api } from '../../api/client.js';
+
+import type { OrganizationCurrentResponse } from '@shape-and-flow/booking-contracts';
+
+const { t } = useI18n();
+
+const organization = ref<OrganizationCurrentResponse | null>(null);
+
+/**
+ * The cancellation window is read from the organization, not hard-coded into the copy.
+ *
+ * The business can change it in settings, and a landing page promising 24 hours while the API
+ * enforces 48 is worse than saying nothing.
+ */
+onMounted(async () => {
+  try {
+    organization.value = await api.public.organization();
+  } catch {
+    // The page is still useful without it; the sentence that needs the number is hidden.
+    organization.value = null;
+  }
+});
 </script>
 
 <template>
-  <div class="flex flex-col gap-6">
-    <SfCard as="section">
-      <h1 class="text-2xl font-semibold tracking-tight">Termin buchen</h1>
-      <p class="mt-2 text-text-secondary">
-        Wählen Sie eine Behandlung, einen Termin und bezahlen Sie direkt online.
-      </p>
+  <SfCard as="section">
+    <h1 class="text-2xl font-semibold tracking-tight">{{ t('home.title') }}</h1>
+    <p class="mt-2 text-text-secondary">{{ t('home.intro') }}</p>
 
-      <ul class="mt-4 flex flex-col gap-2 text-sm text-text-secondary">
-        <li class="flex items-center gap-2">
-          <SfIcon name="calendar" /><span>Freie Termine in Echtzeit</span>
-        </li>
-        <li class="flex items-center gap-2">
-          <SfIcon name="credit-card" /><span>Sichere Zahlung über Stripe</span>
-        </li>
-        <li class="flex items-center gap-2">
-          <SfIcon name="clock" /><span>Absage bis 24 Stunden vorher kostenfrei</span>
-        </li>
-      </ul>
+    <ul class="mt-4 flex flex-col gap-2 text-sm text-text-secondary">
+      <li class="flex items-center gap-2">
+        <SfIcon name="calendar" /><span>{{ t('home.featureRealtime') }}</span>
+      </li>
+      <li class="flex items-center gap-2">
+        <SfIcon name="credit-card" /><span>{{ t('home.featurePayment') }}</span>
+      </li>
+      <li v-if="organization !== null" class="flex items-center gap-2">
+        <SfIcon name="clock" />
+        <span>
+          {{
+            t('home.featureCancellation', { hours: organization.settings.freeCancellationHours })
+          }}
+        </span>
+      </li>
+    </ul>
 
-      <div class="mt-6">
-        <SfButton disabled>Behandlung wählen</SfButton>
-      </div>
-    </SfCard>
-  </div>
+    <div class="mt-6">
+      <SfButton disabled>{{ t('home.start') }}</SfButton>
+    </div>
+  </SfCard>
 </template>
