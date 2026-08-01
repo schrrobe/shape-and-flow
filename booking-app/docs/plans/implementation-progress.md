@@ -7,9 +7,9 @@ while implementing that the plan could not have known.
 |                   |                                                                                   |
 | ----------------- | --------------------------------------------------------------------------------- |
 | Branch            | `feat/phase-1-booking-app` (nothing pushed)                                       |
-| Tasks complete    | 24 of 49                                                                          |
+| Tasks complete    | 29 of 49                                                                          |
 | Unit tests        | 379 passing (364 api + 15 contracts)                                              |
-| Integration tests | 260 passing                                                                       |
+| Integration tests | 388 passing                                                                       |
 | Gates             | `pnpm lint`, `format`, `typecheck`, `test`, `test:integration`, `build` all green |
 
 ## Execution order — vertical slice
@@ -249,6 +249,24 @@ constructable`. The named import gives both the class and the type.
     plan says: `responseSnapshot` is JSONB and PostgreSQL does not preserve object key
     order. Nothing consumes key order, and `JSON.parse` yields the same object.
 
+36. `ManagementTokenService` lives in its own `ManagementTokenModule`, not in
+    `ManageModule`. Bookings need to _mint_ tokens — confirmation issues one, reschedule
+    rotates one — while the `/manage` controllers need the booking services they drive.
+    One module holding both makes BookingModule and ManageModule mutually dependent.
+37. A bad webhook signature and a management-token failure both use existing public
+    error codes rather than new ones. Widening the public error set is a deliberate act;
+    neither consumer (Stripe, and an attacker guessing tokens) would read a distinct
+    code.
+38. `booking.rescheduled` carries an optional `managementToken`, like
+    `booking.confirmed`. A reschedule revokes the old link, so the notification has to
+    contain a new one that works.
+39. Task 6.5's business-cancellation cases test `cancelByBusiness`, which Task 6.2
+    already built — the plan splits the two, and building 6.2 completely made 6.5's
+    scope smaller than written.
+40. `AttendanceService.reportStaleCompletions` is a report, not a sweep that fixes
+    anything. Auto-completing would manufacture the observation the service exists to
+    record.
+
 ## Plan errors found while implementing
 
 - **§8.4 error handling was wrong, in our favour.** It assumed `23P01` arrives as
@@ -325,6 +343,18 @@ connecting/connected` on a second `connect()`. The hook does a `PING` instead,
   reservation is now made overdue by backdating `expiresAt` — moving the row, not the
   clock. Third time this class of bug has appeared; the rule is now explicit: when a
   comparison is against a database-written column, control time by writing the column.
+
+- **Reschedule evaluated availability against the current service, not the booking.** A
+  rescheduled appointment keeps the duration and buffers it was sold with, but both the
+  optimistic and the in-lock check loaded the live service. A service whose duration had
+  changed since would make its existing bookings either unmovable or movable into slots
+  they do not fit. Caught by a test that repriced _and_ re-timed the service;
+  `asSoldSnapshot` now re-shapes the snapshot to the booking's own dimensions. The price
+  snapshot was already carried across — this is the same principle applied to geometry.
+- **The cent-arithmetic ESLint rule caught a real violation in the refund service.** The
+  remaining refundable amount was computed by subtracting two columns. It goes through
+  `Money` now. Worth recording as evidence the rule earns its keep rather than as a
+  style nit.
 
 ## Bugs caught by verifying rather than assuming
 
