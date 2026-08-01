@@ -51,6 +51,14 @@ export default mergeConfig(
         // REDIS_URL is pointed at the development instance; test/redis.harness.ts
         // refuses to run without it.
         REDIS_QUEUE_PREFIX: 'test-bull',
+        // The rest of what `env.schema.ts` requires. Most suites inject a stub config
+        // through the harness, but the worker-bootstrap suite builds the real container
+        // and therefore the real configuration -- which is the point of that suite.
+        DEFAULT_ORGANIZATION_SLUG: 'shape-and-flow',
+        PUBLIC_WEB_ORIGIN: 'http://localhost:3000',
+        PUBLIC_API_ORIGIN: 'http://localhost:3001',
+        EMAIL_FROM_ADDRESS: 'test@shape-and-flow.example',
+        EMAIL_FROM_NAME: 'Shape and Flow (test)',
       },
       coverage: { enabled: false },
     },
