@@ -14,6 +14,7 @@ import { ExpiryService } from './expiry.service.js';
 import { ExpirySweeper } from './expiry.sweeper.js';
 import { ExpiryProcessor } from './processors/expiry.processor.js';
 import { StripeEventProcessor } from './processors/stripe-event.processor.js';
+import { RescheduleService } from './reschedule.service.js';
 import { ReservationService } from './reservation.service.js';
 
 /**
@@ -41,6 +42,7 @@ import { ReservationService } from './reservation.service.js';
     ExpiryProcessor,
     AuditService,
     CancellationService,
+    RescheduleService,
   ],
   exports: [
     ReservationService,
@@ -53,6 +55,7 @@ import { ReservationService } from './reservation.service.js';
     ExpiryProcessor,
     AuditService,
     CancellationService,
+    RescheduleService,
   ],
 })
 export class BookingModule {}

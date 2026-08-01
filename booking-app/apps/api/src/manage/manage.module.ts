@@ -4,6 +4,7 @@ import { BookingModule } from '../booking/booking.module.js';
 import { PublicModule } from '../public/public.module.js';
 
 import { ManageCancelController } from './manage-cancel.controller.js';
+import { ManageRescheduleController } from './manage-reschedule.controller.js';
 import { ManageController } from './manage.controller.js';
 
 /**
@@ -17,6 +18,6 @@ import { ManageController } from './manage.controller.js';
  */
 @Module({
   imports: [PublicModule, BookingModule],
-  controllers: [ManageController, ManageCancelController],
+  controllers: [ManageController, ManageCancelController, ManageRescheduleController],
 })
 export class ManageModule {}
