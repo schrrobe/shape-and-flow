@@ -45,6 +45,28 @@ const routes: RouteRecordRaw[] = [
     ],
   },
   {
+    path: '/booking/success',
+    name: 'booking-success',
+    component: () => import('../pages/public/BookingSuccess.vue'),
+  },
+  {
+    path: '/booking/canceled',
+    name: 'booking-canceled',
+    component: () => import('../pages/public/BookingCanceled.vue'),
+  },
+
+  {
+    path: '/manage',
+    name: 'manage',
+    component: () => import('../pages/public/ManageBooking.vue'),
+  },
+  {
+    path: '/manage/reschedule',
+    name: 'manage-reschedule',
+    component: () => import('../pages/public/ManageReschedule.vue'),
+  },
+
+  {
     path: '/:pathMatch(.*)*',
     name: 'not-found',
     component: () => import('../pages/public/NotFoundPage.vue'),

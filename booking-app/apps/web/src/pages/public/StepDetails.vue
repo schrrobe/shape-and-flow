@@ -66,8 +66,10 @@ async function submit(): Promise<void> {
         },
         locale: locale.current,
         ...(draft.note.trim() === '' ? {} : { customerNote: draft.note.trim() }),
-        // Absolute, because Stripe redirects the browser to them.
-        successUrl: `${window.location.origin}/booking/success`,
+        // Absolute, because Stripe redirects the browser to them. The placeholder is Stripe's
+        // own: it substitutes the real session id, which is how the landing page knows which
+        // payment to resolve. The API validates only the origin, so the braces survive.
+        successUrl: `${window.location.origin}/booking/success?session_id={CHECKOUT_SESSION_ID}`,
         cancelUrl: `${window.location.origin}/booking/canceled`,
       },
       draft.idempotencyKey ?? '',
