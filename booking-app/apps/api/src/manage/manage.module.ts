@@ -3,6 +3,7 @@ import { Module } from '@nestjs/common';
 import { BookingModule } from '../booking/booking.module.js';
 import { PublicModule } from '../public/public.module.js';
 
+import { ManageCancelController } from './manage-cancel.controller.js';
 import { ManageController } from './manage.controller.js';
 
 /**
@@ -16,6 +17,6 @@ import { ManageController } from './manage.controller.js';
  */
 @Module({
   imports: [PublicModule, BookingModule],
-  controllers: [ManageController],
+  controllers: [ManageController, ManageCancelController],
 })
 export class ManageModule {}
