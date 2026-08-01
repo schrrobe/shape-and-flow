@@ -3,6 +3,9 @@ import {
   bookingStatusSchema,
   cancellationFeePolicySchema,
   localeSchema,
+  notificationChannelSchema,
+  notificationKindSchema,
+  notificationStatusSchema,
   officeUserRoleSchema,
   weekdaySchema,
 } from '@shape-and-flow/booking-contracts';
@@ -13,6 +16,9 @@ import {
   BookingStatus,
   CancellationFeePolicy,
   Locale,
+  NotificationChannel,
+  NotificationKind,
+  NotificationStatus,
   OfficeUserRole,
   Weekday,
 } from './client.js';
@@ -33,6 +39,9 @@ const PAIRS = [
   ['Locale', Locale, localeSchema.options],
   ['OfficeUserRole', OfficeUserRole, officeUserRoleSchema.options],
   ['Weekday', Weekday, weekdaySchema.options],
+  ['NotificationKind', NotificationKind, notificationKindSchema.options],
+  ['NotificationChannel', NotificationChannel, notificationChannelSchema.options],
+  ['NotificationStatus', NotificationStatus, notificationStatusSchema.options],
 ] as const;
 
 describe('contract enums match the Prisma schema', () => {

@@ -59,3 +59,34 @@ export const weekdaySchema = z.enum([
 ]);
 
 export type Weekday = z.infer<typeof weekdaySchema>;
+
+/**
+ * What a notification is about.
+ *
+ * Here rather than only in Prisma because the notification-templates package is
+ * browser-importable and must not reach for the database client to learn the set of
+ * things it has to be able to render. `enum-drift.spec.ts` cross-checks the two.
+ */
+export const notificationKindSchema = z.enum([
+  'BOOKING_CONFIRMATION',
+  'BOOKING_CANCELED_BY_CUSTOMER',
+  'BOOKING_CANCELED_BY_BUSINESS',
+  'BOOKING_RESCHEDULED',
+  'REMINDER_24H',
+  'CANCELLATION_REQUEST_RECEIVED',
+  'CANCELLATION_REQUEST_DECIDED',
+  'RESCHEDULE_REQUEST_RECEIVED',
+  'RESCHEDULE_REQUEST_DECIDED',
+  'REFUND_ISSUED',
+  'OFFICE_NEW_BOOKING',
+  'OFFICE_CANCELLATION_REQUEST',
+  'OFFICE_PASSWORD_RESET',
+]);
+
+export type NotificationKind = z.infer<typeof notificationKindSchema>;
+
+export const notificationChannelSchema = z.enum(['EMAIL', 'SMS']);
+export type NotificationChannel = z.infer<typeof notificationChannelSchema>;
+
+export const notificationStatusSchema = z.enum(['PENDING', 'SENT', 'DELIVERED', 'FAILED']);
+export type NotificationStatus = z.infer<typeof notificationStatusSchema>;
