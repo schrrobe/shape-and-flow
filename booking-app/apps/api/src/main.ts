@@ -20,7 +20,12 @@ async function bootstrap(): Promise<void> {
   const config = loadConfig();
   assertAppRole(config, 'api');
 
-  const app = await NestFactory.create<NestExpressApplication>(AppModule, { bufferLogs: true });
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    bufferLogs: true,
+    // Keeps the unparsed bytes on the request while still parsing JSON normally. The
+    // Stripe webhook needs them: a signature covers the exact bytes sent.
+    rawBody: true,
+  });
 
   // Route Nest's own logs through pino, so everything is one structured stream.
   const logger = app.get(PinoLogger);

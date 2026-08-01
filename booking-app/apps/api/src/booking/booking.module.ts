@@ -4,7 +4,9 @@ import { PublicBookingsController } from '../public/public-bookings.controller.j
 import { PublicModule } from '../public/public.module.js';
 
 import { BookingCheckoutService } from './booking-checkout.service.js';
+import { BookingConfirmationService } from './booking-confirmation.service.js';
 import { CustomerUpsertService } from './customer-upsert.service.js';
+import { StripeEventProcessor } from './processors/stripe-event.processor.js';
 import { ReservationService } from './reservation.service.js';
 
 /**
@@ -21,7 +23,19 @@ import { ReservationService } from './reservation.service.js';
 @Module({
   imports: [PublicModule],
   controllers: [PublicBookingsController],
-  providers: [ReservationService, CustomerUpsertService, BookingCheckoutService],
-  exports: [ReservationService, CustomerUpsertService, BookingCheckoutService],
+  providers: [
+    ReservationService,
+    CustomerUpsertService,
+    BookingCheckoutService,
+    BookingConfirmationService,
+    StripeEventProcessor,
+  ],
+  exports: [
+    ReservationService,
+    CustomerUpsertService,
+    BookingCheckoutService,
+    BookingConfirmationService,
+    StripeEventProcessor,
+  ],
 })
 export class BookingModule {}

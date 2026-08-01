@@ -18,6 +18,7 @@ import { OrganizationModule } from './organization/organization.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
 import { ProvidersModule } from './providers/providers.module.js';
 import { PublicModule } from './public/public.module.js';
+import { WebhooksModule } from './webhooks/webhooks.module.js';
 
 /** The HTTP application. Queue processors live in WorkerModule instead. */
 @Module({
@@ -36,6 +37,7 @@ import { PublicModule } from './public/public.module.js';
     HealthModule,
     PublicModule,
     BookingModule,
+    WebhooksModule,
   ],
   providers: [
     // Registered as a provider rather than with useGlobalFilters so it can take

@@ -9,7 +9,10 @@ import { ENV } from '../src/config/env.schema.js';
 import { CLOCK, FixedClock } from '../src/domain/time/clock.js';
 import { IdempotencyInterceptor } from '../src/messaging/idempotency/idempotency.interceptor.js';
 import { IdempotencyService } from '../src/messaging/idempotency/idempotency.service.js';
+import { InboxRecorder } from '../src/messaging/inbox/inbox.recorder.js';
 import { OutboxRecorder } from '../src/messaging/outbox/outbox.recorder.js';
+import { EnqueueService, QUEUE_REGISTRY } from '../src/messaging/queues/enqueue.service.js';
+import { QUEUES } from '../src/messaging/queues/job-contracts.js';
 import { OrganizationContextService } from '../src/organization/organization-context.service.js';
 import { PrismaService } from '../src/prisma/prisma.service.js';
 import { FakePaymentProvider } from '../src/providers/payment/fake-payment.provider.js';
@@ -79,7 +82,13 @@ const testConfig = {
     FakePaymentProvider,
     { provide: PAYMENT_PROVIDER, useExisting: FakePaymentProvider },
     OutboxRecorder,
+    InboxRecorder,
     IdempotencyService,
+    // Queues that record instead of connecting. The webhook path enqueues, and these
+    // tests are about what it stores and decides -- not about Redis, which the queue
+    // and outbox suites already cover against a real server.
+    { provide: QUEUE_REGISTRY, useFactory: () => recordingQueueRegistry() },
+    EnqueueService,
     { provide: APP_FILTER, useClass: GlobalExceptionFilter },
     { provide: APP_GUARD, useClass: AuthGuard },
     { provide: APP_INTERCEPTOR, useClass: IdempotencyInterceptor },
@@ -92,12 +101,37 @@ const testConfig = {
     PAYMENT_PROVIDER,
     FakePaymentProvider,
     OutboxRecorder,
+    InboxRecorder,
     IdempotencyService,
+    EnqueueService,
+    QUEUE_REGISTRY,
   ],
 })
 // A Nest module is a declaration carrier with an empty body by design.
 // eslint-disable-next-line @typescript-eslint/no-extraneous-class
 export class BookingTestHarnessModule {}
+
+/** Every job the harness's queues were asked to add, in order. */
+export const enqueued: { name: string; data: unknown; options: unknown }[] = [];
+
+/**
+ * A queue registry that records rather than connects.
+ *
+ * Deliberately not a real BullMQ queue: what these tests assert is which jobs the
+ * webhook decides to enqueue, and standing up Redis to observe that would make a slow
+ * suite prove something the queue suite already proves against a real server.
+ */
+function recordingQueueRegistry(): Record<string, unknown> {
+  const queue = {
+    add: (name: string, data: unknown, options: unknown) => {
+      enqueued.push({ name, data, options });
+      return Promise.resolve({ id: 'recorded' });
+    },
+    name: 'recording',
+  };
+
+  return Object.fromEntries(QUEUES.map((queueName) => [queueName, queue]));
+}
 
 export interface BookingTestApp {
   app: INestApplication;
@@ -113,6 +147,7 @@ export async function createBookingTestApp(options: {
 }): Promise<BookingTestApp> {
   currentOrganization = options.organization;
   currentClock = options.clock;
+  enqueued.length = 0;
 
   const moduleRef = await Test.createTestingModule({
     imports: [
@@ -123,7 +158,9 @@ export async function createBookingTestApp(options: {
     ],
   }).compile();
 
-  const app = moduleRef.createNestApplication();
+  // `rawBody: true` for the same reason production sets it: the webhook verifies a
+  // signature over the bytes as sent.
+  const app = moduleRef.createNestApplication({ rawBody: true });
   await app.init();
 
   return {
