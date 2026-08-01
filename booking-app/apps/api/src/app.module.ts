@@ -1,8 +1,11 @@
 import { Module } from '@nestjs/common';
-import { APP_FILTER } from '@nestjs/core';
+import { APP_FILTER, APP_GUARD } from '@nestjs/core';
+import { ThrottlerGuard } from '@nestjs/throttler';
 
 import { GlobalExceptionFilter } from './common/errors/global-exception.filter.js';
+import { AuthGuard } from './common/guards/auth.guard.js';
 import { LoggingModule } from './common/logging/logger.module.js';
+import { ThrottlingModule } from './common/throttling/throttling.module.js';
 import { ConfigModule } from './config/config.module.js';
 import { DomainModule } from './domain/domain.module.js';
 import { HealthModule } from './health/health.module.js';
@@ -13,6 +16,7 @@ import { QueuesModule } from './messaging/queues/queues.module.js';
 import { OrganizationModule } from './organization/organization.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
 import { ProvidersModule } from './providers/providers.module.js';
+import { PublicModule } from './public/public.module.js';
 
 /** The HTTP application. Queue processors live in WorkerModule instead. */
 @Module({
@@ -21,6 +25,7 @@ import { ProvidersModule } from './providers/providers.module.js';
     LoggingModule,
     PrismaModule,
     QueuesModule,
+    ThrottlingModule,
     OutboxModule,
     InboxModule,
     IdempotencyModule,
@@ -28,11 +33,16 @@ import { ProvidersModule } from './providers/providers.module.js';
     OrganizationModule,
     ProvidersModule,
     HealthModule,
+    PublicModule,
   ],
   providers: [
     // Registered as a provider rather than with useGlobalFilters so it can take
     // dependencies later without changing how it is wired.
     { provide: APP_FILTER, useClass: GlobalExceptionFilter },
+    // Order matters: guards run in registration order, so the cheap in-memory
+    // authorisation check happens before the one that talks to Redis.
+    { provide: APP_GUARD, useClass: AuthGuard },
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
   ],
 })
 export class AppModule {}
