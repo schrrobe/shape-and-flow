@@ -1,0 +1,19 @@
+<!doctype html>
+<!--
+  `lang` is set by the application once the locale is resolved (see src/i18n). It starts as
+  `de` rather than empty: a screen reader picks a pronunciation before any script runs, and
+  German is the default for this business.
+-->
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- No external font, no analytics, no CDN: every byte is served from our own origin, so
+         the page works behind a strict CSP and leaks nothing to a third party. -->
+    <title>Shape and Flow</title>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
