@@ -13,6 +13,7 @@ import { InboxRecorder } from '../src/messaging/inbox/inbox.recorder.js';
 import { OutboxRecorder } from '../src/messaging/outbox/outbox.recorder.js';
 import { EnqueueService, QUEUE_REGISTRY } from '../src/messaging/queues/enqueue.service.js';
 import { QUEUES } from '../src/messaging/queues/job-contracts.js';
+import { REDIS } from '../src/messaging/queues/redis.provider.js';
 import { OrganizationContextService } from '../src/organization/organization-context.service.js';
 import { PrismaService } from '../src/prisma/prisma.service.js';
 import { EMAIL_PROVIDER } from '../src/providers/email/email-provider.js';
@@ -21,15 +22,15 @@ import { FakePaymentProvider } from '../src/providers/payment/fake-payment.provi
 import { PAYMENT_PROVIDER } from '../src/providers/payment/payment-provider.js';
 import { FakeSmsProvider } from '../src/providers/sms/fake-sms.provider.js';
 import { SMS_PROVIDER } from '../src/providers/sms/sms-provider.js';
-
-import type { QueueRegistry } from '../src/messaging/queues/enqueue.service.js';
 import { PublicModule } from '../src/public/public.module.js';
 
 import { prisma } from './database.harness.js';
 
 import type { AppConfig } from '../src/config/env.schema.js';
+import type { QueueRegistry } from '../src/messaging/queues/enqueue.service.js';
 import type { OrganizationWithSettings } from '../src/organization/organization-context.service.js';
 import type { INestApplication } from '@nestjs/common';
+import type { Redis } from 'ioredis';
 import type { Server } from 'node:http';
 
 /**
@@ -80,6 +81,11 @@ const testConfig = {
   SMS_PROVIDER: 'fake',
   RESEND_WEBHOOK_SECRET: 'test-resend-secret',
   TWILIO_AUTH_TOKEN: 'test-twilio-token',
+  SESSION_COOKIE_NAME: 'sf_office_session',
+  // Short enough that a suite can wait one out if it ever needs to, long enough that
+  // no test races the idle expiry by accident.
+  SESSION_IDLE_TTL_MINUTES: 60,
+  SESSION_ABSOLUTE_TTL_MINUTES: 10_080,
 } as unknown as AppConfig;
 
 @Global()
@@ -111,6 +117,10 @@ const testConfig = {
       useFactory: () => currentQueues ?? recordingQueueRegistry(),
     },
     EnqueueService,
+    // Only a suite that asked for it gets a connection: importing this harness must
+    // never open one on its own. Anything needing REDIS without it fails at injection,
+    // which is the signal to pass `redis` from redis.harness.ts.
+    { provide: REDIS, useFactory: () => currentRedis },
     { provide: APP_FILTER, useClass: GlobalExceptionFilter },
     { provide: APP_GUARD, useClass: AuthGuard },
     { provide: APP_INTERCEPTOR, useClass: IdempotencyInterceptor },
@@ -131,6 +141,7 @@ const testConfig = {
     IdempotencyService,
     EnqueueService,
     QUEUE_REGISTRY,
+    REDIS,
   ],
 })
 // A Nest module is a declaration carrier with an empty body by design.
@@ -139,6 +150,9 @@ export class BookingTestHarnessModule {}
 
 /** Set per app, by `createBookingTestApp({ queues })`. */
 let currentQueues: QueueRegistry | undefined;
+
+/** Set per app, by `createBookingTestApp({ redis })`. */
+let currentRedis: Redis | undefined;
 
 /** Every job the harness's queues were asked to add, in order. */
 export const enqueued: { name: string; data: unknown; options: unknown }[] = [];
@@ -177,10 +191,22 @@ export async function createBookingTestApp(options: {
   extraImports?: NonNullable<Parameters<typeof Test.createTestingModule>[0]['imports']>;
   /** Real BullMQ queues — pass `queues` from `redis.harness.ts` — instead of the fake. */
   queues?: QueueRegistry;
+  /** A real connection, for anything that stores state in Redis rather than queueing. */
+  redis?: Redis;
+  /**
+   * Mount everything under a prefix, the way `main.ts` mounts `api`.
+   *
+   * Off by default so existing suites keep their short paths. The auth suite sets it,
+   * because the session cookie is scoped to `Path=/api` and a supertest agent's cookie
+   * jar honours that path — without the prefix the jar would silently withhold the
+   * cookie, and every authenticated assertion would pass or fail for the wrong reason.
+   */
+  globalPrefix?: string;
 }): Promise<BookingTestApp> {
   currentOrganization = options.organization;
   currentClock = options.clock;
   currentQueues = options.queues;
+  currentRedis = options.redis;
   enqueued.length = 0;
 
   const moduleRef = await Test.createTestingModule({
@@ -195,6 +221,7 @@ export async function createBookingTestApp(options: {
   // `rawBody: true` for the same reason production sets it: the webhook verifies a
   // signature over the bytes as sent.
   const app = moduleRef.createNestApplication({ rawBody: true });
+  if (options.globalPrefix !== undefined) app.setGlobalPrefix(options.globalPrefix);
   await app.init();
 
   return {

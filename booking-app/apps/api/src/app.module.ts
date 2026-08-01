@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard } from '@nestjs/throttler';
 
+import { AuthModule } from './auth/auth.module.js';
 import { BookingModule } from './booking/booking.module.js';
 import { GlobalExceptionFilter } from './common/errors/global-exception.filter.js';
 import { AuthGuard } from './common/guards/auth.guard.js';
@@ -38,6 +39,7 @@ import { WebhooksModule } from './webhooks/webhooks.module.js';
     OrganizationModule,
     ProvidersModule,
     HealthModule,
+    AuthModule,
     PublicModule,
     BookingModule,
     ManageModule,

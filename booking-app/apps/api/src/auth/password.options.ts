@@ -25,5 +25,10 @@ export const ARGON2_OPTIONS: Options = {
   parallelism: 1,
 };
 
-/** Minimum length accepted for an office password. */
-export const MIN_PASSWORD_LENGTH = 12;
+/**
+ * Minimum length accepted for an office password.
+ *
+ * Re-exported from the contracts package rather than declared again, so the number
+ * the API enforces and the number the browser validates against cannot drift apart.
+ */
+export { MIN_PASSWORD_LENGTH } from '@shape-and-flow/booking-contracts';
