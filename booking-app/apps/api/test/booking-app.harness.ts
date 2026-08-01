@@ -30,6 +30,7 @@ import type { AppConfig } from '../src/config/env.schema.js';
 import type { QueueRegistry } from '../src/messaging/queues/enqueue.service.js';
 import type { OrganizationWithSettings } from '../src/organization/organization-context.service.js';
 import type { INestApplication } from '@nestjs/common';
+import type { RequestHandler } from 'express';
 import type { Redis } from 'ioredis';
 import type { Server } from 'node:http';
 
@@ -202,6 +203,14 @@ export async function createBookingTestApp(options: {
    * cookie, and every authenticated assertion would pass or fail for the wrong reason.
    */
   globalPrefix?: string;
+  /**
+   * Express handlers to mount before the application initialises.
+   *
+   * The correlation middleware is registered with `app.use()` in production rather than
+   * as Nest middleware, so a suite that asserts on correlation ids has to mount it the
+   * same way or it would be proving something about a different wiring.
+   */
+  middleware?: RequestHandler[];
 }): Promise<BookingTestApp> {
   currentOrganization = options.organization;
   currentClock = options.clock;
@@ -221,6 +230,7 @@ export async function createBookingTestApp(options: {
   // `rawBody: true` for the same reason production sets it: the webhook verifies a
   // signature over the bytes as sent.
   const app = moduleRef.createNestApplication({ rawBody: true });
+  for (const handler of options.middleware ?? []) app.use(handler);
   if (options.globalPrefix !== undefined) app.setGlobalPrefix(options.globalPrefix);
   await app.init();
 

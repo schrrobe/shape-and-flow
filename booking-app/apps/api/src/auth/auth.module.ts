@@ -4,9 +4,12 @@ import { NotificationModule } from '../notification/notification.module.js';
 
 import { AuthController } from './auth.controller.js';
 import { CsrfHeaderGuard } from './csrf-header.guard.js';
+import { EmployeeScopeService } from './employee-scope.service.js';
 import { OfficeSessionGuard } from './office-session.guard.js';
 import { PasswordResetService } from './password-reset.service.js';
 import { PasswordService } from './password.service.js';
+import { RefundCapabilityGuard } from './refund-capability.guard.js';
+import { RolesGuard } from './roles.guard.js';
 import { SessionStore } from './session.store.js';
 
 /**
@@ -26,7 +29,18 @@ import { SessionStore } from './session.store.js';
     PasswordResetService,
     OfficeSessionGuard,
     CsrfHeaderGuard,
+    RolesGuard,
+    RefundCapabilityGuard,
+    EmployeeScopeService,
   ],
-  exports: [PasswordService, SessionStore, OfficeSessionGuard, CsrfHeaderGuard],
+  exports: [
+    PasswordService,
+    SessionStore,
+    OfficeSessionGuard,
+    CsrfHeaderGuard,
+    RolesGuard,
+    RefundCapabilityGuard,
+    EmployeeScopeService,
+  ],
 })
 export class AuthModule {}

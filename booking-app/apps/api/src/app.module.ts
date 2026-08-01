@@ -4,6 +4,7 @@ import { ThrottlerGuard } from '@nestjs/throttler';
 
 import { AuthModule } from './auth/auth.module.js';
 import { BookingModule } from './booking/booking.module.js';
+import { AuditModule } from './common/audit/audit.module.js';
 import { GlobalExceptionFilter } from './common/errors/global-exception.filter.js';
 import { AuthGuard } from './common/guards/auth.guard.js';
 import { LoggingModule } from './common/logging/logger.module.js';
@@ -39,6 +40,7 @@ import { WebhooksModule } from './webhooks/webhooks.module.js';
     OrganizationModule,
     ProvidersModule,
     HealthModule,
+    AuditModule,
     AuthModule,
     PublicModule,
     BookingModule,
