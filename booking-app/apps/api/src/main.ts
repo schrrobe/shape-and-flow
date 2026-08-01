@@ -1,10 +1,11 @@
 import 'reflect-metadata';
 
-import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import helmet from 'helmet';
+import { Logger as PinoLogger } from 'nestjs-pino';
 
 import { AppModule } from './app.module.js';
+import { correlationMiddleware } from './common/correlation/correlation.middleware.js';
 import { assertAppRole, loadConfig } from './config/env.schema.js';
 import { loadEnvFile } from './config/load-dotenv.js';
 
@@ -20,7 +21,14 @@ async function bootstrap(): Promise<void> {
   assertAppRole(config, 'api');
 
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { bufferLogs: true });
-  const logger = new Logger('Bootstrap');
+
+  // Route Nest's own logs through pino, so everything is one structured stream.
+  const logger = app.get(PinoLogger);
+  app.useLogger(logger);
+
+  // First, and before pino's request logger: everything downstream — including
+  // that logger — reads the correlation id from the scope this opens.
+  app.use(correlationMiddleware);
 
   app.setGlobalPrefix('api');
   app.use(helmet());

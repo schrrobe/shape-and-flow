@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  // Extends the platform-neutral base, not tsconfig.node.json: this package has
+  // to be importable from the browser bundle as well as from the API.
+  "extends": "@shape-and-flow/booking-config/tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "declaration": false,
+    "declarationMap": false,
+    // Node types are available to the tests and the tool configs only; the build
+    // config strips them, so shipped code cannot depend on them.
+    "types": ["node"]
+  },
+  "include": ["src/**/*.ts", "*.config.ts"],
+  "exclude": ["dist", "node_modules"]
+}

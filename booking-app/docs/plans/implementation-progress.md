@@ -7,8 +7,8 @@ while implementing that the plan could not have known.
 | | |
 | --- | --- |
 | Branch | `feat/phase-1-booking-app` (nothing pushed) |
-| Tasks complete | 12 of 49 |
-| Unit tests | 210 passing |
+| Tasks complete | 13 of 49 |
+| Unit tests | 261 passing (246 api + 15 contracts) |
 | Integration tests | 47 passing |
 | Gates | `pnpm lint`, `format`, `typecheck`, `test`, `test:integration`, `build` all green |
 
@@ -39,13 +39,13 @@ constraint → Stripe Checkout → webhook confirms.
 | 2.2 | DST-safe wall-clock conversion, interval algebra, injectable `Clock` |
 | 2.3 | Availability engine — pure slot generation, 48 tests |
 | 2.4 | Pricing, cancellation-fee policy, deterministic employee selection |
+| 3.1 | Contracts package, error envelope, correlation, redacted logging |
 
 ## Next
 
 | Task | What it is |
 | --- | --- |
-| **3.1** | **Contracts package, error envelope, correlation, redacted logging. Next.** |
-| 3.2 | Provider ports (payment, email, SMS) plus in-memory fakes |
+| **3.2** | **Provider ports (payment, email, SMS) plus in-memory fakes. Next.** |
 | 3.3 | Stripe Checkout adapter |
 | 4.1 | Queue and job-payload contracts |
 | 4.2 | Transactional outbox: recorder, dispatcher, reconciler |
@@ -100,6 +100,22 @@ decision, not a mechanical bump.
    ESLint's model: `no-restricted-syntax` is one rule, so exempting a file
    exempts every selector in it — the cent ban therefore does not apply inside
    test files.
+5. Correlation ids are UUID v4, not the plan's ULID: no dependency needed,
+   `crypto.randomUUID` is native, and log ordering comes from timestamps anyway.
+6. `ErrorCode` in contracts is only the **public** set. Internal invariant
+   violations (`INVALID_MONEY`, `UNSCOPED_TENANT_QUERY`) use codes deliberately
+   absent from it, so the exception filter turns them into a generic 500 while
+   logging the real one. Making a code public is then an explicit act.
+7. The contracts package builds on `pnpm install` via `prepare`. Its exports point
+   at `dist`, and without this a clean checkout would fail lint/typecheck because
+   CI runs those before the build job.
+8. `tsconfig.build.json` in contracts sets `types: []`, so shipped code cannot
+   reach for a Node or DOM global — it has to work in both places it is imported
+   from. Tests keep Node types.
+9. The correlation middleware is a plain Express handler registered with
+   `app.use()`, not a Nest middleware: Express middleware runs before anything a
+   module registers, including pino's request logger, which would otherwise log a
+   placeholder id.
 
 ## Plan errors found while implementing
 
