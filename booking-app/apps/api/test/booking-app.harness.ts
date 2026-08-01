@@ -21,6 +21,8 @@ import { FakePaymentProvider } from '../src/providers/payment/fake-payment.provi
 import { PAYMENT_PROVIDER } from '../src/providers/payment/payment-provider.js';
 import { FakeSmsProvider } from '../src/providers/sms/fake-sms.provider.js';
 import { SMS_PROVIDER } from '../src/providers/sms/sms-provider.js';
+
+import type { QueueRegistry } from '../src/messaging/queues/enqueue.service.js';
 import { PublicModule } from '../src/public/public.module.js';
 
 import { prisma } from './database.harness.js';
@@ -99,7 +101,15 @@ const testConfig = {
     // Queues that record instead of connecting. The webhook path enqueues, and these
     // tests are about what it stores and decides -- not about Redis, which the queue
     // and outbox suites already cover against a real server.
-    { provide: QUEUE_REGISTRY, useFactory: () => recordingQueueRegistry() },
+    {
+      provide: QUEUE_REGISTRY,
+      // Real BullMQ queues when a suite hands some in. Reminders are delayed jobs whose
+      // ids and delays live in Redis, and a recording fake would prove nothing about
+      // either -- including whether BullMQ accepts the id at all, which is exactly where
+      // the last job-id bug was. Passed in rather than imported here, so importing this
+      // harness never opens a Redis connection a suite did not ask for.
+      useFactory: () => currentQueues ?? recordingQueueRegistry(),
+    },
     EnqueueService,
     { provide: APP_FILTER, useClass: GlobalExceptionFilter },
     { provide: APP_GUARD, useClass: AuthGuard },
@@ -126,6 +136,9 @@ const testConfig = {
 // A Nest module is a declaration carrier with an empty body by design.
 // eslint-disable-next-line @typescript-eslint/no-extraneous-class
 export class BookingTestHarnessModule {}
+
+/** Set per app, by `createBookingTestApp({ queues })`. */
+let currentQueues: QueueRegistry | undefined;
 
 /** Every job the harness's queues were asked to add, in order. */
 export const enqueued: { name: string; data: unknown; options: unknown }[] = [];
@@ -162,9 +175,12 @@ export async function createBookingTestApp(options: {
   organization: OrganizationWithSettings;
   clock: FixedClock;
   extraImports?: NonNullable<Parameters<typeof Test.createTestingModule>[0]['imports']>;
+  /** Real BullMQ queues — pass `queues` from `redis.harness.ts` — instead of the fake. */
+  queues?: QueueRegistry;
 }): Promise<BookingTestApp> {
   currentOrganization = options.organization;
   currentClock = options.clock;
+  currentQueues = options.queues;
   enqueued.length = 0;
 
   const moduleRef = await Test.createTestingModule({
