@@ -7,6 +7,7 @@ import { generateAvailability } from '../domain/availability/engine.js';
 import { Money } from '../domain/money/money.js';
 import { computeSuggestedRetainedAmount } from '../domain/pricing/cancellation-fee.js';
 import { CLOCK } from '../domain/time/clock.js';
+import { deriveDisplayStatus } from '../office/display-status.js';
 import { OrganizationContextService } from '../organization/organization-context.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { AvailabilitySnapshotService } from '../public/availability-snapshot.service.js';
@@ -183,13 +184,16 @@ export class ManageController {
   /**
    * What to show instead of the stored status.
    *
-   * An open request means the customer is waiting for an answer; saying "confirmed"
-   * would be true of the row and misleading to the person reading it.
+   * Shares `deriveDisplayStatus` with the office calendar rather than repeating the
+   * rule. The customer and the office must not be able to see different answers about
+   * the same booking, and two copies of "cancellation wins over reschedule" is exactly
+   * how they would come to.
    */
   private displayStatus(booking: ManagedBookingRow): DisplayStatus {
-    if (booking.cancellationRequests.length > 0) return 'CANCELLATION_REQUESTED';
-    if (booking.rescheduleRequests.length > 0) return 'RESCHEDULE_REQUESTED';
-    return booking.status;
+    return deriveDisplayStatus(booking, {
+      cancellation: booking.cancellationRequests.length > 0,
+      reschedule: booking.rescheduleRequests.length > 0,
+    });
   }
 
   /** What has actually settled. A pending payment has not been received. */

@@ -25,6 +25,7 @@ import { SMS_PROVIDER } from '../src/providers/sms/sms-provider.js';
 import { PublicModule } from '../src/public/public.module.js';
 
 import { prisma } from './database.harness.js';
+import { countingPrisma } from './public-app.harness.js';
 
 import type { AppConfig } from '../src/config/env.schema.js';
 import type { QueueRegistry } from '../src/messaging/queues/enqueue.service.js';
@@ -92,7 +93,7 @@ const testConfig = {
 @Global()
 @Module({
   providers: [
-    { provide: PrismaService, useValue: prisma },
+    { provide: PrismaService, useFactory: () => (countingEnabled ? countingPrisma : prisma) },
     { provide: CLOCK, useFactory: () => currentClock ?? new FixedClock(new Date()) },
     { provide: OrganizationContextService, useFactory: organizationStub },
     { provide: ENV, useValue: testConfig },
@@ -155,6 +156,9 @@ let currentQueues: QueueRegistry | undefined;
 /** Set per app, by `createBookingTestApp({ redis })`. */
 let currentRedis: Redis | undefined;
 
+/** Set per app, by `createBookingTestApp({ countQueries })`. */
+let countingEnabled = false;
+
 /** Every job the harness's queues were asked to add, in order. */
 export const enqueued: { name: string; data: unknown; options: unknown }[] = [];
 
@@ -211,11 +215,20 @@ export async function createBookingTestApp(options: {
    * same way or it would be proving something about a different wiring.
    */
   middleware?: RequestHandler[];
+  /**
+   * Count Prisma operations, so a suite can assert an N+1 has not appeared.
+   *
+   * Off by default: the counting client is a `$extends` proxy, and every suite paying
+   * for it to observe something only one suite asserts is the wrong trade. Read the
+   * total through `queryCounter` from `public-app.harness.ts`.
+   */
+  countQueries?: boolean;
 }): Promise<BookingTestApp> {
   currentOrganization = options.organization;
   currentClock = options.clock;
   currentQueues = options.queues;
   currentRedis = options.redis;
+  countingEnabled = options.countQueries ?? false;
   enqueued.length = 0;
 
   const moduleRef = await Test.createTestingModule({
