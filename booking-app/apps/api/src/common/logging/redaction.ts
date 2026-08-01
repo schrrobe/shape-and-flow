@@ -39,9 +39,15 @@ export const REDACT_PATHS = [
   'token',
   'tokenHash',
   'idempotencyKey',
+  // The plaintext management token, which travels in the booking.confirmed job
+  // payload so the confirmation email can contain the link. `*.token` does not
+  // match it, and a logged job payload would otherwise hand out the link that
+  // cancels or reschedules the booking.
+  'managementToken',
   '*.token',
   '*.tokenHash',
   '*.idempotencyKey',
+  '*.managementToken',
 
   // personal data
   'email',

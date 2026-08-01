@@ -6,6 +6,7 @@ import { LoggingModule } from './common/logging/logger.module.js';
 import { ConfigModule } from './config/config.module.js';
 import { DomainModule } from './domain/domain.module.js';
 import { HealthModule } from './health/health.module.js';
+import { QueuesModule } from './messaging/queues/queues.module.js';
 import { OrganizationModule } from './organization/organization.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
 import { ProvidersModule } from './providers/providers.module.js';
@@ -16,6 +17,7 @@ import { ProvidersModule } from './providers/providers.module.js';
     ConfigModule,
     LoggingModule,
     PrismaModule,
+    QueuesModule,
     DomainModule,
     OrganizationModule,
     ProvidersModule,

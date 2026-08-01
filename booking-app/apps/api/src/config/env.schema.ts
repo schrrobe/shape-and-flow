@@ -38,6 +38,15 @@ export const envSchema = z
       (value) => value.startsWith('redis://') || value.startsWith('rediss://'),
       { message: 'REDIS_URL must be a redis:// connection string' },
     ),
+    /**
+     * Namespace for every BullMQ key, so one Redis can serve two environments —
+     * and so the integration suite's queue reset provably cannot reach the
+     * queues an application is using. The API and its workers must agree on this
+     * value; if they disagree the workers consume nothing, silently.
+     */
+    REDIS_QUEUE_PREFIX: nonEmpty
+      .regex(/^[a-z0-9:_-]+$/i, 'REDIS_QUEUE_PREFIX must be a simple key-safe token')
+      .default('bull'),
 
     // ── tenancy ──────────────────────────────────────────────────────────────
     DEFAULT_ORGANIZATION_SLUG: nonEmpty,

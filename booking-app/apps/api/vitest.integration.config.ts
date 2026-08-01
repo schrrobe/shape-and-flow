@@ -46,6 +46,11 @@ export default mergeConfig(
         NODE_ENV: 'test',
         DATABASE_URL: TEST_DATABASE_URL,
         REDIS_URL: TEST_REDIS_URL,
+        // The queue tests obliterate every queue between tests. A prefix of its
+        // own means that reset cannot reach an application's queues even if
+        // REDIS_URL is pointed at the development instance; test/redis.harness.ts
+        // refuses to run without it.
+        REDIS_QUEUE_PREFIX: 'test-bull',
       },
       coverage: { enabled: false },
     },

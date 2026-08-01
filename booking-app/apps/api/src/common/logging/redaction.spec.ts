@@ -35,6 +35,7 @@ const SECRETS = {
   customerNote: 'strictly-private-note',
   tokenHash: 'deadbeefdeadbeef',
   token: 'plaintext-management-token',
+  managementToken: 'mgmt-9x7q-plaintext',
 };
 
 describe('log redaction', () => {
@@ -56,6 +57,7 @@ describe('log redaction', () => {
       },
       tokenHash: SECRETS.tokenHash,
       token: SECRETS.token,
+      managementToken: SECRETS.managementToken,
     });
 
     for (const [field, value] of Object.entries(SECRETS)) {
@@ -82,6 +84,19 @@ describe('log redaction', () => {
     ]) {
       expect(line).not.toContain(value);
     }
+  });
+
+  it('redacts the management token out of a job payload', () => {
+    // The plaintext token travels in the booking.confirmed payload so the email
+    // can contain the link. Whoever reads it in a log can cancel the booking, and
+    // `*.token` does not match the field name.
+    const line = captureLine({
+      job: 'booking.confirmed',
+      data: { bookingId: 'clx-booking-1', managementToken: SECRETS.managementToken },
+    });
+
+    expect(line).not.toContain(SECRETS.managementToken);
+    expect(line).toContain('clx-booking-1');
   });
 
   it('redacts one level of nesting, which is how domain objects are logged', () => {
