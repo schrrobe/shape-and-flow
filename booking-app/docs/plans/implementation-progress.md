@@ -46,26 +46,43 @@ constraint → Stripe Checkout → webhook confirms.
 | 4.2  | Transactional outbox: recorder, dispatcher, reconciler                         |
 | 4.3  | Webhook inbox: recorder, reconciler                                            |
 | 4.4  | Idempotency: canonical request hash, service, global interceptor, sweeper      |
+| 5.1  | Public catalog and availability, throttled, tenant read from context only     |
+| 5.2  | Reservation transaction under the per-employee advisory lock                  |
+| 5.3  | Booking endpoint, Checkout session, idempotent replay                        |
+| 5.4  | Stripe webhook ingress with raw-body signature check, booking confirmation    |
+| 5.5  | Two-phase expiry saga with persisted `EXPIRING` and a stuck-state sweep       |
+| 6.1  | Management tokens: hash stored, plaintext once, token-as-selector `/manage`   |
+| 6.2  | Cancellation: customer self-service inside the window, request outside it     |
+| 6.3  | Refunds: idempotent Stripe refunds, webhook-driven settlement                 |
+| 6.4  | Reschedule: availability evaluated against the as-sold snapshot              |
+| 6.5  | Completion and no-show, with the audit trail                                  |
+| 7.1  | `booking-notification-templates`: 13 kinds x 2 locales, 67 tests, snapshots   |
+| 7.2  | Notification dispatch, dedupe, frozen payload, delivery-status webhooks       |
+| 7.3  | Reminders: time-keyed job ids, fresh manage token, nightly reconciliation     |
+| 7.4  | Worker process, exhaustive job router, 8 repeatables, api/worker Docker targets |
 
 ## Next
 
-| Task    | What it is                                            |
-| ------- | ----------------------------------------------------- |
-| **4.3** | **Webhook inbox: recorder, reconciler. Next.**        |
-| 4.4     | Idempotency service and interceptor                   |
-| 5.1     | Public catalog and availability endpoints             |
-| 5.2     | Reservation transaction under the advisory lock       |
-| 5.3     | Booking endpoint, Checkout session, idempotent replay |
-| 5.4     | Stripe webhook ingress and booking confirmation       |
-| 5.5     | Two-phase expiry saga                                 |
+| Task    | What it is                                                    |
+| ------- | ------------------------------------------------------------- |
+| **8.1** | **Office authentication and sessions. Next.**                  |
+| 8.2     | Office booking management endpoints                            |
+| 8.3     | Employees, services, working hours                             |
+| 8.4     | Blocked times, time off, closed days                           |
+| 8.5     | Cancellation and reschedule request decisions                  |
+| 9.x     | Web public booking flow, i18n, WhatsApp button                 |
+| 10.x    | Web office area                                                |
+| 11.x    | End-to-end tests, ops, docs                                    |
 
-**The vertical slice is complete.** A customer can browse the catalog, see real slots,
-reserve one, pay through Stripe Checkout, and have the booking confirmed by webhook —
-with the slot released again if they do not. Verified end to end against a booted
-server, not only by tests: two customers load-balance across the two employees, the
-third gets `409 SLOT_UNAVAILABLE`, and the slot disappears from availability.
+**Stages 5, 6 and 7 are complete.** A customer books and pays; the booking confirms
+by webhook or releases the slot; they can cancel, reschedule or be marked no-show
+through a management link; every step notifies the right people in the right
+language; and a separate worker process runs every job and sweep. Verified end to
+end against booted processes, not only by tests — including the worker image
+draining on SIGTERM.
 
-Deferred out of the slice: 3.4 (email and SMS adapters), and all of stages 6–11.
+Deferred out of the slice: 3.4 (Resend and Twilio adapters — the ports and fakes
+exist, the real clients do not), and all of stages 8-11.
 
 ## Version drift from the plan, and why
 
@@ -269,6 +286,30 @@ constructable`. The named import gives both the class and the type.
 
 ## Plan errors found while implementing
 
+- **The `Notification` entity has no payload column, and the design needs one.**
+  The plan's own management-link design requires the plaintext token to reach the
+  email, and that plaintext exists exactly once. Added `payload Json?` so a send is
+  a pure render of what was true when the notification was queued.
+- **Task 7.3's dedupe discriminator collapses two offsets into one.** The plan uses
+  `String(expectedStartsAtEpochSeconds)` alone, so a 2-hour reminder dedupes into
+  the 24-hour one already sent for the same appointment. Its own "honours multiple
+  configured offsets" test only counts scheduled jobs, so it would not have caught
+  it. The discriminator carries the offset too.
+- **Task 7.3's job id uses colons.** BullMQ reserves `:` as its key separator and
+  rejects a custom id containing one, so `reminderJobId` joins with `-`.
+- **Task 7.4 reads the schedule with `getRepeatableJobs()`.** Removed in BullMQ 6;
+  `getJobSchedulers()` replaces it. A scheduler must also set the job name in its
+  template: it defaults to the scheduler id, and the router dispatches on the job
+  name.
+- **Task 7.4's Docker context is `booking-app`.** `pnpm-lock.yaml` and
+  `pnpm-workspace.yaml` are at the repository root, so that context cannot produce
+  the install that was tested. Both targets build from the root context.
+- **Task 7.4 asserts a ULID correlation id.** `newCorrelationId` returns a UUID.
+- **The plan's schema-drift command is Prisma 6 era.** `--to-schema-datamodel` was
+  renamed to `--to-schema` and `--shadow-database-url` was removed; the shadow URL
+  now has to be in `prisma.config.ts`. It is derived from `DATABASE_URL` there, and
+  the database is created on first volume init, so the gate runs from a fresh clone.
+
 - **§8.4 error handling was wrong, in our favour.** It assumed `23P01` arrives as
   an opaque `PrismaClientUnknownRequestError` needing a message regex. Prisma 7's
   pg adapter reports `PrismaClientKnownRequestError` code `P2039` with the
@@ -360,6 +401,13 @@ connecting/connected` on a second `connect()`. The hook does a `PING` instead,
 
 Each of these would have passed a casual "it works" check.
 
+- **A caught unique violation poisons a Prisma interactive transaction.** Prisma
+  does not wrap statements in savepoints, so after a failed statement every later
+  one fails with "current transaction is aborted", surfaced as `P2039`. Probed
+  directly, which also exposed that the reservation service's reference-collision
+  retry — which documented the opposite as fact — could never have worked. The
+  retry now wraps the whole transaction, and has the tests it never had.
+
 - Decorator metadata was not emitted at all under Vitest 4, so NestJS DI would
   have failed in every future test with errors pointing nowhere near the cause.
   `di-metadata.spec.ts` now asserts `design:paramtypes` directly.
@@ -435,3 +483,21 @@ Each of these would have passed a casual "it works" check.
   CPU and another was killed as out-of-memory — machine memory pressure, not the
   code; the same command was clean and fast immediately afterwards. If lint
   suddenly crawls, check free memory before suspecting a type.
+- Six gates before every commit: `pnpm typecheck`, `pnpm lint`, `pnpm format`,
+  `pnpm test`, `pnpm test:integration`, and `prisma migrate diff --from-migrations
+  --to-schema --exit-code`. The last one needs the `booking_shadow` database, which
+  `docker/postgres-init.sql` creates on first volume init.
+- **One intermittent integration failure, unexplained.** Two full-suite runs failed
+  with a single assertion each — `idempotency.int.spec.ts` "stores nothing when the
+  handler fails", then `public-bookings.int.spec.ts` expecting 409 and getting 404 —
+  both while `docker build` was saturating the machine. Five subsequent full runs
+  and five loops of those two files in isolation were green, so it is not
+  reproducible on an idle machine. Ruled out: the outbox dispatcher (it only starts
+  when `APP_ROLE=worker`, which the test env does not set), unclosed containers in
+  the worker-bootstrap suite, and any Prisma error mapping to 404 (raw Prisma errors
+  become a generic 500; a 404 needs a deliberate `AppError`). If it recurs, capture
+  the response body — the 404 can only come from a service or booking lookup, which
+  would mean the row genuinely was not there.
+- Reminders are the one place a *fresh* management token is minted outside
+  confirmation and reschedule. It happens inside the transaction that queues the
+  message, so a rollback cannot leave a live credential for a message never sent.
