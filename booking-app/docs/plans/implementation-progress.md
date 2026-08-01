@@ -7,8 +7,8 @@ while implementing that the plan could not have known.
 | | |
 | --- | --- |
 | Branch | `feat/phase-1-booking-app` (nothing pushed) |
-| Tasks complete | 11 of 49 |
-| Unit tests | 182 passing |
+| Tasks complete | 12 of 49 |
+| Unit tests | 210 passing |
 | Integration tests | 47 passing |
 | Gates | `pnpm lint`, `format`, `typecheck`, `test`, `test:integration`, `build` all green |
 
@@ -38,13 +38,13 @@ constraint → Stripe Checkout → webhook confirms.
 | 2.1 | `Money` value object, locale formatting, cent-arithmetic ban |
 | 2.2 | DST-safe wall-clock conversion, interval algebra, injectable `Clock` |
 | 2.3 | Availability engine — pure slot generation, 48 tests |
+| 2.4 | Pricing, cancellation-fee policy, deterministic employee selection |
 
 ## Next
 
 | Task | What it is |
 | --- | --- |
-| **2.4** | **Pricing and deterministic employee selection. Next.** |
-| 3.1 | Contracts package, error envelope, correlation, redacted logging |
+| **3.1** | **Contracts package, error envelope, correlation, redacted logging. Next.** |
 | 3.2 | Provider ports (payment, email, SMS) plus in-memory fakes |
 | 3.3 | Stripe Checkout adapter |
 | 4.1 | Queue and job-payload contracts |
@@ -110,6 +110,9 @@ decision, not a mechanical bump.
 - **Task 2.2's ambiguity check looked one hour early.** That never fires: Luxon
   already resolves an ambiguous local time to the earlier offset, so the check
   must look one hour *later*.
+- **Task 2.4's `insideFreeWindow` flag was named backwards.** The plan's own
+  examples set it true when the appointment is *close* — which is when
+  cancellation is not free. Implemented as `feeApplies`.
 - **"20 enums" should read 18.** Corrected in the plan.
 
 ## Bugs caught by verifying rather than assuming
