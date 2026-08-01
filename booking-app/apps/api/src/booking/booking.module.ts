@@ -6,6 +6,9 @@ import { PublicModule } from '../public/public.module.js';
 import { BookingCheckoutService } from './booking-checkout.service.js';
 import { BookingConfirmationService } from './booking-confirmation.service.js';
 import { CustomerUpsertService } from './customer-upsert.service.js';
+import { ExpiryService } from './expiry.service.js';
+import { ExpirySweeper } from './expiry.sweeper.js';
+import { ExpiryProcessor } from './processors/expiry.processor.js';
 import { StripeEventProcessor } from './processors/stripe-event.processor.js';
 import { ReservationService } from './reservation.service.js';
 
@@ -29,6 +32,9 @@ import { ReservationService } from './reservation.service.js';
     BookingCheckoutService,
     BookingConfirmationService,
     StripeEventProcessor,
+    ExpiryService,
+    ExpirySweeper,
+    ExpiryProcessor,
   ],
   exports: [
     ReservationService,
@@ -36,6 +42,9 @@ import { ReservationService } from './reservation.service.js';
     BookingCheckoutService,
     BookingConfirmationService,
     StripeEventProcessor,
+    ExpiryService,
+    ExpirySweeper,
+    ExpiryProcessor,
   ],
 })
 export class BookingModule {}
