@@ -7,9 +7,9 @@ while implementing that the plan could not have known.
 |                   |                                                                                   |
 | ----------------- | --------------------------------------------------------------------------------- |
 | Branch            | `feat/phase-1-booking-app` (nothing pushed)                                       |
-| Tasks complete    | 17 of 49                                                                          |
-| Unit tests        | 363 passing (348 api + 15 contracts)                                              |
-| Integration tests | 86 passing                                                                        |
+| Tasks complete    | 18 of 49                                                                          |
+| Unit tests        | 364 passing (349 api + 15 contracts)                                              |
+| Integration tests | 109 passing                                                                       |
 | Gates             | `pnpm lint`, `format`, `typecheck`, `test`, `test:integration`, `build` all green |
 
 ## Execution order — vertical slice
@@ -44,6 +44,7 @@ constraint → Stripe Checkout → webhook confirms.
 | 3.3  | Stripe Checkout adapter                                                        |
 | 4.1  | Five BullMQ queues, 20 validated job payloads, `EnqueueService`                |
 | 4.2  | Transactional outbox: recorder, dispatcher, reconciler                         |
+| 4.3  | Webhook inbox: recorder, reconciler                                            |
 
 ## Next
 
@@ -167,6 +168,22 @@ constructable`. The named import gives both the class and the type.
 18. `/api/health/detail` does not exist yet, so `OutboxReconciler.health()` is
     the method that endpoint will call rather than a wired-up endpoint.
 
+19. `InboxRecorder.markProcessed`/`markFailed` take a discriminated `InboxRef`
+    rather than the plan's `(kind, providerEventId)` pair. A messaging event is
+    keyed on `(provider, providerEventId)` — the same id can legitimately arrive
+    from Resend and from Twilio — so the pair version cannot address one
+    correctly. The plan's `note?` parameter is dropped: there is no column for it,
+    and putting a "deliberately ignored" note in `lastError` would mislabel the
+    column. An unhandled event type is simply marked processed; `type` already
+    records what it was.
+20. Inbox job ids are derived from the **row id** (`inbox-<cuid>`), not from the
+    provider's event id. A provider id is not guaranteed to be key-safe, and
+    BullMQ rejects a colon — see the Task 4.1 finding. Deterministic either way,
+    which is what makes re-enqueueing an already-queued event a no-op.
+21. `InboxReconciler.runOnce()` returns `{ reenqueued, poisoned, deleted }` rather
+    than the plan's bare count, and there is a separate `health()`, mirroring
+    `OutboxReconciler`.
+
 ## Plan errors found while implementing
 
 - **§8.4 error handling was wrong, in our favour.** It assumed `23P01` arrives as
@@ -217,6 +234,15 @@ connecting/connected` on a second `connect()`. The hook does a `PING` instead,
   would dispatch forty. Proving `SKIP LOCKED` needs a second transaction that holds
   one row while the drain runs; with `SKIP LOCKED` removed that test is the only
   one that fails, after stalling for the transaction timeout.
+
+- **`isUniqueViolation` could not match a Prisma field name.** Prisma 7's pg
+  adapter reports `constraint.fields` as database **columns** (`stripe_event_id`)
+  and its own message repeats them, so nothing in the error mentions the field name
+  a caller naturally reaches for. Passing `stripeEventId` matched nothing and the
+  violation was rethrown as a 500 — in exactly the case the caller wrote the check
+  to handle. The helper now normalises both spellings. Every pre-existing call site
+  passed snake_case constraint names and was unaffected; only Task 4.3's new ones
+  hit it.
 
 ## Bugs caught by verifying rather than assuming
 
