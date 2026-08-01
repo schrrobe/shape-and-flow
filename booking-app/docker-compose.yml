@@ -19,6 +19,8 @@ services:
       - '5433:5432'
     volumes:
       - booking-postgres-data:/var/lib/postgresql/data
+      # Runs only on first initialisation of an empty data volume.
+      - ./docker/postgres-init.sql:/docker-entrypoint-initdb.d/10-shadow-database.sql:ro
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U booking -d booking']
       interval: 3s

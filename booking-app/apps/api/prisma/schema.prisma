@@ -897,6 +897,14 @@ model Notification {
   /// violation on insert means "already queued" and is swallowed, which turns
   /// at-least-once outbox delivery into effectively-once customer contact.
   dedupeKey         String              @unique @map("dedupe_key")
+  /// The template's own data, frozen at queue time.
+  ///
+  /// Not in the plan's field list, and required by the plan's own design: the
+  /// confirmation email must contain the plaintext management token, which exists only
+  /// once — in the outbox payload — and cannot be re-derived from the hash the database
+  /// stores. Freezing the data also means a notification says what was true when it was
+  /// queued, which is what a customer reading it later expects.
+  payload           Json?
   scheduledFor      DateTime?           @map("scheduled_for") @db.Timestamptz(3)
   createdAt         DateTime            @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt         DateTime            @updatedAt @map("updated_at") @db.Timestamptz(3)

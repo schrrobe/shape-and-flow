@@ -21,7 +21,7 @@ import { CustomerUpsertService } from './customer-upsert.service.js';
 import type { CustomerInput } from './customer-upsert.service.js';
 import type { EmployeeCandidate } from '../domain/employee-selection/select-employee.js';
 import type { Clock } from '../domain/time/clock.js';
-import type { Booking, BookingOrigin, Prisma } from '../prisma/client.js';
+import type { Booking, BookingOrigin } from '../prisma/client.js';
 import type { Locale } from '@shape-and-flow/booking-contracts';
 
 /** How many references to try before giving up. Each collision is a 1-in-a-billion event. */
@@ -239,46 +239,95 @@ export class ReservationService {
     const organizationId = this.organizations.getOrganizationId();
     const { employeeId } = input;
 
-    try {
-      return await this.prisma.$transaction(
-        async (tx) =>
-          await withCalendarLock(tx, [employeeId], async () => {
-            // Read *after* the lock. The snapshot the customer saw is stale by
-            // definition; this one cannot be overtaken before the insert.
-            const snapshot = await this.snapshots.loadForSlot(tx, {
-              serviceId: service.id,
-              employeeId,
-              startsAt: input.startsAt,
+    // The reference-collision retry lives out here, around the whole transaction, and
+    // that placement is not a style choice. A failed statement poisons a PostgreSQL
+    // transaction — every later statement fails with "current transaction is aborted",
+    // which Prisma surfaces as P2039 — because Prisma does not wrap interactive
+    // transaction statements in savepoints. Retrying the insert *inside* would therefore
+    // turn a recoverable collision into a hard failure. Probed, not assumed.
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        return await this.insertOnce(input, service, expiresAt, organizationId, employeeId);
+      } catch (error) {
+        // The key is composite — (organizationId, reference) — so the column name is what
+        // the violation reports. A collision is vanishingly unlikely; re-running the whole
+        // transaction, advisory lock and all, is the cheap way to be correct about it.
+        if (isUniqueViolation(error, 'reference') && attempt < REFERENCE_ATTEMPTS) {
+          this.logger.warn(`booking reference collided; retrying (attempt ${String(attempt)})`);
+          continue;
+        }
+
+        // The constraint fired, which means another transaction won the slot between the
+        // re-check and the insert. A 409 is the honest answer; a 500 would be a lie.
+        if (isExclusionViolation(error, 'bookings_no_overlap')) {
+          this.logger.debug(`slot taken concurrently for employee ${employeeId}`);
+          throw new AppError('SLOT_UNAVAILABLE', {
+            message: 'That slot is no longer available.',
+          });
+        }
+
+        throw error;
+      }
+    }
+  }
+
+  /** One attempt at the transaction: lock, re-check, upsert the customer, insert, record. */
+  private async insertOnce(
+    input: ReserveInput & { employeeId: string },
+    service: {
+      id: string;
+      name: string;
+      durationMinutes: number;
+      prepBufferMinutes: number;
+      cleanupBufferMinutes: number;
+      priceCents: number;
+      currency: string;
+    },
+    expiresAt: Date,
+    organizationId: string,
+    employeeId: string,
+  ): Promise<ReserveResult> {
+    return await this.prisma.$transaction(
+      async (tx) =>
+        await withCalendarLock(tx, [employeeId], async () => {
+          // Read *after* the lock. The snapshot the customer saw is stale by
+          // definition; this one cannot be overtaken before the insert.
+          const snapshot = await this.snapshots.loadForSlot(tx, {
+            serviceId: service.id,
+            employeeId,
+            startsAt: input.startsAt,
+          });
+
+          if (!isSlotBookable(snapshot, employeeId, input.startsAt)) {
+            throw new AppError('SLOT_UNAVAILABLE', {
+              message: 'That slot is no longer available.',
             });
+          }
 
-            if (!isSlotBookable(snapshot, employeeId, input.startsAt)) {
-              throw new AppError('SLOT_UNAVAILABLE', {
-                message: 'That slot is no longer available.',
-              });
-            }
+          const employee = await tx.employee.findFirstOrThrow({
+            where: { id: employeeId, organizationId },
+            select: { id: true, displayName: true },
+          });
 
-            const employee = await tx.employee.findFirstOrThrow({
-              where: { id: employeeId, organizationId },
-              select: { id: true, displayName: true },
-            });
+          const customer = await this.customers.upsert(tx, organizationId, input.customer);
 
-            const customer = await this.customers.upsert(tx, organizationId, input.customer);
+          // Buffers come from the snapshot, so a service edited between the read and
+          // the insert cannot shift the block bounds under us.
+          const endsAt = new Date(
+            input.startsAt.getTime() + snapshot.service.durationMinutes * 60_000,
+          );
+          const blockStartsAt = new Date(
+            input.startsAt.getTime() - snapshot.service.prepBufferMinutes * 60_000,
+          );
+          const blockEndsAt = new Date(
+            endsAt.getTime() + snapshot.service.cleanupBufferMinutes * 60_000,
+          );
 
-            // Buffers come from the snapshot, so a service edited between the read and
-            // the insert cannot shift the block bounds under us.
-            const endsAt = new Date(
-              input.startsAt.getTime() + snapshot.service.durationMinutes * 60_000,
-            );
-            const blockStartsAt = new Date(
-              input.startsAt.getTime() - snapshot.service.prepBufferMinutes * 60_000,
-            );
-            const blockEndsAt = new Date(
-              endsAt.getTime() + snapshot.service.cleanupBufferMinutes * 60_000,
-            );
+          assertTransition(null, BookingStatus.PENDING_PAYMENT);
 
-            assertTransition(null, BookingStatus.PENDING_PAYMENT);
-
-            const booking = await this.insertWithReference(tx, {
+          const booking = await tx.booking.create({
+            data: {
+              reference: generateBookingReference(),
               organizationId,
               origin: input.origin ?? 'ONLINE',
               customerId: customer.id,
@@ -298,70 +347,30 @@ export class ReservationService {
               expiresAt,
               locale: input.locale,
               ...(input.customerNote === undefined ? {} : { customerNote: input.customerNote }),
-            });
+            },
+          });
 
-            // In the same transaction, so a booking can never exist without the row
-            // that explains how it got its status.
-            await tx.bookingStatusHistory.create({
-              data: {
-                organizationId,
-                bookingId: booking.id,
-                fromStatus: null,
-                toStatus: BookingStatus.PENDING_PAYMENT,
-                actorType: 'CUSTOMER',
-              },
-            });
+          // In the same transaction, so a booking can never exist without the row
+          // that explains how it got its status.
+          await tx.bookingStatusHistory.create({
+            data: {
+              organizationId,
+              bookingId: booking.id,
+              fromStatus: null,
+              toStatus: BookingStatus.PENDING_PAYMENT,
+              actorType: 'CUSTOMER',
+            },
+          });
 
-            return {
-              booking,
-              employee,
-              price: Money.fromCents(service.priceCents, service.currency),
-            };
-          }),
-        // Generous but bounded. The lock is held for the whole transaction, so a
-        // stuck one delays other reservations for the same employee.
-        { isolationLevel: 'ReadCommitted', timeout: 15_000, maxWait: 10_000 },
-      );
-    } catch (error) {
-      // The constraint fired, which means another transaction won the slot between the
-      // re-check and the insert. A 409 is the honest answer; a 500 would be a lie.
-      if (isExclusionViolation(error, 'bookings_no_overlap')) {
-        this.logger.debug(`slot taken concurrently for employee ${employeeId}`);
-        throw new AppError('SLOT_UNAVAILABLE', {
-          message: 'That slot is no longer available.',
-        });
-      }
-
-      throw error;
-    }
-  }
-
-  /**
-   * Insert, retrying on a reference collision.
-   *
-   * The retry is inside the transaction, so a collision costs one statement rather
-   * than the whole reservation. Note the savepoint behaviour this relies on: a failed
-   * statement inside a Prisma interactive transaction does not abort the transaction,
-   * so a second insert can follow the first.
-   */
-  private async insertWithReference(
-    tx: Prisma.TransactionClient,
-    data: Omit<Prisma.BookingUncheckedCreateInput, 'reference'>,
-  ): Promise<Booking> {
-    for (let attempt = 1; ; attempt += 1) {
-      const reference = generateBookingReference();
-
-      try {
-        return await tx.booking.create({ data: { ...data, reference } });
-      } catch (error) {
-        // The key is composite — (organizationId, reference) — so the column name is what
-        // the violation reports.
-        const collided = isUniqueViolation(error, 'reference');
-
-        if (!collided || attempt >= REFERENCE_ATTEMPTS) throw error;
-
-        this.logger.warn(`booking reference ${reference} collided; retrying`);
-      }
-    }
+          return {
+            booking,
+            employee,
+            price: Money.fromCents(service.priceCents, service.currency),
+          };
+        }),
+      // Generous but bounded. The lock is held for the whole transaction, so a
+      // stuck one delays other reservations for the same employee.
+      { isolationLevel: 'ReadCommitted', timeout: 15_000, maxWait: 10_000 },
+    );
   }
 }

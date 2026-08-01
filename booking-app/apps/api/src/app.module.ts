@@ -15,6 +15,7 @@ import { IdempotencyModule } from './messaging/idempotency/idempotency.module.js
 import { InboxModule } from './messaging/inbox/inbox.module.js';
 import { OutboxModule } from './messaging/outbox/outbox.module.js';
 import { QueuesModule } from './messaging/queues/queues.module.js';
+import { NotificationModule } from './notification/notification.module.js';
 import { OrganizationModule } from './organization/organization.module.js';
 import { PaymentModule } from './payment/payment.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
@@ -41,6 +42,7 @@ import { WebhooksModule } from './webhooks/webhooks.module.js';
     BookingModule,
     ManageModule,
     PaymentModule,
+    NotificationModule,
     WebhooksModule,
   ],
   providers: [

@@ -1,7 +1,9 @@
 import { Module } from '@nestjs/common';
 
 import { BookingModule } from '../booking/booking.module.js';
+import { NotificationModule } from '../notification/notification.module.js';
 
+import { MessagingWebhookController } from './messaging-webhook.controller.js';
 import { StripeWebhookController } from './stripe-webhook.controller.js';
 
 /**
@@ -12,7 +14,7 @@ import { StripeWebhookController } from './stripe-webhook.controller.js';
  * parser cannot work.
  */
 @Module({
-  imports: [BookingModule],
-  controllers: [StripeWebhookController],
+  imports: [BookingModule, NotificationModule],
+  controllers: [StripeWebhookController, MessagingWebhookController],
 })
 export class WebhooksModule {}

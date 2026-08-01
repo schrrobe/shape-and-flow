@@ -25,7 +25,7 @@ export interface SeedContext {
   category: { id: string };
   service30: { id: string; name: string; priceCents: number };
   service60: { id: string; name: string; priceCents: number };
-  customer: { id: string };
+  customer: { id: string; email: string; phone: string | null };
 }
 
 let counter = 0;

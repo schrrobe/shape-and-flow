@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { BOOKING_REFERENCE_PATTERN } from '../../src/booking/booking-reference.js';
 import { BLOCKING_BOOKING_STATUSES } from '../../src/booking/booking-status.machine.js';
@@ -14,6 +14,19 @@ import type { ReserveInput } from '../../src/booking/reservation.service.js';
 import type { OrganizationContextService } from '../../src/organization/organization-context.service.js';
 import type { PrismaService } from '../../src/prisma/prisma.service.js';
 import type { SeedContext } from '../factories/index.js';
+
+/** References the generator will hand out before falling back to the real one. */
+const forcedReferences: string[] = [];
+
+vi.mock('../../src/booking/booking-reference.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/booking/booking-reference.js')>();
+
+  return {
+    ...actual,
+    generateBookingReference: (): string =>
+      forcedReferences.shift() ?? actual.generateBookingReference(),
+  };
+});
 
 const db = prisma as unknown as PrismaService;
 
@@ -353,5 +366,41 @@ describe('the reserved slot', () => {
     });
 
     await expect(service.reserve(input())).resolves.toBeDefined();
+  });
+});
+
+describe('a reference collision', () => {
+  it('retries the whole transaction and succeeds with a fresh reference', async () => {
+    // An existing booking owns the reference the generator will produce first. The
+    // *whole* transaction has to be retried, not just the insert: a failed statement
+    // poisons a PostgreSQL transaction, so an in-transaction retry would fail with
+    // P2039 instead of recovering.
+    const first = await service.reserve(input());
+    await prisma.booking.update({
+      where: { id: first.booking.id },
+      data: { status: 'CANCELED_BY_CUSTOMER', canceledAt: NOW, expiresAt: null },
+    });
+
+    forcedReferences.push(first.booking.reference);
+    const second = await service.reserve(input());
+
+    expect(second.booking.reference).not.toBe(first.booking.reference);
+    expect(second.booking.reference).toMatch(BOOKING_REFERENCE_PATTERN);
+    expect(forcedReferences).toHaveLength(0);
+  });
+
+  it('gives up after the bounded number of attempts', async () => {
+    const first = await service.reserve(input());
+    await prisma.booking.update({
+      where: { id: first.booking.id },
+      data: { status: 'CANCELED_BY_CUSTOMER', canceledAt: NOW, expiresAt: null },
+    });
+
+    // Enough collisions to exhaust the retries. Better a 500 than an unbounded loop
+    // holding an advisory lock.
+    for (let index = 0; index < 6; index += 1) forcedReferences.push(first.booking.reference);
+
+    await expect(service.reserve(input())).rejects.toThrow();
+    forcedReferences.length = 0;
   });
 });

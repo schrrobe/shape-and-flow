@@ -15,8 +15,12 @@ import { EnqueueService, QUEUE_REGISTRY } from '../src/messaging/queues/enqueue.
 import { QUEUES } from '../src/messaging/queues/job-contracts.js';
 import { OrganizationContextService } from '../src/organization/organization-context.service.js';
 import { PrismaService } from '../src/prisma/prisma.service.js';
+import { EMAIL_PROVIDER } from '../src/providers/email/email-provider.js';
+import { FakeEmailProvider } from '../src/providers/email/fake-email.provider.js';
 import { FakePaymentProvider } from '../src/providers/payment/fake-payment.provider.js';
 import { PAYMENT_PROVIDER } from '../src/providers/payment/payment-provider.js';
+import { FakeSmsProvider } from '../src/providers/sms/fake-sms.provider.js';
+import { SMS_PROVIDER } from '../src/providers/sms/sms-provider.js';
 import { PublicModule } from '../src/public/public.module.js';
 
 import { prisma } from './database.harness.js';
@@ -70,6 +74,10 @@ const testConfig = {
   NODE_ENV: 'test',
   PUBLIC_WEB_ORIGIN,
   PAYMENT_PROVIDER: 'fake',
+  EMAIL_PROVIDER: 'fake',
+  SMS_PROVIDER: 'fake',
+  RESEND_WEBHOOK_SECRET: 'test-resend-secret',
+  TWILIO_AUTH_TOKEN: 'test-twilio-token',
 } as unknown as AppConfig;
 
 @Global()
@@ -81,6 +89,10 @@ const testConfig = {
     { provide: ENV, useValue: testConfig },
     FakePaymentProvider,
     { provide: PAYMENT_PROVIDER, useExisting: FakePaymentProvider },
+    FakeEmailProvider,
+    { provide: EMAIL_PROVIDER, useExisting: FakeEmailProvider },
+    FakeSmsProvider,
+    { provide: SMS_PROVIDER, useExisting: FakeSmsProvider },
     OutboxRecorder,
     InboxRecorder,
     IdempotencyService,
@@ -100,6 +112,10 @@ const testConfig = {
     ENV,
     PAYMENT_PROVIDER,
     FakePaymentProvider,
+    EMAIL_PROVIDER,
+    FakeEmailProvider,
+    SMS_PROVIDER,
+    FakeSmsProvider,
     OutboxRecorder,
     InboxRecorder,
     IdempotencyService,
@@ -137,6 +153,8 @@ export interface BookingTestApp {
   app: INestApplication;
   server: () => Server;
   payments: FakePaymentProvider;
+  email: FakeEmailProvider;
+  sms: FakeSmsProvider;
   close: () => Promise<void>;
 }
 
@@ -167,6 +185,8 @@ export async function createBookingTestApp(options: {
     app,
     server: () => app.getHttpServer() as Server,
     payments: app.get(FakePaymentProvider),
+    email: app.get(FakeEmailProvider),
+    sms: app.get(FakeSmsProvider),
     close: async () => {
       await app.close();
     },

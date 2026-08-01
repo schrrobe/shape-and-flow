@@ -15,6 +15,19 @@ if (!databaseUrl) {
   throw new Error('DATABASE_URL is not set. Copy booking-app/.env.example to booking-app/.env.');
 }
 
+/**
+ * A throwaway database for `migrate diff --from-migrations` and `migrate dev`.
+ *
+ * Derived from `DATABASE_URL` rather than configured separately, so the drift gate runs
+ * with no extra setup and cannot point at the real database by mistake. Prisma 7 requires
+ * this to be in the config: `--shadow-database-url` was removed from the CLI.
+ */
+function shadowDatabaseUrl(url: string): string {
+  const parsed = new URL(url);
+  parsed.pathname = `${parsed.pathname.replace(/\/$/, '')}_shadow`;
+  return parsed.toString();
+}
+
 export default defineConfig({
   schema: resolve(packageDir, 'prisma/schema.prisma'),
   migrations: {
@@ -27,5 +40,6 @@ export default defineConfig({
   },
   datasource: {
     url: databaseUrl,
+    shadowDatabaseUrl: process.env.SHADOW_DATABASE_URL ?? shadowDatabaseUrl(databaseUrl),
   },
 });

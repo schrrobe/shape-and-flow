@@ -37,6 +37,9 @@ importers:
       '@shape-and-flow/booking-contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@shape-and-flow/booking-notification-templates':
+        specifier: workspace:*
+        version: link:../../packages/notification-templates
       bullmq:
         specifier: 6.0.5
         version: 6.0.5(ioredis@6.0.0)(pg@8.22.0)
