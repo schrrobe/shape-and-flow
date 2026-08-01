@@ -3,6 +3,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { AppError } from '../../common/errors/app-error.js';
 import { CLOCK } from '../../domain/time/clock.js';
 import { InboxRecorder } from '../../messaging/inbox/inbox.recorder.js';
+import { RefundWebhookHandler } from '../../payment/refund-webhook.handler.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import { BookingConfirmationService } from '../booking-confirmation.service.js';
 
@@ -68,6 +69,7 @@ export class StripeEventProcessor {
     private readonly prisma: PrismaService,
     private readonly inbox: InboxRecorder,
     private readonly confirmations: BookingConfirmationService,
+    private readonly refunds: RefundWebhookHandler,
     @Inject(CLOCK) private readonly clock: Clock,
   ) {}
 
@@ -106,6 +108,13 @@ export class StripeEventProcessor {
 
   private async dispatch(type: string, rawPayload: unknown, eventId: string): Promise<void> {
     const object = (rawPayload as StripeEventShape).data?.object ?? {};
+
+    // Refund events are a separate concern: this class decides which booking an event is
+    // about, and that one decides what a refund event means.
+    if (this.refunds.handles(type)) {
+      await this.refunds.handle(type, object);
+      return;
+    }
 
     switch (type) {
       case HANDLED.COMPLETED:

@@ -16,6 +16,7 @@ import { InboxModule } from './messaging/inbox/inbox.module.js';
 import { OutboxModule } from './messaging/outbox/outbox.module.js';
 import { QueuesModule } from './messaging/queues/queues.module.js';
 import { OrganizationModule } from './organization/organization.module.js';
+import { PaymentModule } from './payment/payment.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
 import { ProvidersModule } from './providers/providers.module.js';
 import { PublicModule } from './public/public.module.js';
@@ -39,6 +40,7 @@ import { WebhooksModule } from './webhooks/webhooks.module.js';
     PublicModule,
     BookingModule,
     ManageModule,
+    PaymentModule,
     WebhooksModule,
   ],
   providers: [
