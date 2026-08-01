@@ -61,6 +61,9 @@ importers:
       rxjs:
         specifier: 7.8.2
         version: 7.8.2
+      stripe:
+        specifier: 22.4.0
+        version: 22.4.0(@types/node@26.1.2)
       zod:
         specifier: 4.4.3
         version: 4.4.3
@@ -3285,6 +3288,15 @@ packages:
   strip-json-comments@5.0.3:
     resolution: {integrity: sha512-1tB5mhVo7U+ETBKNf92xT4hrQa3pm0MZ0PQvuDnWgAAGHDsfp4lPSpiS6psrSiet87wyGPh9ft6wmhOMQ0hDiw==}
     engines: {node: '>=14.16'}
+
+  stripe@22.4.0:
+    resolution: {integrity: sha512-LVJ+tcSYeqOSnXr3i+Kz2tZ7y0crLLdP2uwD/4wccrmEVyn0g/Heo0pF7as7rxS/sOjJzrb1lxgZY0Y0Dx1pSA==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      '@types/node': '>=18'
+    peerDependenciesMeta:
+      '@types/node':
+        optional: true
 
   strtok3@10.3.5:
     resolution: {integrity: sha512-ki4hZQfh5rX0QDLLkOCj+h+CVNkqmp/CMf8v8kZpkNVK6jGQooMytqzLZYUVYIZcFZ6yDB70EfD8POcFXiF5oA==}
@@ -6690,6 +6702,10 @@ snapshots:
   strip-bom@3.0.0: {}
 
   strip-json-comments@5.0.3: {}
+
+  stripe@22.4.0(@types/node@26.1.2):
+    optionalDependencies:
+      '@types/node': 26.1.2
 
   strtok3@10.3.5:
     dependencies:

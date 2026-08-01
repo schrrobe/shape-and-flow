@@ -7,8 +7,8 @@ while implementing that the plan could not have known.
 | | |
 | --- | --- |
 | Branch | `feat/phase-1-booking-app` (nothing pushed) |
-| Tasks complete | 14 of 49 |
-| Unit tests | 295 passing (280 api + 15 contracts) |
+| Tasks complete | 15 of 49 |
+| Unit tests | 330 passing (315 api + 15 contracts) |
 | Integration tests | 47 passing |
 | Gates | `pnpm lint`, `format`, `typecheck`, `test`, `test:integration`, `build` all green |
 
@@ -41,13 +41,13 @@ constraint → Stripe Checkout → webhook confirms.
 | 2.4 | Pricing, cancellation-fee policy, deterministic employee selection |
 | 3.1 | Contracts package, error envelope, correlation, redacted logging |
 | 3.2 | Provider ports (payment, email, SMS) with in-memory fakes |
+| 3.3 | Stripe Checkout adapter |
 
 ## Next
 
 | Task | What it is |
 | --- | --- |
-| **3.3** | **Stripe Checkout adapter. Next.** |
-| 4.1 | Queue and job-payload contracts |
+| **4.1** | **Queue and job-payload contracts. Next.** |
 | 4.2 | Transactional outbox: recorder, dispatcher, reconciler |
 | 4.3 | Webhook inbox: recorder, reconciler |
 | 4.4 | Idempotency service and interceptor |
@@ -138,6 +138,16 @@ decision, not a mechanical bump.
   examples set it true when the appointment is *close* — which is when
   cancellation is not free. Implemented as `feeApplies`.
 - **"20 enums" should read 18.** Corrected in the plan.
+- **Task 3.3 assumed Stripe's `expires_at` could equal the 5-minute reservation
+  deadline.** Stripe accepts 30 minutes to 24 hours, so the adapter clamps to the
+  minimum and our own expiry saga enforces the real deadline by calling
+  `sessions.expire`. Stripe's value is only a backstop.
+- **Task 3.3 assumed a hard-coded API version string.** Since stripe-node 22,
+  `apiVersion` is a *literal* type accepting only the SDK's pinned version, so it
+  cannot drift by configuration. A test pins the value instead, so an SDK upgrade
+  fails and forces a review.
+- **The plan's Connect option was `stripeAccount`.** stripe-node documents that as
+  on its way out in favour of `stripeContext`; the adapter sends the latter.
 
 ## Bugs caught by verifying rather than assuming
 
