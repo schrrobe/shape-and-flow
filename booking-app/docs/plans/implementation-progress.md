@@ -7,9 +7,9 @@ while implementing that the plan could not have known.
 |                   |                                                                                   |
 | ----------------- | --------------------------------------------------------------------------------- |
 | Branch            | `feat/phase-1-booking-app` (nothing pushed)                                       |
-| Tasks complete    | 16 of 49                                                                          |
-| Unit tests        | 355 passing (340 api + 15 contracts)                                              |
-| Integration tests | 61 passing                                                                        |
+| Tasks complete    | 17 of 49                                                                          |
+| Unit tests        | 363 passing (348 api + 15 contracts)                                              |
+| Integration tests | 86 passing                                                                        |
 | Gates             | `pnpm lint`, `format`, `typecheck`, `test`, `test:integration`, `build` all green |
 
 ## Execution order — vertical slice
@@ -43,19 +43,19 @@ constraint → Stripe Checkout → webhook confirms.
 | 3.2  | Provider ports (payment, email, SMS) with in-memory fakes                      |
 | 3.3  | Stripe Checkout adapter                                                        |
 | 4.1  | Five BullMQ queues, 20 validated job payloads, `EnqueueService`                |
+| 4.2  | Transactional outbox: recorder, dispatcher, reconciler                         |
 
 ## Next
 
-| Task    | What it is                                                        |
-| ------- | ----------------------------------------------------------------- |
-| **4.2** | **Transactional outbox: recorder, dispatcher, reconciler. Next.** |
-| 4.3     | Webhook inbox: recorder, reconciler                               |
-| 4.4     | Idempotency service and interceptor                               |
-| 5.1     | Public catalog and availability endpoints                         |
-| 5.2     | Reservation transaction under the advisory lock                   |
-| 5.3     | Booking endpoint, Checkout session, idempotent replay             |
-| 5.4     | Stripe webhook ingress and booking confirmation                   |
-| 5.5     | Two-phase expiry saga                                             |
+| Task    | What it is                                            |
+| ------- | ----------------------------------------------------- |
+| **4.3** | **Webhook inbox: recorder, reconciler. Next.**        |
+| 4.4     | Idempotency service and interceptor                   |
+| 5.1     | Public catalog and availability endpoints             |
+| 5.2     | Reservation transaction under the advisory lock       |
+| 5.3     | Booking endpoint, Checkout session, idempotent replay |
+| 5.4     | Stripe webhook ingress and booking confirmation       |
+| 5.5     | Two-phase expiry saga                                 |
 
 Deferred out of the slice: 3.4, and all of stages 6–11.
 
@@ -154,6 +154,19 @@ constructable`. The named import gives both the class and the type.
     accepted and bounded: the payload is deleted when the outbox row is swept,
     and `managementToken` is in the log redaction list.
 
+16. The outbox dispatcher and reconciler take the injected `Clock`, not SQL
+    `now()` as the plan specified. Prisma sends a **client-generated** value for
+    `@default(now())` rather than letting Postgres fill the column, so
+    `availableAt` and `createdAt` are application-written; comparing them against
+    the database's clock compares two clocks. See the bug below.
+17. The dispatcher's interval and the reconciler's `sweep.outbox` wiring are
+    implemented but not running: neither has a process to run in until the worker
+    lands in stage 7. `OutboxDispatcherScheduler` is registered in both roles and
+    starts in neither unless `APP_ROLE=worker`, and its role guard, re-entrancy
+    and shutdown behaviour are unit-tested in the meantime.
+18. `/api/health/detail` does not exist yet, so `OutboxReconciler.health()` is
+    the method that endpoint will call rather than a wired-up endpoint.
+
 ## Plan errors found while implementing
 
 - **§8.4 error handling was wrong, in our favour.** It assumed `23P01` arrives as
@@ -190,6 +203,21 @@ connecting/connected` on a second `connect()`. The hook does a `PING` instead,
   enqueue boundary and `jobIdFor()` builds ids that pass — without it the symptom
   would have been silently lost deduplication, i.e. duplicate confirmation emails.
 
+- **Task 4.2's claim query mixed two clocks.** It compares `available_at` against
+  "now", and the plan used SQL `now()` — but Prisma writes `@default(now())` from
+  the client, so the column holds an application timestamp. The two clocks differ
+  by a few milliseconds and the difference changes sign as the Docker VM's clock
+  drifts, so a row recorded moments earlier was intermittently in the database's
+  future and no drain claimed it. The symptom was a test suite that failed
+  differently on each run.
+- **Task 4.2's concurrency test could not fail for the right reason.** Two
+  dispatchers over twenty rows total twenty dispatches whether the claim uses
+  `SKIP LOCKED` or plain `FOR UPDATE` — a blocking claim finds the rows already
+  marked when it unblocks. It does rule out claiming with no lock at all, which
+  would dispatch forty. Proving `SKIP LOCKED` needs a second transaction that holds
+  one row while the drain runs; with `SKIP LOCKED` removed that test is the only
+  one that fails, after stalling for the transaction timeout.
+
 ## Bugs caught by verifying rather than assuming
 
 Each of these would have passed a casual "it works" check.
@@ -216,6 +244,12 @@ Each of these would have passed a casual "it works" check.
   proved Nest's hook was firing all along. The test now awaits the `end` event.
   Worth remembering the general shape: a shutdown assertion that reads state
   synchronously can report a clean teardown as a leak, and vice versa.
+- Prisma 7's interactive transaction client **does** expose `$transaction`, so it
+  cannot be used to tell a transaction client from a root one. `$connect` can: it is
+  absent on a transaction client and present on both the root client and the
+  tenant-guarded wrapper, whose proxy forwards it. That is what
+  `assertTransactionClient` checks, and it is what makes "you forgot the
+  transaction" a loud failure in the outbox recorder.
 - A booted process logged nothing on shutdown, which is not evidence either way —
   pino may not flush before the process dies. Shutdown behaviour is asserted
   through a real Nest container in the integration suite instead of by reading a
