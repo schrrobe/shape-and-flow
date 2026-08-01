@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 
+import { ManagementTokenModule } from '../manage/management-token.module.js';
 import { PublicBookingsController } from '../public/public-bookings.controller.js';
 import { PublicModule } from '../public/public.module.js';
 
@@ -24,7 +25,7 @@ import { ReservationService } from './reservation.service.js';
  * mutually dependent modules and a payment provider in every catalog test.
  */
 @Module({
-  imports: [PublicModule],
+  imports: [PublicModule, ManagementTokenModule],
   controllers: [PublicBookingsController],
   providers: [
     ReservationService,

@@ -3,9 +3,9 @@ import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import { hashManagementToken } from '../../src/booking/booking-confirmation.service.js';
 import { StripeEventProcessor } from '../../src/booking/processors/stripe-event.processor.js';
 import { FixedClock } from '../../src/domain/time/clock.js';
+import { hashManagementToken } from '../../src/manage/management-token.service.js';
 import { JOB } from '../../src/messaging/queues/job-contracts.js';
 import { Prisma } from '../../src/prisma/client.js';
 import { WebhooksModule } from '../../src/webhooks/webhooks.module.js';
@@ -232,7 +232,7 @@ describe('confirming a paid booking', () => {
     const stored = await prisma.managementToken.findFirstOrThrow({ where: { bookingId } });
 
     // The email can contain the link; a database read cannot reconstruct it.
-    expect(token).toMatch(/^[0-9a-f]{64}$/);
+    expect(token).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect(stored.tokenHash).toBe(hashManagementToken(token));
     expect(stored.tokenHash).not.toBe(token);
   });

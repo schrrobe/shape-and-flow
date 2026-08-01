@@ -1,24 +1,17 @@
-import { createHash, randomBytes } from 'node:crypto';
-
 import { Inject, Injectable, Logger } from '@nestjs/common';
 
 import { AppError } from '../common/errors/app-error.js';
 import { withSerializationRetry } from '../common/prisma-errors/serialization-retry.js';
 import { CLOCK } from '../domain/time/clock.js';
+import { ManagementTokenService } from '../manage/management-token.service.js';
 import { OutboxRecorder } from '../messaging/outbox/outbox.recorder.js';
 import { JOB } from '../messaging/queues/job-contracts.js';
-import { Prisma, BookingStatus, PaymentStatus } from '../prisma/client.js';
+import { BookingStatus, PaymentStatus, Prisma } from '../prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
 import { assertTransition, isTerminal } from './booking-status.machine.js';
 
 import type { Clock } from '../domain/time/clock.js';
-
-/** How long a management link stays usable. Long enough to cover the appointment itself. */
-export const MANAGEMENT_TOKEN_TTL_DAYS = 120;
-
-/** 256 bits, hex-encoded. The link is the only credential a customer ever gets. */
-const TOKEN_BYTES = 32;
 
 /** Where a confirmation came from, for the history row and the logs. */
 export interface ConfirmationCause {
@@ -47,11 +40,6 @@ export interface MarkPaymentFailedInput {
 
 export type ConfirmOutcome = 'CONFIRMED' | 'ALREADY_CONFIRMED';
 
-/** Hash a management token the way the stored column expects. */
-export function hashManagementToken(token: string): string {
-  return createHash('sha256').update(token, 'utf8').digest('hex');
-}
-
 /**
  * Moves a paid booking to CONFIRMED, exactly once.
  *
@@ -73,6 +61,7 @@ export class BookingConfirmationService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly outbox: OutboxRecorder,
+    private readonly tokens: ManagementTokenService,
     @Inject(CLOCK) private readonly clock: Clock,
   ) {}
 
@@ -111,7 +100,13 @@ export class BookingConfirmationService {
 
         const booking = await tx.booking.findUniqueOrThrow({
           where: { id: input.bookingId },
-          select: { id: true, organizationId: true, priceCentsSnapshot: true, currency: true },
+          select: {
+            id: true,
+            organizationId: true,
+            priceCentsSnapshot: true,
+            currency: true,
+            endsAt: true,
+          },
         });
 
         // The customer has paid, so we confirm even if the amount disagrees. Refusing
@@ -139,7 +134,14 @@ export class BookingConfirmationService {
 
         await this.upsertPayment(tx, booking, input);
 
-        const managementToken = await this.issueManagementToken(tx, booking, now);
+        // Minted through the shared service, so there is one place that decides how a
+        // management token is generated, hashed and expired.
+        const { token: managementToken } = await this.tokens.issue(
+          tx,
+          booking.id,
+          booking.organizationId,
+          booking.endsAt,
+        );
 
         await tx.bookingStatusHistory.create({
           data: {
@@ -210,33 +212,6 @@ export class BookingConfirmationService {
       update: paid,
       select: { id: true },
     });
-  }
-
-  /**
-   * Mint the credential behind the management link.
-   *
-   * Unconditional, and safe to be: `confirmOnce` returns `ALREADY_CONFIRMED` before it
-   * reaches this, so a redelivered event never gets here and there is never a second
-   * token. That is why idempotency lives in the status check rather than being
-   * reimplemented per side effect.
-   */
-  private async issueManagementToken(
-    tx: Prisma.TransactionClient,
-    booking: { id: string; organizationId: string },
-    now: Date,
-  ): Promise<string> {
-    const token = randomBytes(TOKEN_BYTES).toString('hex');
-
-    await tx.managementToken.create({
-      data: {
-        organizationId: booking.organizationId,
-        bookingId: booking.id,
-        tokenHash: hashManagementToken(token),
-        expiresAt: new Date(now.getTime() + MANAGEMENT_TOKEN_TTL_DAYS * 86_400_000),
-      },
-    });
-
-    return token;
   }
 
   /**

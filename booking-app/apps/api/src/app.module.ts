@@ -10,6 +10,7 @@ import { ThrottlingModule } from './common/throttling/throttling.module.js';
 import { ConfigModule } from './config/config.module.js';
 import { DomainModule } from './domain/domain.module.js';
 import { HealthModule } from './health/health.module.js';
+import { ManageModule } from './manage/manage.module.js';
 import { IdempotencyModule } from './messaging/idempotency/idempotency.module.js';
 import { InboxModule } from './messaging/inbox/inbox.module.js';
 import { OutboxModule } from './messaging/outbox/outbox.module.js';
@@ -37,6 +38,7 @@ import { WebhooksModule } from './webhooks/webhooks.module.js';
     HealthModule,
     PublicModule,
     BookingModule,
+    ManageModule,
     WebhooksModule,
   ],
   providers: [
