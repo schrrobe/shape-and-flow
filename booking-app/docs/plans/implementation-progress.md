@@ -60,8 +60,23 @@ constraint → Stripe Checkout → webhook confirms.
 | 7.2  | Notification dispatch, dedupe, frozen payload, delivery-status webhooks       |
 | 7.3  | Reminders: time-keyed job ids, fresh manage token, nightly reconciliation     |
 | 7.4  | Worker process, exhaustive job router, 8 repeatables, api/worker Docker targets |
+| 9.1  | `booking-ui`: tokens with computed WCAG contrast tests, 11 components, generated icons |
+| 9.2  | de/en i18n with seven parity guards, typed API client, error-code mapping      |
+| 9.3  | Booking wizard, draft store, slot picker, reservation countdown                |
+| 9.4  | Confirmation polling, self-service manage and reschedule, WhatsApp contact     |
 
 ## Next
+
+**Stage 9 (public web) is complete.** A customer can browse, book, pay, land back on a
+confirmation that polls for the webhook, and then cancel or request a reschedule through
+the link in their email. Verified in a browser against the running API at every step, not
+only by tests.
+
+Stage 8 (office API) and the start of stage 10 (office web) were built in a **parallel
+session** and are committed as `ab6b9f3`, `9c0a03c` and `c811428`. Stage 9 was written
+against `apps/web`, `packages/ui` and `packages/config` only, and every stage-9 commit was
+staged by explicit path so the two streams never mixed.
+
 
 | Task    | What it is                                                    |
 | ------- | ------------------------------------------------------------- |
@@ -286,6 +301,18 @@ constructable`. The named import gives both the class and the type.
 
 ## Plan errors found while implementing
 
+- **Task 9.1's `tailwind-preset.ts` describes Tailwind 3.** Tailwind 4 has no JavaScript
+  preset — the theme *is* CSS custom properties — so the token mapping lives in
+  `theme.css` under `@theme inline`, checked in both directions by `tokens.spec.ts`.
+- **Task 9.2's client test asserts `ErrorCode.options`.** The export is
+  `errorCodeSchema.options`; `ErrorCode` is the inferred type.
+- **The contracts package exports the `/manage` request schemas but not their types.**
+  Importing a name a package does not export resolves to `any`, so the three shapes are
+  declared in the web client until the exports exist.
+- **The plan's Vite 6 is Vite 8, Pinia 3 is Pinia 4, vue-router 4 is 5.** Current versions
+  used throughout; the only behavioural consequence was Rollup 5 dropping the object form
+  of `manualChunks`.
+
 - **The `Notification` entity has no payload column, and the design needs one.**
   The plan's own management-link design requires the plaintext token to reach the
   email, and that plaintext exists exactly once. Added `payload Json?` so a send is
@@ -400,6 +427,21 @@ connecting/connected` on a second `connect()`. The hook does a `PING` instead,
 ## Bugs caught by verifying rather than assuming
 
 Each of these would have passed a casual "it works" check.
+
+- **`vue-tsc --noEmit | grep "error TS"` matches nothing.** Its default formatter does not
+  print that string, so the web app's typecheck was reported clean while eleven errors
+  stood — two wrong response fields among them. Every gate is now read from the exit code.
+- **`vue: true` had never been exercised in the shared ESLint factory.**
+  `strictTypeChecked` was overriding the Vue parser, so every `.vue` file failed to parse
+  with "'>' expected" — which looked like a syntax error in the components.
+- **The checkout page went blank on expiry.** Handling the countdown's `expired` event
+  cleared the draft the template was bound to, at the moment the page needed to explain
+  itself. It now renders from a local copy — and the redirect guard moved into the timer
+  callback, because the countdown reports expiry during *its* mount, before the parent has
+  a timer to cancel.
+- **"We keep 0,00 €."** The cancellation wording was keyed on `feeApplies` rather than on
+  the retained amount, so a business inside its fee window that keeps nothing produced a
+  sentence a customer has to read three times. Found by looking at the real page.
 
 - **A caught unique violation poisons a Prisma interactive transaction.** Prisma
   does not wrap statements in savepoints, so after a failed statement every later
