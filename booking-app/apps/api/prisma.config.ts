@@ -19,8 +19,11 @@ export default defineConfig({
   schema: resolve(packageDir, 'prisma/schema.prisma'),
   migrations: {
     path: resolve(packageDir, 'prisma/migrations'),
-    // Node 24 strips TypeScript types natively, so the seed needs no bundler.
-    seed: 'node prisma/seed.ts',
+    // tsx, not bare node: the seed imports the generated Prisma client through
+    // `../src/prisma/client.js`, and Node does not resolve a `.js` specifier to
+    // the `.ts` file that actually exists. tsx applies the same NodeNext
+    // resolution TypeScript does.
+    seed: 'tsx prisma/seed.ts',
   },
   datasource: {
     url: databaseUrl,

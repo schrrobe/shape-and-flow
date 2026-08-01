@@ -32,9 +32,16 @@ export default mergeConfig(
       // deliberately provoke lock contention and constraint violations, and a
       // single serialised database makes those outcomes unambiguous.
       fileParallelism: false,
+      // Forked child processes rather than worker threads: with fileParallelism
+      // off there is nothing to gain from threads, and a fork can be terminated
+      // if a run ever does get stuck — a worker thread cannot.
+      pool: 'forks',
       // Real database round trips, and some tests hold advisory locks.
       testTimeout: 30_000,
       hookTimeout: 30_000,
+      // Teardown only closes a pool; if it takes longer than this, something is
+      // wrong and failing fast beats a hung CI job.
+      teardownTimeout: 10_000,
       env: {
         NODE_ENV: 'test',
         DATABASE_URL: TEST_DATABASE_URL,

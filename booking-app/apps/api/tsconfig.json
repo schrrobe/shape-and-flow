@@ -9,6 +9,6 @@
   // Deliberately wide: this is the project ESLint's type-aware rules and
   // `tsc --noEmit` resolve against, so tests and tool configs must be visible
   // to it. Emit is configured separately in tsconfig.build.json.
-  "include": ["src/**/*.ts", "test/**/*.ts", "*.config.ts"],
+  "include": ["src/**/*.ts", "test/**/*.ts", "prisma/**/*.ts", "*.config.ts"],
   "exclude": ["dist", "node_modules"]
 }
