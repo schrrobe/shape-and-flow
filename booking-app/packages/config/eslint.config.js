@@ -124,6 +124,17 @@ export function createEslintConfig(options = {}) {
               'BinaryExpression[operator=/^[*/+-]$/] > MemberExpression[property.name=/Cents$/]',
             message: 'Do not do arithmetic on cents directly. Use the Money value object.',
           },
+          // Reservation expiry, the free-cancellation window and the
+          // minimum-notice rule are all comparisons against "now". Code that
+          // reads the wall clock directly can only be tested by sleeping.
+          {
+            selector: "NewExpression[callee.name='Date'][arguments.length=0]",
+            message: 'Inject Clock instead of reading the wall clock directly.',
+          },
+          {
+            selector: "CallExpression[callee.object.name='Date'][callee.property.name='now']",
+            message: 'Inject Clock instead of reading the wall clock directly.',
+          },
         ],
         'no-restricted-properties': [
           'error',
@@ -153,9 +164,23 @@ export function createEslintConfig(options = {}) {
     { files: PROCESS_ENV_ALLOWED, rules: { 'no-restricted-properties': 'off' } },
 
     {
-      // The Money value object is where cent arithmetic is defined, so it is the
-      // one place allowed to perform it.
-      files: ['**/domain/money/**'],
+      // Where these primitives are defined is the one place allowed to use what
+      // they exist to replace: cent arithmetic in the Money directory, and
+      // reading the wall clock in the time directory. Tests, fixtures, seeds and
+      // tool configs are also exempt — they legitimately construct concrete
+      // instants, and a fixture cannot inject a clock into itself.
+      //
+      // Note the cost of ESLint's model: no-restricted-syntax is one rule, so
+      // exempting a file exempts every selector in it. The cent ban therefore
+      // does not apply inside test files. Production code is where it matters.
+      files: [
+        '**/domain/money/**',
+        '**/domain/time/**',
+        '**/test/**',
+        '**/e2e/**',
+        '**/*.config.{ts,js,mjs}',
+        '**/prisma/seed.ts',
+      ],
       rules: { 'no-restricted-syntax': 'off' },
     },
 
