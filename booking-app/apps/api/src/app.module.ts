@@ -8,6 +8,7 @@ import { DomainModule } from './domain/domain.module.js';
 import { HealthModule } from './health/health.module.js';
 import { OrganizationModule } from './organization/organization.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
+import { ProvidersModule } from './providers/providers.module.js';
 
 /** The HTTP application. Queue processors live in WorkerModule instead. */
 @Module({
@@ -17,6 +18,7 @@ import { PrismaModule } from './prisma/prisma.module.js';
     PrismaModule,
     DomainModule,
     OrganizationModule,
+    ProvidersModule,
     HealthModule,
   ],
   providers: [

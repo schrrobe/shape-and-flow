@@ -22,4 +22,13 @@ export default [
     files: ['**/*.module.ts'],
     rules: { '@typescript-eslint/no-extraneous-class': 'off' },
   },
+
+  {
+    // The in-memory fakes implement async ports without doing any I/O, so they
+    // have nothing to await. They must stay `async` rather than returning
+    // Promise.resolve: a synchronous throw is observably different from a
+    // rejected promise, and every caller awaits them.
+    files: ['**/fake-*.provider.ts'],
+    rules: { '@typescript-eslint/require-await': 'off' },
+  },
 ];

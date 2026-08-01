@@ -7,8 +7,8 @@ while implementing that the plan could not have known.
 | | |
 | --- | --- |
 | Branch | `feat/phase-1-booking-app` (nothing pushed) |
-| Tasks complete | 13 of 49 |
-| Unit tests | 261 passing (246 api + 15 contracts) |
+| Tasks complete | 14 of 49 |
+| Unit tests | 295 passing (280 api + 15 contracts) |
 | Integration tests | 47 passing |
 | Gates | `pnpm lint`, `format`, `typecheck`, `test`, `test:integration`, `build` all green |
 
@@ -40,13 +40,13 @@ constraint → Stripe Checkout → webhook confirms.
 | 2.3 | Availability engine — pure slot generation, 48 tests |
 | 2.4 | Pricing, cancellation-fee policy, deterministic employee selection |
 | 3.1 | Contracts package, error envelope, correlation, redacted logging |
+| 3.2 | Provider ports (payment, email, SMS) with in-memory fakes |
 
 ## Next
 
 | Task | What it is |
 | --- | --- |
-| **3.2** | **Provider ports (payment, email, SMS) plus in-memory fakes. Next.** |
-| 3.3 | Stripe Checkout adapter |
+| **3.3** | **Stripe Checkout adapter. Next.** |
 | 4.1 | Queue and job-payload contracts |
 | 4.2 | Transactional outbox: recorder, dispatcher, reconciler |
 | 4.3 | Webhook inbox: recorder, reconciler |
@@ -116,6 +116,14 @@ decision, not a mechanical bump.
    `app.use()`, not a Nest middleware: Express middleware runs before anything a
    module registers, including pino's request logger, which would otherwise log a
    placeholder id.
+10. Provider ports take `Money`, not raw cents, so the cent-arithmetic ban applies
+    inside the adapters too. The fake was written with raw cents first and the ban
+    caught it.
+11. ProvidersModule throws at start-up when a port names an adapter that does not
+    exist yet, rather than falling back to a fake. A deployment that believes it
+    is talking to Stripe while silently talking to an in-memory stub is the worst
+    available outcome. Refusing `fake` in production stays in the env schema — one
+    place, not two.
 
 ## Plan errors found while implementing
 
