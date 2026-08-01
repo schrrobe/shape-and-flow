@@ -7,8 +7,8 @@ while implementing that the plan could not have known.
 | | |
 | --- | --- |
 | Branch | `feat/phase-1-booking-app` (nothing pushed) |
-| Tasks complete | 10 of 49 |
-| Unit tests | 134 passing |
+| Tasks complete | 11 of 49 |
+| Unit tests | 182 passing |
 | Integration tests | 47 passing |
 | Gates | `pnpm lint`, `format`, `typecheck`, `test`, `test:integration`, `build` all green |
 
@@ -37,13 +37,13 @@ constraint → Stripe Checkout → webhook confirms.
 | 1.4 | Organization context, tenant Prisma guard, idempotent seed |
 | 2.1 | `Money` value object, locale formatting, cent-arithmetic ban |
 | 2.2 | DST-safe wall-clock conversion, interval algebra, injectable `Clock` |
+| 2.3 | Availability engine — pure slot generation, 48 tests |
 
 ## Next
 
 | Task | What it is |
 | --- | --- |
-| **2.3** | **Availability engine — pure slot generation. In progress.** |
-| 2.4 | Pricing and deterministic employee selection |
+| **2.4** | **Pricing and deterministic employee selection. Next.** |
 | 3.1 | Contracts package, error envelope, correlation, redacted logging |
 | 3.2 | Provider ports (payment, email, SMS) plus in-memory fakes |
 | 3.3 | Stripe Checkout adapter |
