@@ -73,7 +73,10 @@ async function bootstrap(): Promise<void> {
   // it holds its queue's locks while being unable to finish anything. Exiting non-zero lets
   // the supervisor replace it.
   process.on('unhandledRejection', (reason) => {
-    logger.error(`unhandled rejection: ${reason instanceof Error ? reason.stack : String(reason)}`);
+    // `stack` is optional even on a real Error, so fall through to the message rather
+    // than logging the word "undefined" at the one moment the detail matters.
+    const detail = reason instanceof Error ? (reason.stack ?? reason.message) : String(reason);
+    logger.error(`unhandled rejection: ${detail}`);
     process.exit(1);
   });
 

@@ -1,6 +1,7 @@
+import { createHmac, timingSafeEqual } from 'node:crypto';
+
 import { Controller, Headers, HttpCode, Inject, Logger, Post, Req } from '@nestjs/common';
 import { SkipThrottle } from '@nestjs/throttler';
-import { createHmac, timingSafeEqual } from 'node:crypto';
 
 import { AppError } from '../common/errors/app-error.js';
 import { Public } from '../common/guards/public.decorator.js';

@@ -79,10 +79,8 @@ export class SchedulerService {
 
     return schedulers.map((scheduler) => ({
       name: scheduler.name,
-      ...(scheduler.every === undefined ? {} : { every: Number(scheduler.every) }),
-      ...(scheduler.pattern === undefined || scheduler.pattern === null
-        ? {}
-        : { pattern: scheduler.pattern }),
+      ...(scheduler.every === undefined ? {} : { every: scheduler.every }),
+      ...(scheduler.pattern === undefined ? {} : { pattern: scheduler.pattern }),
     }));
   }
 }

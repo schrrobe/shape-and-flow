@@ -4,18 +4,18 @@ import { FixedClock } from '../../src/domain/time/clock.js';
 import { hashManagementToken } from '../../src/manage/management-token.service.js';
 import { QUEUE } from '../../src/messaging/queues/job-contracts.js';
 import { NotificationModule } from '../../src/notification/notification.module.js';
+import { NotificationService } from '../../src/notification/notification.service.js';
 import { ReminderReconciler } from '../../src/notification/reminder.reconciler.js';
 import { ReminderService, reminderJobId } from '../../src/notification/reminder.service.js';
-import { NotificationService } from '../../src/notification/notification.service.js';
 import { createBookingTestApp } from '../booking-app.harness.js';
 import { prisma, resetDatabase } from '../database.harness.js';
 import { SLOT_FRIDAY_0900, makeBooking, seedOrganization } from '../factories/index.js';
 import { loadOrganization } from '../public-app.harness.js';
 import { disconnectRedis, queues, resetQueues } from '../redis.harness.js';
 
+import type { BookingStatus } from '../../src/prisma/client.js';
 import type { BookingTestApp } from '../booking-app.harness.js';
 import type { SeedContext } from '../factories/index.js';
-import type { BookingStatus } from '../../src/prisma/client.js';
 
 /**
  * Real "now", like the notification suite.

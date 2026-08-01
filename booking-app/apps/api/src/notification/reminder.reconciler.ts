@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { Inject } from '@nestjs/common';
 
 import { CLOCK } from '../domain/time/clock.js';
 import { EnqueueService } from '../messaging/queues/enqueue.service.js';
@@ -8,8 +9,6 @@ import { PrismaService } from '../prisma/prisma.service.js';
 
 import { dedupeKey } from './dedupe-key.js';
 import { ReminderService, reminderJobId } from './reminder.service.js';
-
-import { Inject } from '@nestjs/common';
 
 import type { Clock } from '../domain/time/clock.js';
 

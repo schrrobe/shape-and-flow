@@ -4,12 +4,12 @@ import { once } from 'node:events';
 import { NestFactory } from '@nestjs/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { AppModule } from '../../src/app.module.js';
 import { correlationId, hasCorrelation } from '../../src/common/correlation/correlation.store.js';
 import { EnqueueService } from '../../src/messaging/queues/enqueue.service.js';
 import { JOB, QUEUE, QUEUES } from '../../src/messaging/queues/job-contracts.js';
 import { SCHEDULE, SchedulerService } from '../../src/messaging/queues/scheduler.service.js';
 import { WorkerRegistrarService } from '../../src/messaging/queues/worker-registrar.service.js';
-import { AppModule } from '../../src/app.module.js';
 import { WorkerModule } from '../../src/worker.module.js';
 import { prisma, resetDatabase } from '../database.harness.js';
 import { seedOrganization } from '../factories/index.js';

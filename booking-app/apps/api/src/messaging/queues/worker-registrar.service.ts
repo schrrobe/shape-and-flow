@@ -1,15 +1,15 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Worker } from 'bullmq';
 
+import { ExpirySweeper } from '../../booking/expiry.sweeper.js';
+import { ExpiryProcessor } from '../../booking/processors/expiry.processor.js';
+import { StripeEventProcessor } from '../../booking/processors/stripe-event.processor.js';
 import {
   correlationId,
   newCorrelationId,
   runWithCorrelation,
 } from '../../common/correlation/correlation.store.js';
 import { ENV } from '../../config/env.schema.js';
-import { ExpirySweeper } from '../../booking/expiry.sweeper.js';
-import { ExpiryProcessor } from '../../booking/processors/expiry.processor.js';
-import { StripeEventProcessor } from '../../booking/processors/stripe-event.processor.js';
 import { NotificationReconciler } from '../../notification/notification.reconciler.js';
 import { BookingEventProcessor } from '../../notification/processors/booking-event.processor.js';
 import { MessagingEventProcessor } from '../../notification/processors/messaging-event.processor.js';
@@ -24,8 +24,8 @@ import { OutboxReconciler } from '../outbox/outbox.reconciler.js';
 import { JOB, QUEUES, isJobName, parseJobPayload, queueForJob } from './job-contracts.js';
 import { createRedisConnection } from './redis.provider.js';
 
-import type { AppConfig } from '../../config/env.schema.js';
 import type { JobName, JobPayload, QueueName } from './job-contracts.js';
+import type { AppConfig } from '../../config/env.schema.js';
 import type { Job } from 'bullmq';
 import type { Redis } from 'ioredis';
 

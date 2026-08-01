@@ -82,7 +82,8 @@ export class ReminderService {
       select: { id: true, organizationId: true, startsAt: true, status: true },
     });
 
-    if (booking === null || booking.status !== BookingStatus.CONFIRMED) {
+    // Covers "no such booking" too: an absent row has no status, so it is not confirmed.
+    if (booking?.status !== BookingStatus.CONFIRMED) {
       this.logger.debug(`no reminders for ${bookingId}: not a confirmed booking`);
       return { scheduled: 0, skipped: 0 };
     }
