@@ -7,9 +7,9 @@ while implementing that the plan could not have known.
 |                   |                                                                                   |
 | ----------------- | --------------------------------------------------------------------------------- |
 | Branch            | `feat/phase-1-booking-app` (nothing pushed)                                       |
-| Tasks complete    | 19 of 49                                                                          |
+| Tasks complete    | 20 of 49                                                                          |
 | Unit tests        | 379 passing (364 api + 15 contracts)                                              |
-| Integration tests | 140 passing                                                                       |
+| Integration tests | 175 passing                                                                       |
 | Gates             | `pnpm lint`, `format`, `typecheck`, `test`, `test:integration`, `build` all green |
 
 ## Execution order — vertical slice
@@ -200,6 +200,30 @@ constructable`. The named import gives both the class and the type.
 25. A replayed response carries an `Idempotent-Replay: true` header. Not in the
     plan; it costs one line and turns "did this re-run?" into something an operator
     can read off the response.
+
+26. The availability snapshot costs **eight** queries, not the plan's five, and the
+    test asserts _constancy_ rather than a ceiling. Prisma issues a round trip per
+    `findMany`; the plan reached five by counting "exceptions plus time off" and
+    "bookings plus blocked times" as one each, which would need SQL UNIONs over two
+    differently-shaped tables. Constancy across range and employee count is the
+    property an N+1 breaks — a fixed ceiling passes a per-day query as long as the
+    ceiling is generous enough.
+27. The booking-horizon check lives in the availability controller as well as in the
+    engine. The engine clamps its output, so without the check a request for next
+    year returns an empty list — indistinguishable from a fully booked week.
+28. `AuthGuard` denies by default and only `@Public()` opens a route. Office sessions
+    (6.2) and management tokens (6.4) add branches to it rather than second guards.
+    Its "closed by default" behaviour is tested over HTTP against a real unmarked
+    route, because Nest resolves the handler _before_ running guards — a path that
+    matches nothing is a 404 and no guard is consulted.
+29. Rate limiting counts in Redis on the connection BullMQ already holds, via
+    `@nest-lab/throttler-storage-redis`. The root config sets one generous default
+    and routes declare real limits with `@Throttle`; named throttlers were not used
+    because every throttler in the root array applies to every route.
+30. `test/public-app.harness.ts` builds a real Nest application over the test
+    database, substituting only the organization context (the real one resolves its
+    slug from the validated environment at bootstrap) and the clock. `ThrottlerGuard`
+    is deliberately absent from it, so `@Throttle` is inert in tests.
 
 ## Plan errors found while implementing
 
