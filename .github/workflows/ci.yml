@@ -21,7 +21,7 @@ permissions:
 # has to come back and edit this file.
 jobs:
   lint:
-    name: Lint, format and typecheck
+    name: Lint, format, typecheck and dead code
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -29,6 +29,9 @@ jobs:
       - run: pnpm lint
       - run: pnpm format
       - run: pnpm typecheck
+      # Unused exports, files and dependencies. `noUnusedLocals` only sees
+      # inside a file, so an export nobody imports is invisible to tsc.
+      - run: pnpm knip
 
   test:
     name: Unit tests
