@@ -31,4 +31,57 @@ export default [
     files: ['**/fake-*.provider.ts'],
     rules: { '@typescript-eslint/require-await': 'off' },
   },
+
+  {
+    // The availability engine, the pricing rules and the money and time
+    // primitives are the part of this app worth testing without a database, a
+    // queue or a Nest container. That only stays true if nothing pulls
+    // infrastructure back into it, and today nothing does: the domain reaches
+    // outside itself for the shared error type and for Prisma enum types, and
+    // for nothing else.
+    //
+    // Nest itself is deliberately not restricted. `@Injectable` on the Clock
+    // and the module that publishes these providers are how the domain is
+    // reachable at all, and a hand-rolled indirection to avoid one import of a
+    // decorator would cost more than the boundary it buys.
+    files: ['src/domain/**/*.ts'],
+    rules: {
+      'import-x/no-restricted-paths': [
+        'error',
+        {
+          basePath: import.meta.dirname,
+          zones: [
+            {
+              target: './src/domain',
+              from: './src',
+              except: ['./domain', './common/errors', './prisma'],
+              message:
+                'The domain is framework- and database-free. Depend on it from the feature module, not the other way round.',
+            },
+          ],
+        },
+      ],
+
+      // Complements the zone above. `src/prisma` is on its allowed list because
+      // the generated enums are the vocabulary the domain and the database
+      // share, but a type is a compile-time fact and the client is a runtime
+      // dependency. Only the first is allowed through.
+      //
+      // This app switches `consistent-type-imports` off for NestJS DI, so
+      // nothing else here would notice a value import creeping back in.
+      '@typescript-eslint/no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['**/prisma/client.js'],
+              allowTypeImports: true,
+              message:
+                'Import Prisma enums into the domain as types only. A value import puts the client in the domain at runtime.',
+            },
+          ],
+        },
+      ],
+    },
+  },
 ];
