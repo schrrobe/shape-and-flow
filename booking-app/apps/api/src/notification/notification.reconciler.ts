@@ -21,7 +21,7 @@ export const NOTIFICATION_STALLED_AFTER_MS = 15 * 60_000;
 const BATCH = 200;
 
 /** Redact rather than delete at this age, keeping the delivery statistics. */
-export const NOTIFICATION_REDACT_AFTER_DAYS = 90;
+const NOTIFICATION_REDACT_AFTER_DAYS = 90;
 
 export interface NotificationHealth {
   pending: number;

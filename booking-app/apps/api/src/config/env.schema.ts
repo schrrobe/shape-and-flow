@@ -186,11 +186,6 @@ export function loadConfig(): AppConfig {
   return cached;
 }
 
-/** Test seam: forget the memoised parse so a fresh environment can be read. */
-export function resetConfigCache(): void {
-  cached = undefined;
-}
-
 /**
  * Refuse to start when the process role does not match the entrypoint.
  *

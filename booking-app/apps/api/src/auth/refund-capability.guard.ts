@@ -10,7 +10,7 @@ import type { CanActivate, ExecutionContext } from '@nestjs/common';
 import type { Request } from 'express';
 
 /** Metadata key the refund guard reads. */
-export const REQUIRES_REFUND_CAPABILITY = 'auth:refund-capability';
+const REQUIRES_REFUND_CAPABILITY = 'auth:refund-capability';
 
 /**
  * This route moves money back to a customer.

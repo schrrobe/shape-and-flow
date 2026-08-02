@@ -6,6 +6,14 @@ import type { Request } from 'express';
 /**
  * A webhook body is capped well below any plausible event, and far below what an
  * unauthenticated endpoint should be willing to buffer in memory.
+ *
+ * Nothing reads this yet. The cap the sentence above describes is not in force:
+ * no body-parser limit is configured, so the webhook endpoints currently accept
+ * whatever Express's default allows. Kept, and kept exported, so the intent
+ * survives until it is wired into the parser rather than being quietly dropped
+ * by a dead-code sweep.
+ *
+ * @knipignore
  */
 export const WEBHOOK_BODY_LIMIT = '1mb';
 

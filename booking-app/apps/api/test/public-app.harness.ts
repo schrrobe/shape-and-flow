@@ -100,7 +100,7 @@ function organizationStub(): Partial<OrganizationContextService> {
 // A Nest module is a declaration carrier with an empty body by design. The shared
 // ESLint config exempts `*.module.ts`; this one is a harness, not a module file.
 // eslint-disable-next-line @typescript-eslint/no-extraneous-class
-export class PublicTestHarnessModule {}
+class PublicTestHarnessModule {}
 
 export interface TestApp {
   app: INestApplication;

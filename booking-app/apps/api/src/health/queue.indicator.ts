@@ -12,7 +12,7 @@ import type { Redis } from 'ioredis';
  * The same two seconds the database check allows. A readiness probe that waits
  * longer than the interval it is polled at stops being a probe and becomes a queue.
  */
-export const REDIS_PING_TIMEOUT_MS = 2_000;
+const REDIS_PING_TIMEOUT_MS = 2_000;
 
 /**
  * Redis, through the connection the queues actually use.

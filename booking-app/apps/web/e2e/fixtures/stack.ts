@@ -20,8 +20,8 @@ import type { APIRequestContext, Page } from '@playwright/test';
 const FAKE_CHECKOUT_HOST = 'https://checkout.fake.local';
 
 /** Matches the seed and what playwright.config.ts hands the reset. */
-export const OWNER = { email: 'owner@shape-and-flow.example', password: 'e2e-owner-password' };
-export const STAFF = { email: 'mara@shape-and-flow.example', password: 'e2e-staff-password' };
+const OWNER = { email: 'owner@shape-and-flow.example', password: 'e2e-owner-password' };
+const STAFF = { email: 'mara@shape-and-flow.example', password: 'e2e-staff-password' };
 
 export interface OutboxMessage {
   id: string;
@@ -109,7 +109,7 @@ export async function deliverWebhook(
 }
 
 /** Every message the system decided to send, rendered from its frozen payload. */
-export async function outbox(request: APIRequestContext): Promise<OutboxMessage[]> {
+async function outbox(request: APIRequestContext): Promise<OutboxMessage[]> {
   const response = await request.get('/api/test-support/outbox');
   expect(response.ok()).toBe(true);
   return (await response.json()) as OutboxMessage[];
@@ -140,10 +140,6 @@ export async function emailTo(
   }
 
   return message;
-}
-
-export async function smsMessages(request: APIRequestContext): Promise<OutboxMessage[]> {
-  return (await outbox(request)).filter((message) => message.channel === 'SMS');
 }
 
 // ── the reservation clock ───────────────────────────────────────────────────
@@ -228,7 +224,7 @@ export async function stubCheckout(page: Page): Promise<{ redirects: string[] }>
 }
 
 /** The session id the fake put in its Checkout URL. */
-export function sessionIdFrom(checkoutUrl: string): string {
+function sessionIdFrom(checkoutUrl: string): string {
   const id = checkoutUrl.split('/').at(-1);
   if (id?.startsWith('cs_') !== true) {
     throw new Error(`No checkout session id in ${checkoutUrl}.`);
@@ -341,7 +337,7 @@ export async function chooseFirstSlot(
 }
 
 /** The details form and the submit, landing on the checkout hand-off page. */
-export async function fillDetailsAndSubmit(
+async function fillDetailsAndSubmit(
   page: Page,
   customer: { firstName: string; lastName: string; email: string; phone?: string },
 ): Promise<void> {

@@ -14,7 +14,7 @@ import { assertTransition, isTerminal } from './booking-status.machine.js';
 import type { Clock } from '../domain/time/clock.js';
 
 /** Where a confirmation came from, for the history row and the logs. */
-export interface ConfirmationCause {
+interface ConfirmationCause {
   kind: 'WEBHOOK' | 'EXPIRY_SAGA';
   /** The Stripe event id, or the job that drove it. */
   reference: string;

@@ -159,7 +159,7 @@ const testConfig = {
 })
 // A Nest module is a declaration carrier with an empty body by design.
 // eslint-disable-next-line @typescript-eslint/no-extraneous-class
-export class BookingTestHarnessModule {}
+class BookingTestHarnessModule {}
 
 /** Set per app, by `createBookingTestApp({ queues })`. */
 let currentQueues: QueueRegistry | undefined;

@@ -53,14 +53,3 @@ export function isRetryableStripeError(error: unknown): boolean {
 
   return false;
 }
-
-/** A short, loggable description that never includes the request payload. */
-export function describeStripeError(error: unknown): string {
-  if (error instanceof Stripe.errors.StripeError) {
-    const parts = [error.type, error.code, error.message].filter(
-      (part): part is string => typeof part === 'string' && part !== '',
-    );
-    return parts.join(' | ');
-  }
-  return error instanceof Error ? error.message : String(error);
-}

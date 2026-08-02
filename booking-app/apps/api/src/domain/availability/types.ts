@@ -12,7 +12,7 @@ import type { LocalDate, MinuteOfDay } from '../time/local-time.js';
  * caller's job and is where query count is controlled.
  */
 
-export interface AvailabilitySettings {
+interface AvailabilitySettings {
   /** Grid step, anchored at the start of each working-hours segment. */
   schedulingIntervalMinutes: number;
   /** How far ahead of `now` the earliest bookable slot may be. */
@@ -21,7 +21,7 @@ export interface AvailabilitySettings {
   bookingHorizonDays: number;
 }
 
-export interface AvailabilityServiceSnapshot {
+interface AvailabilityServiceSnapshot {
   id: string;
   durationMinutes: number;
   /** Employee time before the appointment. Invisible to the customer. */
@@ -30,7 +30,7 @@ export interface AvailabilityServiceSnapshot {
   cleanupBufferMinutes: number;
 }
 
-export interface BreakSnapshot {
+interface BreakSnapshot {
   startMinute: MinuteOfDay;
   endMinute: MinuteOfDay;
 }

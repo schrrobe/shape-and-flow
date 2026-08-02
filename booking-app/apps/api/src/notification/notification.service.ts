@@ -24,8 +24,6 @@ import type { EmailProvider } from '../providers/email/email-provider.js';
 import type { SmsProvider } from '../providers/sms/sms-provider.js';
 import type { TemplateData } from '@shape-and-flow/booking-notification-templates';
 
-export { dedupeKey };
-
 export interface QueueInput<K extends NotificationKind = NotificationKind> {
   organizationId: string;
   kind: K;

@@ -22,7 +22,7 @@ export const INBOX_STALLED_AFTER_MS = 5 * 60_000;
 export const INBOX_MAX_ATTEMPTS = 10;
 
 /** Re-enqueued per run. Bounded so a backlog cannot flood the queue in one tick. */
-export const INBOX_BATCH_SIZE = 100;
+const INBOX_BATCH_SIZE = 100;
 
 /**
  * Retention.
@@ -37,7 +37,7 @@ export const INBOX_MESSAGING_RETENTION_DAYS = 30;
 /** How many ids a log line names before it becomes noise. */
 const SAMPLE_LIMIT = 20;
 
-export interface InboxKindHealth {
+interface InboxKindHealth {
   /** Unprocessed and still being retried. */
   pending: number;
   /** Unprocessed for longer than {@link INBOX_STALLED_AFTER_MS}. */

@@ -33,4 +33,4 @@ export function asOfficeSnapshot(snapshot: AvailabilitySnapshot): AvailabilitySn
 }
 
 /** Ten years. Not "unbounded": the engine iterates days, and a range still has to end. */
-export const OFFICE_HORIZON_DAYS = 3650;
+const OFFICE_HORIZON_DAYS = 3650;

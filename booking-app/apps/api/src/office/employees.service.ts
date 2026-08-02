@@ -520,7 +520,7 @@ function notFound(message: string): AppError {
 }
 
 /** Exported for the controllers, which map the same row shape. */
-export function toDto(employee: {
+function toDto(employee: {
   id: string;
   firstName: string;
   lastName: string;

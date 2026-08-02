@@ -11,7 +11,7 @@ import type { ManualPayment, Prisma, Refund } from '../prisma/client.js';
  *
  * `bookingId` is not decoration: it is the key the batched read groups on.
  */
-export const FINANCIAL_PAYMENT = {
+const FINANCIAL_PAYMENT = {
   id: true,
   bookingId: true,
   amountCents: true,
@@ -23,9 +23,9 @@ export const FINANCIAL_PAYMENT = {
   createdAt: true,
 } as const satisfies Prisma.PaymentSelect;
 
-export type FinancialPayment = Prisma.PaymentGetPayload<{ select: typeof FINANCIAL_PAYMENT }>;
-export type FinancialManualPayment = ManualPayment;
-export type FinancialRefund = Refund;
+type FinancialPayment = Prisma.PaymentGetPayload<{ select: typeof FINANCIAL_PAYMENT }>;
+type FinancialManualPayment = ManualPayment;
+type FinancialRefund = Refund;
 
 export interface BookingFinancials {
   rootBookingId: string;

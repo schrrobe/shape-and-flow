@@ -13,7 +13,7 @@ import { AppError } from '../../common/errors/app-error.js';
  * cannot be mutated after it has been read.
  */
 
-export const DEFAULT_CURRENCY = 'EUR';
+const DEFAULT_CURRENCY = 'EUR';
 
 function assertValidAmount(amountCents: number): void {
   if (!Number.isFinite(amountCents)) {

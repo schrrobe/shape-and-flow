@@ -26,12 +26,3 @@ export interface SmsSendResult {
 export interface SmsProvider {
   send(message: SmsMessage): Promise<SmsSendResult>;
 }
-
-/**
- * Whether a provider failure is worth retrying.
- *
- * The distinction matters: retrying an invalid phone number wastes attempts and
- * delays the notification's final FAILED state, while giving up on a 503 loses a
- * reminder that would have gone through a minute later.
- */
-export type DeliveryFailureClass = 'RETRYABLE' | 'PERMANENT';

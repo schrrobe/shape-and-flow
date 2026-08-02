@@ -14,7 +14,7 @@ import type { Redis } from 'ioredis';
  * ones that must not be limited at all — webhooks, whose gate is signature
  * verification — use `@SkipThrottle`.
  */
-export const DEFAULT_THROTTLE = { ttl: 60_000, limit: 300 };
+const DEFAULT_THROTTLE = { ttl: 60_000, limit: 300 };
 
 /**
  * Rate limiting, counted in Redis rather than in memory.

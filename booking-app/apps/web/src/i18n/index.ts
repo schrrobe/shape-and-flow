@@ -19,8 +19,6 @@ export const LOCALE_STORAGE_KEY = 'sf.locale';
  */
 export const DISPLAY_ZONE = 'Europe/Berlin';
 
-const TAGS: Record<Locale, string> = { de: 'de-DE', en: 'en-GB' };
-
 export function isLocale(value: unknown): value is Locale {
   return typeof value === 'string' && (LOCALES as readonly string[]).includes(value);
 }
@@ -114,8 +112,4 @@ export function applyLocale(locale: Locale): void {
   } catch {
     // Private mode, or storage disabled. Losing the preference is not worth failing over.
   }
-}
-
-export function localeTag(locale: Locale): string {
-  return TAGS[locale];
 }

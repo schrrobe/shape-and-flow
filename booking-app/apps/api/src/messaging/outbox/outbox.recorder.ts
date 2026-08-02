@@ -39,7 +39,7 @@ function isTransactionClient(client: object): boolean {
  * it does — either way the guarantee is gone, and nothing about the code looks
  * wrong. So it is a runtime error rather than a convention.
  */
-export function assertTransactionClient(client: object, caller: string): void {
+function assertTransactionClient(client: object, caller: string): void {
   if (isTransactionClient(client)) return;
 
   throw new AppError('OUTBOX_NOT_TRANSACTIONAL', {

@@ -5,7 +5,7 @@ import { AppError } from '../common/errors/app-error.js';
 import type { OfficeSession } from './session.store.js';
 
 /** Every employee, for a role that is not scoped to one. */
-export const ALL_EMPLOYEES = 'ALL';
+const ALL_EMPLOYEES = 'ALL';
 
 export type VisibleEmployees = string[] | typeof ALL_EMPLOYEES;
 

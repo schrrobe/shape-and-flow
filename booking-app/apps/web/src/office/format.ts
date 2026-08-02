@@ -43,13 +43,6 @@ const DATE_TIME = new Intl.DateTimeFormat('de-DE', {
   hourCycle: 'h23',
 });
 
-const WEEKDAY = new Intl.DateTimeFormat('en-GB', {
-  timeZone: DISPLAY_ZONE,
-  weekday: 'short',
-  day: '2-digit',
-  month: '2-digit',
-});
-
 /**
  * The one place the office divides by 100.
  *
@@ -82,10 +75,6 @@ export function date(instant: string | Date): string {
 
 export function dateTime(instant: string | Date): string {
   return DATE_TIME.format(new Date(instant));
-}
-
-export function weekday(instant: string | Date): string {
-  return WEEKDAY.format(new Date(instant));
 }
 
 /** A `YYYY-MM-DD` rendered as a German date, without pretending it is an instant. */

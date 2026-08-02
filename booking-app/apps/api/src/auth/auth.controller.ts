@@ -48,7 +48,7 @@ const RESET_LIMIT = { default: { limit: 5, ttl: 3_600_000 } };
 export const MAX_FAILED_ATTEMPTS = 10;
 
 /** How long that lockout lasts. Long enough to be expensive, short enough to wait out. */
-export const LOCKOUT_MINUTES = 15;
+const LOCKOUT_MINUTES = 15;
 
 /** What login needs to decide, and what the response is built from. */
 const USER_FOR_LOGIN = {

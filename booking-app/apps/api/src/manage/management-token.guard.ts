@@ -15,7 +15,7 @@ export const ManagementToken = (): MethodDecorator & ClassDecorator =>
   SetMetadata(MANAGEMENT_TOKEN_ROUTE, true);
 
 /** Where the guard leaves what it resolved. */
-export const MANAGED_BOOKING = 'managedBooking';
+const MANAGED_BOOKING = 'managedBooking';
 
 interface WithManagedBooking {
   [MANAGED_BOOKING]?: ResolvedToken;

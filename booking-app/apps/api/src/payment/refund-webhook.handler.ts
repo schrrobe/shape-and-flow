@@ -10,7 +10,7 @@ import type { RefundStatusValue } from '../providers/payment/payment-provider.js
  * `charge.refunded` is the one that can arrive *before* the API response that created the
  * refund, which is why settlement has to be able to match on our own idempotency key.
  */
-export const REFUND_EVENT_TYPES = {
+const REFUND_EVENT_TYPES = {
   CHARGE_REFUNDED: 'charge.refunded',
   REFUND_UPDATED: 'refund.updated',
   REFUND_FAILED: 'refund.failed',

@@ -1,7 +1,7 @@
 import { nextTick, onMounted, useTemplateRef } from 'vue';
 
 /** The `ref` attribute every step puts on its heading. A convention, so the composable can bind it. */
-export const STEP_HEADING_REF = 'heading';
+const STEP_HEADING_REF = 'heading';
 
 /**
  * Move focus to a step's heading when it opens, and name the page.

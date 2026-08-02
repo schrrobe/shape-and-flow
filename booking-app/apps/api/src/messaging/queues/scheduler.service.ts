@@ -6,7 +6,7 @@ import { JOB, QUEUE } from './job-contracts.js';
 import type { JobName } from './job-contracts.js';
 
 /** The business timezone, so a nightly job runs at 03:00 local across DST changes. */
-export const SCHEDULE_ZONE = 'Europe/Berlin';
+const SCHEDULE_ZONE = 'Europe/Berlin';
 
 interface Cadence {
   job: JobName;
