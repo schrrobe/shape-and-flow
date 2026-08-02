@@ -7,10 +7,10 @@ while implementing that the plan could not have known.
 |                   |                                                                                   |
 | ----------------- | --------------------------------------------------------------------------------- |
 | Branch            | `feat/phase-1-booking-app` (nothing pushed)                                       |
-| Tasks complete    | 48 of 49 — only Task 3.4 remains                                                  |
-| Unit tests        | 849 passing (489 api + 215 web + 37 contracts + 41 ui + 67 templates)             |
-| Integration tests | 695 passing                                                                       |
-| End-to-end tests  | 36 passing (18 scenarios × desktop and 360-pixel mobile)                           |
+| Tasks complete    | 48 of 49 — only Task 3.4 remains; the 11-task review remediation is done          |
+| Unit tests        | 854 passing (489 api + 220 web + 37 contracts + 41 ui + 67 templates)             |
+| Integration tests | 739 passing                                                                       |
+| End-to-end tests  | 40 passing (20 scenarios × desktop and 360-pixel mobile)                           |
 | Gates             | `pnpm lint`, `format`, `typecheck`, `test`, `test:integration`, `test:e2e`, `build` all green |
 
 ## Execution order — vertical slice
@@ -76,6 +76,52 @@ constraint → Stripe Checkout → webhook confirms.
 | 10.3 | Office management screens, request queues and exports                          |
 | 11.3 | Production compose, web image, edge nginx, verified backup and restore, runbooks |
 | 11.1 | Playwright suite: customer, expiry, self-service, office and axe journeys      |
+
+## The review remediation
+
+All sixteen findings from the booking review are closed, as eleven commits from
+`4ca3b45` to `be75ee0`. The plan is
+`docs/superpowers/plans/2026-08-02-booking-review-remediation.md`; the design spec it
+was written from is `docs/superpowers/specs/2026-08-02-booking-review-remediation-design.md`.
+
+Each finding has a test that fails without its fix:
+
+| Finding | Fix | Proof |
+| --- | --- | --- |
+| Employee price override ignored | `4ca3b45` | `reservation.int` override, `public-bookings.int` quote/snapshot/charge |
+| Explicit employee not validated | `4ca3b45` | `reservation.int` unassigned, hidden, archived |
+| Checkout failure strands the reservation | `d410a3c` | `public-bookings.int` resume, attachment gap, lost response |
+| Request alerts point at no notification row | `2bfe51e` | `cancellation.int` and `reschedule.int` send-event resolution |
+| Rejected requests tell the customer nothing | `2bfe51e` | both `*_REQUEST_DECIDED` rejection tests |
+| Reschedule loses payment access | `f9d4978`, `7fdd7e0` | `booking-financials.int`, office detail, `/manage`, export |
+| Cancellation over-refunds a partly refunded charge | `8367c3e` | `cancellation.int` cumulative-target tests |
+| Pending refunds excluded from the balance | `8367c3e` | `refund.int` pending-balance and concurrency |
+| Refund permission read full retention as a refund | `8367c3e` | `office-bookings.int` omitted-body authorization |
+| Failed-login increments race | `6947ffd` | `auth.int` parallel failures |
+| Worker settings stay stale | `41ca979` | `worker-bootstrap.int` refresh before scope |
+| "Any employee" not persisted | `c4ef12a` | `booking-draft.spec` reload |
+| Expired Checkout reuses a spent key | `c4ef12a` | `booking-draft.spec`, `RedirectToCheckout.spec` |
+| Success page loses the confirmation email | `c4ef12a` | `BookingSuccess.spec` |
+| Transactional routes duplicate audit rows | `f83cf30` | `office-bookings.int` exact-one counts |
+| Audit rows use the wrong entity id | `f83cf30` | manual-booking and refund id assertions |
+
+Four things are worth carrying forward.
+
+- **`Booking.financialRootBookingId` is the answer to "which booking was paid".** Every
+  financial read goes through `BookingFinancialsService`; nothing reads
+  `booking.payments` any more. Customer lifetime value is summed **per root**, not per
+  booking — every link in a chain reports the same payment, and summing per booking
+  triples one appointment's money for a customer who moved twice.
+- **A refund is reserved against `amount - refunded - pending`.** `reserveInTransaction`
+  is the only place a refund row is created, and it takes either an `ADDITIONAL`
+  instruction or a `CUMULATIVE_TARGET` outcome. Cancellation means the second; an office
+  user typing an amount means the first.
+- **The refund capability is checked inside the decision transaction**, against the
+  amount the reservation actually moves. Outside it, an omitted retained amount — which
+  means "accept the frozen suggestion" — was read as zero and the most ordinary approval
+  was refused.
+- **A bound idempotency key survives `abandon`.** It is the only handle on a reservation
+  a failed attempt already committed, and `ReservationService.resume()` reads it back.
 
 ## Next
 
@@ -202,6 +248,23 @@ constructable`. The named import gives both the class and the type.
   checking exactly where a wrong field name costs the most.
 
 ## Deliberate deviations from the plan
+
+From the remediation plan, four:
+
+- `ReservationService.resume()` loads the whole booking row with the employee included,
+  rather than a hand-listed `RESUMABLE_BOOKING` projection. `ReserveResult.booking` is a
+  generated `Booking`, and a list of scalars is a thing to revisit every time the model
+  gains a column.
+- The office copy of a request notification goes to `settings.officeNotificationEmail`,
+  which is where every other office message goes. The plan's per-user `officeRecipients`
+  does not exist.
+- `RefundService.reserveInTransaction` takes a `lenient` flag. Cancelling an unpaid
+  booking is ordinary and must not raise; a refund route asked to refund one is a mistake
+  worth reporting, and the two callers needed different answers to the same situation.
+- The two remediation e2e journeys drive the reschedule through the manage and office
+  APIs rather than their screens. Each screen has its own spec; what the journey is about
+  is what happens to the money afterwards, and six clicks to get there are six ways to
+  fail about something else.
 
 1. Integration tests share one database with `fileParallelism: false`, rather than
    per-worker template clones. These tests provoke lock contention; one
@@ -498,6 +561,27 @@ constructable`. The named import gives both the class and the type.
     appear, which is a race that passes on a quiet machine. A 204 leaves the document alone.
 
 ## Plan errors found while implementing
+
+Five in the remediation plan, all corrected in the implementation rather than followed:
+
+- **`IdempotencyKey` has no Prisma relation to `Booking`.** Both `Booking.idempotencyKeyId`
+  and `IdempotencyKey.bookingId` are plain columns, so the plan's `resume()` — which
+  filters and selects through a nested `booking` relation — does not compile. It is two
+  queries: find the claim, then load the booking under the same tenant, status and expiry
+  conditions `reserve()` would have established.
+- **`Booking.idempotencyKeyId` is unique.** Rebinding a key to a second reservation after
+  the first lapsed collides with the row that still holds it, so the claim clears any
+  other booking holding the key before it binds.
+- **The plan's rejection test counted every customer row.** `seedOrganization` already
+  creates one, so `prisma.customer.count()` is never zero; the tests use a first-timer
+  address instead, which is what makes the rollback observable.
+- **Template fields are `suggestedRetainedCents`, not `suggestedRetainedAmountCents`**,
+  and there is no `OFFICE_RESCHEDULE_REQUEST` kind — the office copy exists only for
+  cancellations. Adding a kind means an enum value, a migration and two translations,
+  which is a change of scope rather than a fix, and the office already sees reschedule
+  requests in its queue.
+- **`AppError('FORBIDDEN')` is not a declared code.** The capability refusal uses
+  `FORBIDDEN_ROLE`, so a client cannot tell it from a guard-level refusal.
 
 - **Task 11.1's office journey could not be written as specified: there was no
   manual-booking screen.** ~~The plan's office journey opens with `new-booking` on the
