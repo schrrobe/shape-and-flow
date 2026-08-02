@@ -1,7 +1,8 @@
 import { DateTime } from 'luxon';
 
 import { AppError } from '../../common/errors/app-error.js';
-import { Weekday } from '../../prisma/client.js';
+
+import type { Weekday } from '../../prisma/client.js';
 
 /**
  * Conversion between local wall-clock time and instants.
@@ -29,14 +30,18 @@ const LOCAL_DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
 /** One hour, the size of every DST transition in Europe/Berlin. */
 const TRANSITION_MS = 3_600_000;
 
+// Written as literals rather than through the generated `Weekday` object so
+// this module needs the Prisma enum as a type only. The type still checks each
+// entry, so a renamed enum member is a compile error here rather than a value
+// the database rejects at runtime.
 const WEEKDAY_BY_ISO: Record<number, Weekday> = {
-  1: Weekday.MONDAY,
-  2: Weekday.TUESDAY,
-  3: Weekday.WEDNESDAY,
-  4: Weekday.THURSDAY,
-  5: Weekday.FRIDAY,
-  6: Weekday.SATURDAY,
-  7: Weekday.SUNDAY,
+  1: 'MONDAY',
+  2: 'TUESDAY',
+  3: 'WEDNESDAY',
+  4: 'THURSDAY',
+  5: 'FRIDAY',
+  6: 'SATURDAY',
+  7: 'SUNDAY',
 };
 
 function invalid(message: string, details?: unknown): never {
