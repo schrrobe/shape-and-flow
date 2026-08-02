@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
 
+import { PaymentModule } from '../payment/payment.module.js';
+
 import { BookingNotificationData } from './booking-notification-data.service.js';
 import { NotificationReconciler } from './notification.reconciler.js';
 import { NotificationService } from './notification.service.js';
@@ -19,6 +21,10 @@ import { RequestNotificationService } from './request-notification.service.js';
  * whose failure must never roll back the thing it was announcing.
  */
 @Module({
+  // For `BookingFinancialsService`: a message about a rescheduled booking has to name
+  // the money on the row that was paid. One direction only — nothing in PaymentModule
+  // composes a notification.
+  imports: [PaymentModule],
   providers: [
     NotificationService,
     NotificationReconciler,

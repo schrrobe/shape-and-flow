@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 
 import { withSerializationRetry } from '../../common/prisma-errors/serialization-retry.js';
 import { Money } from '../../domain/money/money.js';
+import { receivedFrom, refundedFrom } from '../../office/received.js';
 import { OrganizationContextService } from '../../organization/organization-context.service.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import { BookingNotificationData } from '../booking-notification-data.service.js';
@@ -137,7 +138,7 @@ export class BookingEventProcessor {
     if (booking === null) return;
 
     const byBusiness = booking.status === 'CANCELED_BY_BUSINESS';
-    const refunded = await this.refundedTotal(booking.id, booking.currency);
+    const refunded = refundedFrom(booking.financials, booking.currency);
 
     await withSerializationRetry(
       () =>
@@ -291,22 +292,13 @@ export class BookingEventProcessor {
     await this.reminders.cancelFor(booking.id);
   }
 
-  /** What actually arrived. Through Money, because the cent ban is right about this. */
+  /**
+   * What actually arrived, from the booking's financial root.
+   *
+   * Cash counts too: a customer who paid at the desk and then cancelled is owed that
+   * money back, and a message that ignored it would name the wrong retained amount.
+   */
   private paidTotal(booking: BookingRow): Money {
-    return Money.sum(
-      booking.payments
-        .filter((payment) => payment.status !== 'PENDING' && payment.status !== 'FAILED')
-        .map((payment) => Money.fromCents(payment.amountCents, booking.currency)),
-      booking.currency,
-    );
-  }
-
-  private async refundedTotal(bookingId: string, currency: string): Promise<Money> {
-    const sum = await this.prisma.refund.aggregate({
-      where: { bookingId, status: 'SUCCEEDED' },
-      _sum: { amountCents: true },
-    });
-
-    return Money.fromCents(sum._sum.amountCents ?? 0, currency);
+    return receivedFrom(booking.financials, booking.currency);
   }
 }

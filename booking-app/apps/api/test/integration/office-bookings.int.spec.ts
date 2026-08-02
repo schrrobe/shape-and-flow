@@ -769,6 +769,100 @@ describe('GET /api/office/audit-log', () => {
 
 /* ── CSV export ───────────────────────────────────────────────────────────────── */
 
+describe('a booking that has been rescheduled twice', () => {
+  /** A replacement in a chain: rescheduled from one booking, financially rooted at another. */
+  async function replacementOf(
+    previousId: string,
+    rootId: string,
+    startsAt: Date,
+    status: BookingStatus,
+  ): Promise<{ id: string }> {
+    return await prisma.booking.create({
+      data: {
+        ...makeBooking(ctx, { status, startsAt, expiresAt: null }),
+        ...(status === 'CONFIRMED' ? { confirmedAt: NOW } : {}),
+        rescheduledFromBookingId: previousId,
+        financialRootBookingId: rootId,
+      },
+      select: { id: true },
+    });
+  }
+
+  it('shows the office the payment that is still on the original booking', async () => {
+    const owner = await signedInAs('OWNER');
+
+    const original = await bookingAt(berlin(NEXT_MONDAY, '10:00'), {
+      status: 'CANCELED_BY_BUSINESS',
+    });
+    await paidWithCard(original.id, ctx.service30.priceCents);
+
+    const first = await replacementOf(
+      original.id,
+      original.id,
+      berlin(NEXT_MONDAY, '12:00'),
+      'CANCELED_BY_BUSINESS',
+    );
+    const second = await replacementOf(
+      first.id,
+      original.id,
+      berlin(NEXT_MONDAY, '14:00'),
+      'CONFIRMED',
+    );
+
+    const detail = officeBookingDetailSchema.parse(
+      (await owner.get(`/api/office/bookings/${second.id}`).expect(200)).body,
+    );
+
+    expect(detail.payments).toHaveLength(1);
+    expect(detail.payments[0]?.status).toBe('SUCCEEDED');
+    expect(detail.paid.amountCents).toBe(ctx.service30.priceCents);
+  });
+
+  it('counts a manual payment recorded on an earlier link exactly once', async () => {
+    const owner = await signedInAs('OWNER');
+
+    const original = await bookingAt(berlin(NEXT_MONDAY, '10:00'), {
+      status: 'CANCELED_BY_BUSINESS',
+    });
+    const first = await replacementOf(
+      original.id,
+      original.id,
+      berlin(NEXT_MONDAY, '12:00'),
+      'CANCELED_BY_BUSINESS',
+    );
+
+    await owner
+      .post(`/api/office/bookings/${first.id}/manual-payments`)
+      .set('Idempotency-Key', randomUUID())
+      .send({ amountCents: 4500, method: 'CASH' })
+      .expect(201);
+
+    const second = await replacementOf(
+      first.id,
+      original.id,
+      berlin(NEXT_MONDAY, '14:00'),
+      'CONFIRMED',
+    );
+
+    const detail = officeBookingDetailSchema.parse(
+      (await owner.get(`/api/office/bookings/${second.id}`).expect(200)).body,
+    );
+
+    expect(detail.manualPayments).toHaveLength(1);
+    expect(detail.paid.amountCents).toBe(4500);
+
+    const csv = await owner
+      .get('/api/office/exports/bookings.csv')
+      .query({ from: '2026-08-01', to: '2026-08-31' })
+      .expect(200);
+
+    const latestLine = csv.text
+      .split('\r\n')
+      .find((line) => line.includes(';CONFIRMED;') && line.includes('45,00'));
+    expect(latestLine).toBeDefined();
+  });
+});
+
 describe('CSV export', () => {
   it('streams semicolon-delimited utf-8 with a BOM', async () => {
     const owner = await signedInAs('OWNER');

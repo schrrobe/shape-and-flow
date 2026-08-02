@@ -2,9 +2,11 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 
 import { ENV } from '../config/env.schema.js';
 import { OrganizationContextService } from '../organization/organization-context.service.js';
+import { BookingFinancialsService } from '../payment/booking-financials.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
 import type { AppConfig } from '../config/env.schema.js';
+import type { BookingFinancials } from '../payment/booking-financials.service.js';
 import type { Prisma } from '../prisma/client.js';
 import type { AppointmentData, CommonData } from '@shape-and-flow/booking-notification-templates';
 
@@ -25,10 +27,18 @@ export const BOOKING_FOR_NOTIFICATION = {
   customer: {
     select: { id: true, firstName: true, lastName: true, email: true, phone: true },
   },
-  payments: { select: { status: true, amountCents: true, refundedAmountCents: true } },
 } as const;
 
-export type BookingRow = Prisma.BookingGetPayload<{ select: typeof BOOKING_FOR_NOTIFICATION }>;
+/**
+ * The booking, plus the money on its financial root.
+ *
+ * Not `booking.payments`: a rescheduled booking's payment stays on the row that was
+ * paid, and a cancellation email that read this booking's own relation told the
+ * customer nothing had been refunded because it could see nothing that was paid.
+ */
+export type BookingRow = Prisma.BookingGetPayload<{
+  select: typeof BOOKING_FOR_NOTIFICATION;
+}> & { financials: BookingFinancials };
 
 /**
  * The booking fields every notification shares, built one way.
@@ -45,6 +55,7 @@ export class BookingNotificationData {
   constructor(
     private readonly prisma: PrismaService,
     private readonly organizations: OrganizationContextService,
+    private readonly financials: BookingFinancialsService,
     @Inject(ENV) private readonly config: AppConfig,
   ) {}
 
@@ -64,9 +75,10 @@ export class BookingNotificationData {
 
     if (booking === null) {
       this.logger.warn(`booking ${bookingId} no longer exists; no notification sent`);
+      return null;
     }
 
-    return booking;
+    return { ...booking, financials: await this.financials.load(bookingId, tx) };
   }
 
   /** The fields every appointment template shares. */
