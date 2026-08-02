@@ -1,5 +1,3 @@
-import { randomUUID } from 'node:crypto';
-
 import { Inject, Injectable } from '@nestjs/common';
 
 import { AppError } from '../common/errors/app-error.js';
@@ -12,6 +10,7 @@ import { OutboxRecorder } from '../messaging/outbox/outbox.recorder.js';
 import { JOB } from '../messaging/queues/job-contracts.js';
 import { RequestNotificationService } from '../notification/request-notification.service.js';
 import { OrganizationContextService } from '../organization/organization-context.service.js';
+import { RefundService } from '../payment/refund.service.js';
 import { BookingStatus, PaymentStatus, Prisma, RefundReason } from '../prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
@@ -19,6 +18,7 @@ import { AuditService } from './audit.service.js';
 import { assertTransition } from './booking-status.machine.js';
 
 import type { Clock } from '../domain/time/clock.js';
+import type { RefundAmount, RefundReservationResult } from '../payment/refund.service.js';
 
 export type CancelByCustomerResult =
   | { outcome: 'CANCELED'; refundId: string | null; refundExpected: Money }
@@ -39,6 +39,15 @@ export interface DecideRequestInput {
   /** Absent on approval falls back to the frozen suggestion. */
   retainedAmountCents?: number | undefined;
   note?: string | undefined;
+  /**
+   * Whether this office user may move money.
+   *
+   * Enforced here rather than in the controller, because only the reservation knows
+   * whether this decision actually refunds anything: retention and the paid total are
+   * both read inside the transaction, and comparing them outside it was what made
+   * "accept the suggestion" — an omitted amount — look like a full refund.
+   */
+  mayIssueRefunds?: boolean | undefined;
 }
 
 /** The columns every cancellation path needs. */
@@ -77,6 +86,7 @@ export class CancellationService {
     private readonly outbox: OutboxRecorder,
     private readonly audit: AuditService,
     private readonly requestNotifications: RequestNotificationService,
+    private readonly refunds: RefundService,
     @Inject(CLOCK) private readonly clock: Clock,
   ) {}
 
@@ -155,9 +165,12 @@ export class CancellationService {
             },
           });
 
-          const refundId = await this.requestRefund(tx, booking, paid, {
-            reason: RefundReason.CUSTOMER_CANCELLATION,
-          });
+          const { refundId } = await this.reserveRefund(
+            tx,
+            booking,
+            { kind: 'CUMULATIVE_TARGET', targetAmountCents: paid.amountCents },
+            { reason: RefundReason.CUSTOMER_CANCELLATION },
+          );
 
           await this.outbox.record(tx, {
             organizationId: booking.organizationId,
@@ -350,10 +363,16 @@ export class CancellationService {
       },
     });
 
-    const refundId = await this.requestRefund(tx, booking, paid.minus(retained), {
-      reason: RefundReason.CUSTOMER_CANCELLATION,
-      officeUserId: input.officeUserId,
-    });
+    const { refundId } = await this.reserveRefund(
+      tx,
+      booking,
+      { kind: 'CUMULATIVE_TARGET', targetAmountCents: paid.minus(retained).amountCents },
+      {
+        reason: RefundReason.CUSTOMER_CANCELLATION,
+        officeUserId: input.officeUserId,
+        ...(input.mayIssueRefunds === undefined ? {} : { mayIssueRefunds: input.mayIssueRefunds }),
+      },
+    );
 
     await this.outbox.record(tx, {
       organizationId: booking.organizationId,
@@ -419,15 +438,23 @@ export class CancellationService {
             },
           });
 
+          // ADDITIONAL, not a target: an amount the office typed means "refund this much
+          // now", which is a different question from "the customer should end up with
+          // this much back".
           const refundId =
             input.refundAmountCents === undefined
               ? null
-              : await this.requestRefund(
-                  tx,
-                  booking,
-                  Money.fromCents(input.refundAmountCents, booking.currency),
-                  { reason: RefundReason.BUSINESS_CANCELLATION, officeUserId: input.officeUserId },
-                );
+              : (
+                  await this.reserveRefund(
+                    tx,
+                    booking,
+                    { kind: 'ADDITIONAL', amountCents: input.refundAmountCents },
+                    {
+                      reason: RefundReason.BUSINESS_CANCELLATION,
+                      officeUserId: input.officeUserId,
+                    },
+                  )
+                ).refundId;
 
           // Any open request is about a decision that has now been overtaken. Closing
           // them here is what stops a request outliving its booking, waiting for an
@@ -496,57 +523,42 @@ export class CancellationService {
   }
 
   /**
-   * Create the refund row, if there is anything to refund.
+   * Reserve the refund a cancellation implies, through the one path that owns the
+   * remaining balance.
    *
-   * A row, not a provider call: the money moves in a worker, driven by the
-   * `refund.requested` outbox event. That is what makes a refund survive a crash between
-   * deciding to refund and Stripe accepting it.
+   * The target is **cumulative**: "the customer should end up with this much back", not
+   * "send this much now". Stated as an instruction, a booking that had already been
+   * partly refunded got the gross amount again — more than the charge, which the
+   * provider then rejected after the office had been told the cancellation went through.
+   *
+   * `lenient` because cancelling an unpaid booking is ordinary, not an error.
    */
-  private async requestRefund(
+  private async reserveRefund(
     tx: Prisma.TransactionClient,
     booking: CancellableBooking,
-    amount: Money,
-    options: { reason: RefundReason; officeUserId?: string },
-  ): Promise<string | null> {
-    if (amount.amountCents <= 0) return null;
-
-    const payment = booking.payments.find(
-      (candidate) =>
-        candidate.status === PaymentStatus.SUCCEEDED ||
-        candidate.status === PaymentStatus.PARTIALLY_REFUNDED,
-    );
-
-    // An unpaid manual booking cancels with nothing to give back.
-    if (payment === undefined) return null;
-
-    const refund = await tx.refund.create({
-      data: {
-        organizationId: booking.organizationId,
-        bookingId: booking.id,
-        paymentId: payment.id,
-        amountCents: amount.amountCents,
-        currency: booking.currency,
-        status: 'PENDING',
-        reason: options.reason,
-        // Generated here and stored before any provider call, so a retry after a lost
-        // response cannot refund twice.
-        idempotencyKey: randomUUID(),
-        ...(options.officeUserId === undefined
-          ? {}
-          : { issuedByOfficeUserId: options.officeUserId }),
-      },
-      select: { id: true },
+    amount: RefundAmount,
+    options: { reason: RefundReason; officeUserId?: string; mayIssueRefunds?: boolean },
+  ): Promise<RefundReservationResult> {
+    const reserved = await this.refunds.reserveInTransaction(tx, {
+      bookingId: booking.id,
+      amount,
+      reason: options.reason,
+      lenient: true,
+      ...(options.officeUserId === undefined ? {} : { officeUserId: options.officeUserId }),
     });
 
-    await this.outbox.record(tx, {
-      organizationId: booking.organizationId,
-      aggregateType: 'Refund',
-      aggregateId: refund.id,
-      eventType: JOB.REFUND_REQUESTED,
-      payload: { organizationId: booking.organizationId, refundId: refund.id },
-    });
+    // Checked against what the reservation *actually* moves, not against what the
+    // request asked for. Keeping everything moves nothing and needs no capability;
+    // anything else does, and only the arithmetic above knows which this is.
+    if (reserved.additionalAmountCents > 0 && options.mayIssueRefunds === false) {
+      // The same code and wording every other capability refusal uses, so a client
+      // cannot tell a guard-level refusal from this one.
+      throw new AppError('FORBIDDEN_ROLE', {
+        message: 'Your account may not perform this action.',
+      });
+    }
 
-    return refund.id;
+    return reserved;
   }
 
   /** How much the retained amount may be, and what it is when unspecified. */

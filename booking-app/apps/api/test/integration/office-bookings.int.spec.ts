@@ -769,6 +769,55 @@ describe('GET /api/office/audit-log', () => {
 
 /* ── CSV export ───────────────────────────────────────────────────────────────── */
 
+describe('deciding a cancellation request without the refund capability', () => {
+  /** A pending request whose frozen suggestion decides whether money will move. */
+  async function openCancellationRequest(suggestedRetainedAmountCents: number): Promise<string> {
+    const booking = await bookingAt(berlin(NEXT_MONDAY, '10:00'));
+    await paidWithCard(booking.id, 4500);
+
+    const request = await prisma.cancellationRequest.create({
+      data: {
+        organizationId: ctx.organization.id,
+        bookingId: booking.id,
+        suggestedRetainedAmountCents,
+      },
+      select: { id: true },
+    });
+
+    return request.id;
+  }
+
+  it('allows full retention even when the body omits the amount', async () => {
+    // Keeping everything moves no money, so it needs no refund capability. Treating an
+    // omitted amount as zero made the most common approval — accept the suggestion —
+    // look like a full refund and refused it.
+    const admin = await signedInAs('ADMIN', { canIssueRefunds: false });
+    const requestId = await openCancellationRequest(4500);
+
+    await admin
+      .post(`/api/office/cancellation-requests/${requestId}/decide`)
+      .send({ decision: 'APPROVED' })
+      .expect(201);
+
+    expect(await prisma.refund.count()).toBe(0);
+  });
+
+  it('refuses when the suggestion leaves money to refund', async () => {
+    const admin = await signedInAs('ADMIN', { canIssueRefunds: false });
+    const requestId = await openCancellationRequest(1000);
+
+    await admin
+      .post(`/api/office/cancellation-requests/${requestId}/decide`)
+      .send({ decision: 'APPROVED' })
+      .expect(403);
+
+    expect(await prisma.refund.count()).toBe(0);
+    expect(
+      (await prisma.cancellationRequest.findUniqueOrThrow({ where: { id: requestId } })).decision,
+    ).toBe('PENDING');
+  });
+});
+
 describe('a booking that has been rescheduled twice', () => {
   /** A replacement in a chain: rescheduled from one booking, financially rooted at another. */
   async function replacementOf(

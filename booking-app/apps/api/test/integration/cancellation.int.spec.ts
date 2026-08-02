@@ -208,6 +208,79 @@ describe('outside the fee window', () => {
   });
 });
 
+describe('a cancellation on top of an earlier refund', () => {
+  /** A refund already on the booking's payment, settled or still in flight. */
+  async function existingRefund(
+    bookingId: string,
+    amountCents: number,
+    status: 'SUCCEEDED' | 'PENDING',
+  ): Promise<void> {
+    const payment = await prisma.payment.findFirstOrThrow({ where: { bookingId } });
+
+    await prisma.refund.create({
+      data: {
+        organizationId: ctx.organization.id,
+        bookingId,
+        paymentId: payment.id,
+        amountCents,
+        currency: 'EUR',
+        status,
+        reason: 'GOODWILL',
+        idempotencyKey: `existing-${bookingId}-${status}`,
+      },
+    });
+
+    if (status === 'SUCCEEDED') {
+      await prisma.payment.update({
+        where: { id: payment.id },
+        data: { refundedAmountCents: amountCents, status: 'PARTIALLY_REFUNDED' },
+      });
+    }
+  }
+
+  it('refunds only the difference when part has already gone back', async () => {
+    // The target is cumulative — "the customer should end up with 45,00 back" — not a
+    // fresh instruction to send 45,00. Asking for the gross amount again would refund
+    // 55,00 against a 45,00 charge.
+    const booking = await confirmedPaid();
+    await existingRefund(booking.id, 1000, 'SUCCEEDED');
+
+    await service.cancelByCustomer(booking.id);
+
+    const refunds = await prisma.refund.findMany({
+      where: { bookingId: booking.id, reason: 'CUSTOMER_CANCELLATION' },
+    });
+    expect(refunds).toHaveLength(1);
+    expect(refunds[0]?.amountCents).toBe(ctx.service30.priceCents - 1000);
+  });
+
+  it('counts a refund still in flight against the same target', async () => {
+    const booking = await confirmedPaid();
+    await existingRefund(booking.id, 1500, 'PENDING');
+
+    await service.cancelByCustomer(booking.id);
+
+    const refunds = await prisma.refund.findMany({
+      where: { bookingId: booking.id, reason: 'CUSTOMER_CANCELLATION' },
+    });
+    expect(refunds[0]?.amountCents).toBe(ctx.service30.priceCents - 1500);
+  });
+
+  it('creates nothing when the target has already been met', async () => {
+    const booking = await confirmedPaid();
+    await existingRefund(booking.id, ctx.service30.priceCents, 'SUCCEEDED');
+
+    const result = await service.cancelByCustomer(booking.id);
+
+    expect(result).toMatchObject({ outcome: 'CANCELED', refundId: null });
+    expect(
+      await prisma.refund.count({
+        where: { bookingId: booking.id, reason: 'CUSTOMER_CANCELLATION' },
+      }),
+    ).toBe(0);
+  });
+});
+
 describe('the notifications a request produces', () => {
   it('queues a notification row for every send event it records', async () => {
     const { booking } = await openRequest();
