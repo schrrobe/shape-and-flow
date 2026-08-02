@@ -3,8 +3,6 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { AppError } from '../common/errors/app-error.js';
 import { withSerializationRetry } from '../common/prisma-errors/serialization-retry.js';
 import { Money } from '../domain/money/money.js';
-import { OutboxRecorder } from '../messaging/outbox/outbox.recorder.js';
-import { JOB } from '../messaging/queues/job-contracts.js';
 import { OrganizationContextService } from '../organization/organization-context.service.js';
 import { PaymentStatus } from '../prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
@@ -46,7 +44,6 @@ export class BookingCheckoutService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly organizations: OrganizationContextService,
-    private readonly outbox: OutboxRecorder,
     @Inject(PAYMENT_PROVIDER) private readonly payments: PaymentProvider,
   ) {}
 
@@ -98,11 +95,22 @@ export class BookingCheckoutService {
   }
 
   /**
-   * Transaction two: name the session, open a pending payment, arm the expiry.
+   * Transaction two: name the session and open a pending payment.
    *
-   * Short by design — no network call inside it. The outbox row is what schedules the
-   * expiry job, so "the reservation exists" and "something will eventually release
-   * it" commit together.
+   * Short by design — no network call inside it — and safe to run twice on the same
+   * pair. That matters because the caller retries: an attempt whose Checkout call
+   * succeeded but whose attachment did not commit comes back with the very same
+   * session id, and the provider's own idempotency key guarantees it. So the row lock
+   * comes first, then both writes are conditional: the session id is set only if
+   * absent, and the payment insert skips a duplicate rather than colliding on the
+   * unique session column.
+   *
+   * A *different* session id on a booking that already has one is not a retry and is
+   * refused. Two live Checkout sessions for one reservation is a customer who can pay
+   * twice.
+   *
+   * Arming the expiry is no longer part of this. It commits with the reservation,
+   * where it belongs: the hold exists from that moment, so its release has to as well.
    */
   private async attach(booking: Booking, sessionId: string): Promise<void> {
     const organizationId = this.organizations.getOrganizationId();
@@ -110,36 +118,64 @@ export class BookingCheckoutService {
     await withSerializationRetry(
       () =>
         this.prisma.$transaction(async (tx) => {
-          await tx.booking.update({
+          // Serialises two attempts at the same booking. Without it both could read a
+          // null session id and both try to insert a payment.
+          await tx.$queryRaw`SELECT id FROM bookings WHERE id = ${booking.id} FOR UPDATE`;
+
+          const current = await tx.booking.findUniqueOrThrow({
             where: { id: booking.id },
-            data: { stripeCheckoutSessionId: sessionId },
+            select: { stripeCheckoutSessionId: true },
           });
+
+          if (
+            current.stripeCheckoutSessionId !== null &&
+            current.stripeCheckoutSessionId !== sessionId
+          ) {
+            throw new AppError('INTERNAL_ERROR', {
+              message: 'Booking already has another Checkout session.',
+            });
+          }
+
+          if (current.stripeCheckoutSessionId === null) {
+            await tx.booking.update({
+              where: { id: booking.id },
+              data: { stripeCheckoutSessionId: sessionId },
+            });
+          }
 
           // A payment row from the moment there is something to pay, so a webhook
           // arriving before anyone reads this booking has a row to upsert onto.
-          await tx.payment.create({
-            data: {
-              organizationId,
-              bookingId: booking.id,
-              stripeCheckoutSessionId: sessionId,
-              amountCents: booking.priceCentsSnapshot,
-              currency: booking.currency,
-              status: PaymentStatus.PENDING,
-            },
+          await tx.payment.createMany({
+            skipDuplicates: true,
+            data: [
+              {
+                organizationId,
+                bookingId: booking.id,
+                stripeCheckoutSessionId: sessionId,
+                amountCents: booking.priceCentsSnapshot,
+                currency: booking.currency,
+                status: PaymentStatus.PENDING,
+              },
+            ],
           });
 
-          // The delayed job that will start the expiry saga. Recorded rather than
-          // enqueued directly, so a committed reservation always has a release
-          // mechanism — an enqueue outside the transaction could be lost.
-          await this.outbox.record(tx, {
-            organizationId,
-            aggregateType: 'Booking',
-            aggregateId: booking.id,
-            eventType: JOB.BOOKING_EXPIRY_REQUESTED,
-            payload: { organizationId, bookingId: booking.id },
-            // Due when the reservation lapses, not now.
-            ...(booking.expiresAt === null ? {} : { availableAt: booking.expiresAt }),
+          // `skipDuplicates` hides a collision, so the row that survived is read back
+          // and checked. A session id already attached to a different booking or a
+          // different amount would otherwise pass silently.
+          const payment = await tx.payment.findUniqueOrThrow({
+            where: { stripeCheckoutSessionId: sessionId },
+            select: { bookingId: true, amountCents: true, currency: true },
           });
+
+          if (
+            payment.bookingId !== booking.id ||
+            payment.amountCents !== booking.priceCentsSnapshot ||
+            payment.currency !== booking.currency
+          ) {
+            throw new AppError('INTERNAL_ERROR', {
+              message: 'Checkout session is already attached to a different payment.',
+            });
+          }
         }),
       'attach-checkout-session',
     );

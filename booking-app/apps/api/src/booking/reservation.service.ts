@@ -69,6 +69,14 @@ export interface ReserveInput {
   origin?: BookingOrigin | undefined;
   /** Absent means a customer, which is what every pre-Stage-8 caller meant. */
   actor?: ReserveActor | undefined;
+  /**
+   * The request's idempotency key, bound to the booking in the same transaction.
+   *
+   * Present only for the public route, which is the only caller whose retry has to
+   * find the reservation its previous attempt made. Absent leaves the booking
+   * unbound, exactly as before.
+   */
+  idempotencyKey?: string | undefined;
 }
 
 export interface ReserveResult {
@@ -143,6 +151,55 @@ export class ReservationService {
       () => this.insert({ ...input, employeeId, actor }, service, expiresAt),
       'reserve',
     );
+  }
+
+  /**
+   * The reservation a previous attempt at this key already made, if it is still live.
+   *
+   * The public route calls this before reserving. Without it the sequence that
+   * follows a Checkout failure is self-defeating: the first attempt committed a
+   * reservation and then failed at the provider, so the retry the 502 asked the
+   * customer for reserves the same slot again and is refused SLOT_UNAVAILABLE — by
+   * the customer's own hold. The only way out was to wait five minutes for the
+   * reservation to expire.
+   *
+   * `null` for anything not resumable — no claim, a booking that has since expired,
+   * been paid, or belongs to another tenant — and the caller reserves normally. The
+   * status and expiry conditions are the same ones `reserve()` would establish, so a
+   * resumed booking is indistinguishable from a fresh one.
+   */
+  async resume(idempotencyKey: string): Promise<ReserveResult | null> {
+    const organizationId = this.organizations.getOrganizationId();
+
+    const claimed = await this.prisma.idempotencyKey.findFirst({
+      where: { key: idempotencyKey, scope: 'booking.create', bookingId: { not: null } },
+      select: { bookingId: true },
+    });
+
+    if (claimed?.bookingId === null || claimed?.bookingId === undefined) return null;
+
+    // The whole row plus the employee, not a projection: `ReserveResult.booking` is a
+    // generated `Booking`, and a hand-listed set of scalars would have to be revisited
+    // every time the model gains a column.
+    const booking = await this.prisma.booking.findFirst({
+      where: {
+        id: claimed.bookingId,
+        organizationId,
+        status: BookingStatus.PENDING_PAYMENT,
+        expiresAt: { gt: this.clock.now() },
+      },
+      include: { employee: { select: { id: true, displayName: true } } },
+    });
+
+    if (booking === null) return null;
+
+    const { employee, ...reserved } = booking;
+
+    return {
+      booking: reserved,
+      employee,
+      price: Money.fromCents(reserved.priceCentsSnapshot, reserved.currency),
+    };
   }
 
   /**
@@ -327,6 +384,45 @@ export class ReservationService {
     };
   }
 
+  /**
+   * Take ownership of the in-flight idempotency key, so the retry can find this row.
+   *
+   * The claim is what turns a key from "this request ran" into "this request holds a
+   * reservation". `ReservationService.resume()` reads it back, and
+   * `IdempotencyService.abandon()` keeps a bound key alive for exactly that reason.
+   *
+   * A key that is not claimable — swept, completed, or never begun — is refused
+   * rather than ignored: reserving without a claim would produce a hold nothing can
+   * find again, which is the failure this exists to remove.
+   */
+  private async claimIdempotencyKey(
+    tx: Prisma.TransactionClient,
+    key: string | undefined,
+  ): Promise<string | null> {
+    if (key === undefined) return null;
+
+    const claimed = await tx.idempotencyKey.findFirst({
+      where: { key, scope: 'booking.create', state: 'IN_PROGRESS' },
+      select: { id: true },
+    });
+
+    if (claimed === null) {
+      throw new AppError('IDEMPOTENCY_KEY_REUSED', {
+        message: 'Booking attempt is not claimable.',
+      });
+    }
+
+    // `Booking.idempotencyKeyId` is unique, and a previous attempt at this key may
+    // still be holding it on a reservation that has since lapsed. That booking is
+    // finished with; the live attempt is the one that needs the claim.
+    await tx.booking.updateMany({
+      where: { idempotencyKeyId: claimed.id },
+      data: { idempotencyKeyId: null },
+    });
+
+    return claimed.id;
+  }
+
   /** The transaction: lock, re-check, upsert the customer, insert, record history. */
   private async insert(
     input: ReserveInput & { employeeId: string; actor: ReserveActor },
@@ -412,6 +508,8 @@ export class ReservationService {
             actor: input.actor,
           });
 
+          const claimedKeyId = await this.claimIdempotencyKey(tx, input.idempotencyKey);
+
           const customer = await this.customers.upsert(tx, organizationId, input.customer);
 
           // Buffers come from the snapshot, so a service edited between the read and
@@ -452,6 +550,7 @@ export class ReservationService {
               status,
               expiresAt,
               locale: input.locale,
+              ...(claimedKeyId === null ? {} : { idempotencyKeyId: claimedKeyId }),
               ...(input.customerNote === undefined ? {} : { customerNote: input.customerNote }),
               ...(office === null
                 ? {}
@@ -461,6 +560,29 @@ export class ReservationService {
                   }),
             },
           });
+
+          if (claimedKeyId !== null) {
+            await tx.idempotencyKey.update({
+              where: { id: claimedKeyId },
+              data: { bookingId: booking.id },
+            });
+          }
+
+          // Armed here rather than when the Checkout session is attached, because the
+          // reservation commits before the provider is called: a failure at the
+          // provider would otherwise leave a held slot with nothing scheduled to
+          // release it. Recorded rather than enqueued, so "the reservation exists" and
+          // "something will let it go" commit together.
+          if (expiresAt !== null) {
+            await this.outbox.record(tx, {
+              organizationId,
+              aggregateType: 'Booking',
+              aggregateId: booking.id,
+              eventType: JOB.BOOKING_EXPIRY_REQUESTED,
+              payload: { organizationId, bookingId: booking.id },
+              availableAt: expiresAt,
+            });
+          }
 
           // In the same transaction, so a booking can never exist without the row
           // that explains how it got its status.

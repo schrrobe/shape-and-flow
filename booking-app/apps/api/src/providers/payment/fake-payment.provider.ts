@@ -54,6 +54,7 @@ export class FakePaymentProvider implements PaymentProvider {
   private readonly store: FakePaymentStore;
   private readonly calls: string[] = [];
   private nextFailure: Error | null = null;
+  private nextCheckoutFailureAfterCreate: Error | null = null;
   private counter = 0;
 
   /**
@@ -78,6 +79,18 @@ export class FakePaymentProvider implements PaymentProvider {
   /** Make exactly the next provider call fail, then behave normally again. */
   failNextWith(error: Error): void {
     this.nextFailure = error;
+  }
+
+  /**
+   * Lose the answer to exactly the next session creation, after it has happened.
+   *
+   * The failure mode `failNextWith` cannot express: the session exists at the
+   * provider and the caller never learns its id. The retry has to find that session
+   * through its idempotency key rather than open a second one the customer could
+   * also pay into, and only a store that already holds the first one can prove it.
+   */
+  failNextCheckoutAfterCreateWith(error: Error): void {
+    this.nextCheckoutFailureAfterCreate = error;
   }
 
   /** Mark a session paid, as if the customer had completed Checkout. */
@@ -133,6 +146,7 @@ export class FakePaymentProvider implements PaymentProvider {
     await this.store.clear();
     this.calls.length = 0;
     this.nextFailure = null;
+    this.nextCheckoutFailureAfterCreate = null;
     this.counter = 0;
   }
 
@@ -169,6 +183,13 @@ export class FakePaymentProvider implements PaymentProvider {
     await this.store.putSession(session);
     if (input.idempotencyKey !== undefined) {
       await this.store.rememberKey(input.idempotencyKey, sessionId);
+    }
+
+    // Stored first, then thrown: that ordering is the failure being modelled.
+    if (this.nextCheckoutFailureAfterCreate !== null) {
+      const failure = this.nextCheckoutFailureAfterCreate;
+      this.nextCheckoutFailureAfterCreate = null;
+      throw failure;
     }
 
     return this.resultFor(session);

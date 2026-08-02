@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
 
 import request from 'supertest';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { BookingCheckoutService } from '../../src/booking/booking-checkout.service.js';
 import { FixedClock } from '../../src/domain/time/clock.js';
 import { JOB } from '../../src/messaging/queues/job-contracts.js';
 import { PUBLIC_WEB_ORIGIN, createBookingTestApp } from '../booking-app.harness.js';
@@ -10,8 +11,10 @@ import { prisma, resetDatabase } from '../database.harness.js';
 import { SLOT_FRIDAY_0900, seedOrganization } from '../factories/index.js';
 import { loadOrganization } from '../public-app.harness.js';
 
+import type { Booking } from '../../src/prisma/client.js';
 import type { FakePaymentProvider } from '../../src/providers/payment/fake-payment.provider.js';
 import type { SeedContext } from '../factories/index.js';
+import type { INestApplication } from '@nestjs/common';
 import type { Server } from 'node:http';
 
 const NOW = new Date('2026-08-10T06:00:00.000Z');
@@ -20,6 +23,7 @@ let ctx: SeedContext;
 let clock: FixedClock;
 let server: () => Server;
 let payments: FakePaymentProvider;
+let app: INestApplication;
 
 function body(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -57,6 +61,7 @@ beforeEach(async () => {
 
   server = testApp.server;
   payments = testApp.payments;
+  app = testApp.app;
 
   return testApp.close;
 });
@@ -263,6 +268,82 @@ describe('when Stripe is unreachable', () => {
 
     const response = await post().expect(502);
     expect(JSON.stringify(response.body)).not.toContain('ECONNRESET');
+  });
+
+  it('resumes the same reservation after Checkout fails', async () => {
+    // The retry the 502 asks the customer for. Without resume it reserves again and
+    // collides with its own held slot, so the honest retry is answered
+    // SLOT_UNAVAILABLE — the customer is locked out by their own first attempt.
+    const key = randomUUID();
+    payments.failNextWith(new Error('ECONNRESET'));
+
+    await post(body(), key).expect(502);
+    const held = await prisma.booking.findFirstOrThrow();
+
+    const retried = await post(body(), key).expect(201);
+
+    expect((retried.body as { bookingId: string }).bookingId).toBe(held.id);
+    expect(await prisma.booking.count()).toBe(1);
+    expect(await prisma.payment.count()).toBe(1);
+    expect(await payments.sessions()).toHaveLength(1);
+  });
+
+  it('arms expiry before Checkout answers', async () => {
+    // The reservation commits before the provider is called, so the release has to
+    // commit with it. Armed in the attachment, a failed Checkout leaves a held slot
+    // with nothing scheduled to let it go.
+    payments.failNextWith(new Error('ECONNRESET'));
+    await post().expect(502);
+
+    const held = await prisma.booking.findFirstOrThrow();
+    expect(
+      await prisma.outboxEvent.count({
+        where: { aggregateId: held.id, eventType: JOB.BOOKING_EXPIRY_REQUESTED },
+      }),
+    ).toBe(1);
+  });
+
+  it('resumes when the provider answered but the attachment never committed', async () => {
+    const key = randomUUID();
+
+    // A narrow test-only cast: `attach` is private, and widening it for a test would
+    // publish a method whose whole contract is "only the Checkout path calls this".
+    const checkout = app.get(BookingCheckoutService);
+    const attach = vi.spyOn(
+      checkout as unknown as { attach(booking: Booking, sessionId: string): Promise<void> },
+      'attach',
+    );
+    attach.mockRejectedValueOnce(new Error('database unavailable after provider response'));
+
+    await post(body(), key).expect(502);
+    const firstSession = (await payments.sessions())[0];
+    expect(firstSession).toBeDefined();
+
+    const retried = await post(body(), key).expect(201);
+
+    expect((retried.body as { checkoutUrl: string }).checkoutUrl).toBe(
+      `https://checkout.fake.local/c/pay/${firstSession?.sessionId ?? 'never'}`,
+    );
+    expect(await prisma.booking.count()).toBe(1);
+    expect(await prisma.payment.count()).toBe(1);
+    expect(await payments.sessions()).toHaveLength(1);
+  });
+
+  it('reuses the session a lost provider response already created', async () => {
+    // Stripe created the session and the socket died before the answer arrived. The
+    // provider key makes the retry return that same session rather than a second one
+    // the customer could also pay into.
+    const key = randomUUID();
+    payments.failNextCheckoutAfterCreateWith(new Error('socket closed after response'));
+
+    await post(body(), key).expect(502);
+    const retried = await post(body(), key).expect(201);
+
+    expect(await payments.sessions()).toHaveLength(1);
+    expect((retried.body as { bookingId: string }).bookingId).toBe(
+      (await prisma.booking.findFirstOrThrow()).id,
+    );
+    expect(await prisma.payment.count()).toBe(1);
   });
 });
 
