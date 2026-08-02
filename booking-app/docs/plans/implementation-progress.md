@@ -7,8 +7,8 @@ while implementing that the plan could not have known.
 |                   |                                                                                   |
 | ----------------- | --------------------------------------------------------------------------------- |
 | Branch            | `feat/phase-1-booking-app` (nothing pushed)                                       |
-| Tasks complete    | 29 of 49                                                                          |
-| Unit tests        | 379 passing (364 api + 15 contracts)                                              |
+| Tasks complete    | 41 of 49                                                                          |
+| Unit tests        | 639 passing (399 api + 166 web + 37 contracts + 37 ui)                            |
 | Integration tests | 388 passing                                                                       |
 | Gates             | `pnpm lint`, `format`, `typecheck`, `test`, `test:integration`, `build` all green |
 
@@ -64,30 +64,42 @@ constraint → Stripe Checkout → webhook confirms.
 | 9.2  | de/en i18n with seven parity guards, typed API client, error-code mapping      |
 | 9.3  | Booking wizard, draft store, slot picker, reservation countdown                |
 | 9.4  | Confirmation polling, self-service manage and reschedule, WhatsApp contact     |
+| 8.1  | Office sessions in Redis, argon2id passwords, CSRF header, reset flow          |
+| 8.2  | §10.5 role matrix enforced, refund capability, employee scope, audit trail     |
+| 8.3  | Office dashboard and calendar, derived display statuses                        |
+| 10.1 | Office shell, login, forgot and reset password, session store and route guard  |
 
 ## Next
 
-**Stage 9 (public web) is complete.** A customer can browse, book, pay, land back on a
-confirmation that polls for the webhook, and then cancel or request a reschedule through
-the link in their email. Verified in a browser against the running API at every step, not
-only by tests.
+**Stage 9 (public web) and task 10.1 are complete.** A customer can browse, book, pay,
+land back on a confirmation that polls for the webhook, and then cancel or request a
+reschedule through the link in their email. A member of staff can sign in, land in the
+office shell, and sign out. Verified in a browser against the running API at every step,
+not only by tests.
 
-Stage 8 (office API) and the start of stage 10 (office web) were built in a **parallel
-session** and are committed as `ab6b9f3`, `9c0a03c` and `c811428`. Stage 9 was written
-against `apps/web`, `packages/ui` and `packages/config` only, and every stage-9 commit was
-staged by explicit path so the two streams never mixed.
+Tasks 8.1 to 8.3 were built in a **parallel session** and are committed as `ab6b9f3`,
+`9c0a03c` and `c811428` — all three are API work; no office *web* code came from there.
+Stage 9 and 10.1 were staged by explicit path so the two streams never mixed.
 
+**Stopped, waiting on stage 8.** Tasks 10.2 and 10.3 cannot be finished yet:
 
-| Task    | What it is                                                    |
-| ------- | ------------------------------------------------------------- |
-| **8.1** | **Office authentication and sessions. Next.**                  |
-| 8.2     | Office booking management endpoints                            |
-| 8.3     | Employees, services, working hours                             |
-| 8.4     | Blocked times, time off, closed days                           |
-| 8.5     | Cancellation and reschedule request decisions                  |
-| 9.x     | Web public booking flow, i18n, WhatsApp button                 |
-| 10.x    | Web office area                                                |
-| 11.x    | End-to-end tests, ops, docs                                    |
+| Needs                | For                                                     | State                            |
+| -------------------- | ------------------------------------------------------- | -------------------------------- |
+| 8.4 staff, availability, catalog, settings | 10.3 management screens            | in the working tree, uncommitted |
+| 8.5 bookings, manual payments, refunds, exports | 10.2 list and detail, 10.3 requests and exports | not started        |
+
+Building against uncommitted contracts would produce a commit that does not compile on
+its own, and building 8.5 in parallel would collide in `office.module.ts`,
+`packages/contracts/src/office/` and the integration harness — the files the other stream
+has open. So 10.2 and 10.3 wait for those two commits, by the user's decision.
+
+What is buildable the moment 8.4 and 8.5 land:
+
+| Task | What it is                                                     |
+| ---- | -------------------------------------------------------------- |
+| 10.2 | Office dashboard, calendar grid, booking list and detail        |
+| 10.3 | Employees, working hours, services, availability, requests, customers, settings, users, exports |
+| 11.x | End-to-end tests, ops, docs                                    |
 
 **Stages 5, 6 and 7 are complete.** A customer books and pays; the booking confirms
 by webhook or releases the slot; they can cancel, reschedule or be marked no-show
@@ -97,7 +109,7 @@ end against booted processes, not only by tests — including the worker image
 draining on SIGTERM.
 
 Deferred out of the slice: 3.4 (Resend and Twilio adapters — the ports and fakes
-exist, the real clients do not), and all of stages 8-11.
+exist, the real clients do not).
 
 ## Version drift from the plan, and why
 
@@ -298,6 +310,30 @@ constructable`. The named import gives both the class and the type.
 40. `AttendanceService.reportStaleCompletions` is a report, not a sweep that fixes
     anything. Auto-completing would manufacture the observation the service exists to
     record.
+41. The office password-reset token is read from the URL **fragment**, not the query
+    string task 10.1 specifies. The API sends `/office/reset-password#<token>` and is
+    right to — a query string puts a live credential in the access log and in any
+    `Referer` the page emits. The mechanics are shared with the customer management
+    link through `useFragmentCredential`.
+42. `/office` renders `OfficeStart.vue`, a landing page the plan does not list. Task
+    10.1 has to have a route behind the session guard, and the dashboard belongs to
+    10.2; guarding a route whose component does not exist yet is not an option. It is
+    registered under the name `office-dashboard`, so 10.2 replaces the component and
+    no path, link or sidebar entry moves.
+43. Office copy is English literals in templates, not `t()` keys, because the plan
+    makes the office area English-only. The customer literal-copy guard is narrowed to
+    customer-facing templates and a second guard stops office templates calling `t()`
+    — staff copy in the customer i18n bundle would be downloaded by every visitor to
+    the booking flow. Office money and dates still format as `de-DE` in
+    `Europe/Berlin`, which is what the plan's own 10.3 tests expect.
+44. Task 10.1's capability helpers are backed by a table in
+    `packages/contracts/src/auth/capabilities.ts` whose test reads §10.5 out of the
+    plan document. The plan asks for "one shared capability table … so the API guard
+    test and this test read the same data"; the API enforces the matrix through
+    `@Roles` decorators per route instead, and adding a drift test that reads their
+    metadata would mean touching files the parallel stream has open. Reading the
+    specification is the stronger comparison anyway, and it is what caught §10.5's
+    one ambiguous cell.
 
 ## Plan errors found while implementing
 
@@ -482,6 +518,34 @@ Each of these would have passed a casual "it works" check.
   pino may not flush before the process dies. Shutdown behaviour is asserted
   through a real Nest container in the integration suite instead of by reading a
   log.
+- **A credential in the URL fragment was read only at setup.** Opening the emailed
+  reset link while already on `/office/reset-password` is a hash-only navigation:
+  the browser and the router both treat it as the same document, nothing remounts,
+  and the token sat in the address bar under a page saying the link was incomplete.
+  The customer management link had the same hole. `useFragmentCredential` now also
+  listens for `hashchange`, and never clears a token it already holds — its own
+  `replaceState` empties the fragment, so re-reading naively would discard the
+  credential the page is using.
+- **`scrollBehavior` handed the fragment to `document.querySelector`.** A token
+  starting with a digit is not a valid selector, so it throws rather than missing.
+  The two routes that receive a credential that way are now excluded by path.
+- **A named `office` manual chunk made things worse, not better.** Adding one to
+  `manualChunks` made Rollup fold `vendor` into it: one 316 kB file that the entry
+  chunk depends on, so every customer would have downloaded the whole staff
+  interface to get Vue. Route-level dynamic imports already split the area; the
+  invariant is pinned by a test rather than by a chunk name.
+- **A guard reached for a Pinia store on every navigation.** The office session
+  guard is global, and it called `useSession()` before checking whether the route
+  was an office one — which made the customer booking flow depend on a store
+  existing. A public-route test failed on it, in the harness rather than in
+  production, which is the cheap place to find it.
+- **Test isolation, twice, in the same file.** Passing a fresh `createPinia()` to
+  `mount` while the test held another meant the store the form wrote to was not the
+  store the assertions read. And mounted apps stay installed in the
+  module-singleton router, so a `beforeEach` guard resolved its store through a
+  *previous* test's app and found it still signed in. Fixed by passing the instance
+  to `useSession(pinia)` explicitly and by `enableAutoUnmount(afterEach)` — both
+  worth knowing before writing the next office spec.
 
 ## Known Phase 1 limitations
 
