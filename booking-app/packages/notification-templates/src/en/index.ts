@@ -84,7 +84,10 @@ export const enTemplates: LocaleTemplates = {
   }),
 
   REMINDER_24H: (data) => ({
-    subject: `Reminder: your appointment tomorrow at ${formatTime(data.startsAt, LOCALE)}`,
+    // The date, not "tomorrow". One template serves every configured offset, so a
+    // business running a 2-hour reminder as well sent "tomorrow" about an appointment
+    // later the same day — and somebody eventually turns up a day late because of it.
+    subject: `Reminder: your appointment on ${formatDate(data.startsAt, LOCALE)} at ${formatTime(data.startsAt, LOCALE)}`,
     blocks: [
       `Hello ${data.customerFirstName},`,
       `A reminder about your appointment.`,

@@ -88,7 +88,8 @@ export const deTemplates: LocaleTemplates = {
   }),
 
   REMINDER_24H: (data) => ({
-    subject: `Erinnerung: Ihr Termin morgen um ${formatTime(data.startsAt, LOCALE)} Uhr`,
+    // Das Datum statt „morgen“: dieselbe Vorlage bedient jeden konfigurierten Vorlauf.
+    subject: `Erinnerung: Ihr Termin am ${formatDate(data.startsAt, LOCALE)} um ${formatTime(data.startsAt, LOCALE)} Uhr`,
     blocks: [
       `Guten Tag ${data.customerFirstName},`,
       `wir möchten Sie an Ihren Termin erinnern.`,
