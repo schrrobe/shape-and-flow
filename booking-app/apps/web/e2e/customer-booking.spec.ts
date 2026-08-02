@@ -71,11 +71,16 @@ test('a reserved slot disappears for the next visitor while the first is still p
   page,
   browser,
 }) => {
-  const reserved = await reserveSlot(page, {
-    firstName: 'Anna',
-    lastName: 'Becker',
-    email: 'anna@example.com',
-  });
+  // A week out, and not because the test needs the distance: the earliest bookable day
+  // is the one the minimum-notice window is eating into, so by mid-afternoon it can be
+  // down to its last two or three slots — and this test's second assertion is that the
+  // reserved day still has *others*. A whole working day cannot run out that way, so the
+  // test now fails for the reason it is about rather than for the time it was run at.
+  const reserved = await reserveSlot(
+    page,
+    { firstName: 'Anna', lastName: 'Becker', email: 'anna@example.com' },
+    { weeksAhead: 1 },
+  );
 
   // A second visitor, with their own session and their own draft.
   const second = await browser.newPage();
@@ -86,6 +91,8 @@ test('a reserved slot disappears for the next visitor while the first is still p
     if ((await any.count()) > 0) await any.click();
     else await second.getByTestId('employee-card').first().click();
 
+    // The same week the first visitor booked in, one click along like they did.
+    await second.getByTestId('next-week').click();
     await expect(second.getByTestId('slot').first()).toBeVisible();
     // The held slot is gone even though nobody has paid: PENDING_PAYMENT blocks.
     await expect(slotsOn(second, reserved.date).filter({ hasText: reserved.label })).toHaveCount(0);
