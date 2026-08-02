@@ -1,5 +1,6 @@
 import js from '@eslint/js';
 import eslintConfigPrettier from 'eslint-config-prettier';
+import { createTypeScriptImportResolver } from 'eslint-import-resolver-typescript';
 import importX from 'eslint-plugin-import-x';
 import pluginVue from 'eslint-plugin-vue';
 import globals from 'globals';
@@ -17,6 +18,10 @@ export const DEFAULT_IGNORES = [
   '**/test-results/**',
   '**/*.d.ts',
 ];
+
+/** Extensions import-x may append when following an import to a file. */
+const TS_EXTENSIONS = ['.ts', '.tsx', '.cts', '.mts', '.js', '.jsx', '.cjs', '.mjs'];
+const TS_EXTENSIONS_WITH_VUE = [...TS_EXTENSIONS, '.vue'];
 
 /**
  * Files that legitimately read `process.env`: the one validated config module,
@@ -95,6 +100,34 @@ export function createEslintConfig(options = {}) {
         },
       },
       plugins: { 'import-x': importX },
+      settings: {
+        // no-cycle has to follow imports to real files to mean anything, and it
+        // fails silently in both directions if either half of that is missing.
+        //
+        // Resolution: this codebase writes ESM specifiers (`./interval.js`)
+        // that point at TypeScript sources, which the plain Node resolver
+        // cannot follow.
+        //
+        // Parsing: once a dependency is resolved it still has to be read, and
+        // import-x parses dependencies with espree unless told otherwise. A
+        // return type annotation is enough to make that throw, and an
+        // unparseable dependency contributes no edges to the graph.
+        //
+        // Get either wrong and no-cycle reports nothing, which is
+        // indistinguishable from a codebase that has no cycles.
+        'import-x/resolver-next': [
+          createTypeScriptImportResolver({
+            project: `${tsconfigRootDir}/tsconfig.json`,
+            alwaysTryTypes: true,
+            ...(vue ? { extensions: TS_EXTENSIONS_WITH_VUE } : {}),
+          }),
+        ],
+        'import-x/extensions': vue ? TS_EXTENSIONS_WITH_VUE : TS_EXTENSIONS,
+        'import-x/parsers': {
+          '@typescript-eslint/parser': ['.ts', '.tsx', '.cts', '.mts'],
+          ...(vue ? { 'vue-eslint-parser': ['.vue'] } : {}),
+        },
+      },
       rules: {
         // Promise correctness. A dropped promise in a booking or payment path
         // is a silently lost side effect, so both of these are errors.
@@ -112,9 +145,18 @@ export function createEslintConfig(options = {}) {
           { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' },
         ],
 
-        // TypeScript is the source of truth for module resolution, so the
-        // plugin is here only for deterministic import ordering.
+        // TypeScript already reports unresolved imports, and it does it with
+        // full knowledge of the project graph, so the plugin's own check would
+        // only add a second opinion on the same question.
         'import-x/no-unresolved': 'off',
+
+        // A cycle makes module initialisation order significant, which turns
+        // an unrelated import reshuffle into an undefined at load time. Ten
+        // levels is deep enough to catch the indirect ones that are hard to
+        // see by reading; external packages are skipped because their cycles
+        // are not ours to fix.
+        'import-x/no-cycle': ['error', { maxDepth: 10, ignoreExternal: true }],
+        'import-x/no-self-import': 'error',
         'import-x/order': [
           'error',
           {
