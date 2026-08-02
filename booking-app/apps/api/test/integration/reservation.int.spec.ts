@@ -9,7 +9,7 @@ import { ManagementTokenService } from '../../src/manage/management-token.servic
 import { OutboxRecorder } from '../../src/messaging/outbox/outbox.recorder.js';
 import { AvailabilitySnapshotService } from '../../src/public/availability-snapshot.service.js';
 import { prisma, resetDatabase } from '../database.harness.js';
-import { SLOT_FRIDAY_0900, seedOrganization } from '../factories/index.js';
+import { SLOT_FRIDAY_0900, makeBooking, seedOrganization } from '../factories/index.js';
 import { loadOrganization } from '../public-app.harness.js';
 
 import type { ReserveInput } from '../../src/booking/reservation.service.js';
@@ -247,6 +247,27 @@ describe('any available employee', () => {
     // The second employee now has fewer bookings that day, so selectEmployee prefers
     // them. Without this the whole day would land on one person.
     expect(second.booking.employeeId).not.toBe(first.booking.employeeId);
+  });
+
+  it('counts the local day rather than the UTC one', async () => {
+    // Berlin is UTC+2 in August, so 00:30 local on the Friday is 22:30Z on the Thursday.
+    // A window running from UTC midnight files that booking under the previous day:
+    // employee1 then looks idle, wins the tie-break, and the fuller calendar gets fuller.
+    await prisma.booking.create({
+      data: {
+        ...makeBooking(ctx, {
+          status: 'CONFIRMED',
+          startsAt: new Date('2026-08-13T22:30:00.000Z'),
+          expiresAt: null,
+          employeeId: ctx.employee1.id,
+        }),
+        confirmedAt: NOW,
+      },
+    });
+
+    const { booking } = await service.reserve(input({ employeeId: null }));
+
+    expect(booking.employeeId).toBe(ctx.employee2.id);
   });
 
   it('reports SLOT_UNAVAILABLE when nobody is free', async () => {

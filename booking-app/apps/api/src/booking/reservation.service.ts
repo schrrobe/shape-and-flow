@@ -9,7 +9,11 @@ import { selectEmployee } from '../domain/employee-selection/select-employee.js'
 import { Money } from '../domain/money/money.js';
 import { resolveEffectivePrice } from '../domain/pricing/pricing.js';
 import { CLOCK } from '../domain/time/clock.js';
-import { instantToLocalDate } from '../domain/time/local-time.js';
+import {
+  addLocalDays,
+  instantToLocalDate,
+  wallClockToInstantOrThrow,
+} from '../domain/time/local-time.js';
 import { ManagementTokenService } from '../manage/management-token.service.js';
 import { OutboxRecorder } from '../messaging/outbox/outbox.recorder.js';
 import { JOB } from '../messaging/queues/job-contracts.js';
@@ -299,10 +303,12 @@ export class ReservationService {
     const zone = this.organizations.getTimezone();
     const date = instantToLocalDate(startsAt, zone);
 
-    // The local day, as an instant range. Padded like the snapshot window for the same
-    // reason: local midnight is not UTC midnight.
-    const dayStart = new Date(`${date}T00:00:00.000Z`);
-    const dayEnd = new Date(dayStart.getTime() + 86_400_000);
+    // The local day, as an instant range, through the time primitives. Taking UTC
+    // midnight and adding 24 hours shifts the window by the zone's offset, so "how many
+    // bookings does this employee have today" counted part of the neighbouring day — and
+    // load balancing then handed the appointment to the busier person.
+    const dayStart = wallClockToInstantOrThrow(date, 0, zone);
+    const dayEnd = wallClockToInstantOrThrow(addLocalDays(date, 1, zone), 0, zone);
 
     const [employees, counts] = await Promise.all([
       this.prisma.employee.findMany({
