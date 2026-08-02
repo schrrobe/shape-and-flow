@@ -208,6 +208,75 @@ describe('outside the fee window', () => {
   });
 });
 
+describe('the notifications a request produces', () => {
+  it('queues a notification row for every send event it records', async () => {
+    const { booking } = await openRequest();
+
+    // The send processor looks the row up by id. An event whose payload names something
+    // that is not a notification is a job that can only ever fail.
+    const events = await prisma.outboxEvent.findMany({
+      where: { eventType: JOB.NOTIFICATION_SEND },
+    });
+    expect(events.length).toBeGreaterThan(0);
+
+    for (const event of events) {
+      const { notificationId } = event.payload as { notificationId: string };
+      await expect(
+        prisma.notification.findUniqueOrThrow({ where: { id: notificationId } }),
+      ).resolves.toBeDefined();
+    }
+
+    expect(
+      await prisma.notification.count({
+        where: { bookingId: booking.id, kind: 'CANCELLATION_REQUEST_RECEIVED' },
+      }),
+    ).toBe(1);
+    expect(
+      await prisma.notification.count({
+        where: { bookingId: booking.id, kind: 'OFFICE_CANCELLATION_REQUEST' },
+      }),
+    ).toBe(1);
+  });
+
+  it('tells the customer when their request is rejected', async () => {
+    const { booking, requestId } = await openRequest();
+
+    await service.decideRequest({
+      requestId,
+      officeUserId: ctx.owner.id,
+      decision: 'REJECTED',
+      note: 'zu kurzfristig',
+    });
+
+    const decided = await prisma.notification.findFirstOrThrow({
+      where: { bookingId: booking.id, kind: 'CANCELLATION_REQUEST_DECIDED' },
+    });
+    expect((decided.payload as { approved: boolean }).approved).toBe(false);
+  });
+
+  it('tells the customer once when their request is approved', async () => {
+    const { booking, requestId } = await openRequest();
+
+    await service.decideRequest({ requestId, officeUserId: ctx.owner.id, decision: 'APPROVED' });
+
+    expect(
+      await prisma.notification.count({
+        where: { bookingId: booking.id, kind: 'CANCELLATION_REQUEST_DECIDED' },
+      }),
+    ).toBe(1);
+
+    // The decision message covers it, so the generic cancellation email must not be
+    // queued as well — two emails about one cancellation.
+    const event = await prisma.outboxEvent.findFirstOrThrow({
+      where: { aggregateId: booking.id, eventType: JOB.BOOKING_CANCELED },
+    });
+    expect(
+      (event.payload as { customerNotificationAlreadyQueued?: boolean })
+        .customerNotificationAlreadyQueued,
+    ).toBe(true);
+  });
+});
+
 describe('inside the fee window', () => {
   it('opens a request and leaves the booking confirmed', async () => {
     await withSettings({ cancellationFeePolicy: 'PERCENTAGE', cancellationFeePercent: 50 });

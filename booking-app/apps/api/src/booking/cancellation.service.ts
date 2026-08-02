@@ -10,6 +10,7 @@ import { computeSuggestedRetainedAmount } from '../domain/pricing/cancellation-f
 import { CLOCK } from '../domain/time/clock.js';
 import { OutboxRecorder } from '../messaging/outbox/outbox.recorder.js';
 import { JOB } from '../messaging/queues/job-contracts.js';
+import { RequestNotificationService } from '../notification/request-notification.service.js';
 import { OrganizationContextService } from '../organization/organization-context.service.js';
 import { BookingStatus, PaymentStatus, Prisma, RefundReason } from '../prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
@@ -75,6 +76,7 @@ export class CancellationService {
     private readonly organizations: OrganizationContextService,
     private readonly outbox: OutboxRecorder,
     private readonly audit: AuditService,
+    private readonly requestNotifications: RequestNotificationService,
     @Inject(CLOCK) private readonly clock: Clock,
   ) {}
 
@@ -195,14 +197,14 @@ export class CancellationService {
           select: { id: true },
         });
 
-        // The office has to be told, and the customer has to be told it is pending. Both
-        // through the outbox, so the notifications commit with the request.
-        await this.outbox.record(tx, {
-          organizationId: booking.organizationId,
-          aggregateType: 'CancellationRequest',
-          aggregateId: request.id,
-          eventType: JOB.NOTIFICATION_SEND,
-          payload: { organizationId: booking.organizationId, notificationId: request.id },
+        // The office has to be told, and the customer has to be told it is pending.
+        // Composed as real notification rows in this transaction, so they commit with
+        // the request.
+        await this.requestNotifications.queueCancellationReceived(tx, {
+          requestId: request.id,
+          bookingId: booking.id,
+          suggestedRetainedCents: suggestedRetained.amountCents,
+          reason: reason ?? null,
         });
 
         return { outcome: 'REQUESTED' as const, requestId: request.id, suggestedRetained };
@@ -270,6 +272,14 @@ export class CancellationService {
 
           if (input.decision === 'REJECTED') {
             await tx.cancellationRequest.update({ where: { id: request.id }, data: decided });
+            await this.requestNotifications.queueCancellationDecided(tx, {
+              requestId: request.id,
+              bookingId: booking.id,
+              approved: false,
+              retainedCents: 0,
+              refundedCents: 0,
+              note: input.note ?? null,
+            });
             await this.auditDecision(tx, request, input, null);
             return;
           }
@@ -283,6 +293,15 @@ export class CancellationService {
               retainedAmountCents: retained.amountCents,
               ...(refundId === null ? {} : { refundId }),
             },
+          });
+
+          await this.requestNotifications.queueCancellationDecided(tx, {
+            requestId: request.id,
+            bookingId: booking.id,
+            approved: true,
+            retainedCents: retained.amountCents,
+            refundedCents: paid.minus(retained).amountCents,
+            note: input.note ?? null,
           });
 
           await this.auditDecision(tx, request, input, retained.amountCents);
@@ -345,6 +364,9 @@ export class CancellationService {
         organizationId: booking.organizationId,
         bookingId: booking.id,
         ...(refundId === null ? {} : { refundId }),
+        // The decision message above already tells the customer, and says more than the
+        // generic one would. Without this they get two emails about one cancellation.
+        customerNotificationAlreadyQueued: true,
       },
     });
 

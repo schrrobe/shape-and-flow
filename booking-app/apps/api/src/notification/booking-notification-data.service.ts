@@ -48,9 +48,16 @@ export class BookingNotificationData {
     @Inject(ENV) private readonly config: AppConfig,
   ) {}
 
-  /** The booking, or null when it has been deleted since the event was written. */
-  async load(bookingId: string): Promise<BookingRow | null> {
-    const booking = await this.prisma.booking.findUnique({
+  /**
+   * The booking, or null when it has been deleted since the event was written.
+   *
+   * Takes an optional transaction client because a caller may be composing a message
+   * about a booking it has just created and not yet committed — a reschedule
+   * approval builds the replacement and announces it in one transaction, and a read
+   * on a fresh connection would not see it.
+   */
+  async load(bookingId: string, tx?: Prisma.TransactionClient): Promise<BookingRow | null> {
+    const booking = await (tx ?? this.prisma).booking.findUnique({
       where: { id: bookingId },
       select: BOOKING_FOR_NOTIFICATION,
     });

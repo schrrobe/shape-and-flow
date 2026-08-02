@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 
 import { ManagementTokenModule } from '../manage/management-token.module.js';
+import { NotificationModule } from '../notification/notification.module.js';
 import { PaymentModule } from '../payment/payment.module.js';
 import { PublicBookingsController } from '../public/public-bookings.controller.js';
 import { PublicModule } from '../public/public.module.js';
@@ -28,9 +29,21 @@ import { ReservationService } from './reservation.service.js';
  * `POST /public/bookings` is registered here rather than in PublicModule even though it
  * sits under that path, because everything it calls lives here. The alternative is two
  * mutually dependent modules and a payment provider in every catalog test.
+ *
+ * NotificationModule is imported for `RequestNotificationService`, and only in this
+ * direction: NotificationModule imports nothing, which is what keeps the two from
+ * becoming a cycle. Cancelling and rescheduling compose customer-facing messages in
+ * the transaction that decides the request, so the message and the decision commit
+ * together.
  */
 @Module({
-  imports: [PublicModule, ManagementTokenModule, PaymentModule, AuditWriterModule],
+  imports: [
+    PublicModule,
+    ManagementTokenModule,
+    PaymentModule,
+    AuditWriterModule,
+    NotificationModule,
+  ],
   controllers: [PublicBookingsController],
   providers: [
     ReservationService,

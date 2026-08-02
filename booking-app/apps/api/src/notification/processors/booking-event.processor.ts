@@ -115,8 +115,24 @@ export class BookingEventProcessor {
     await this.reminders.schedule(booking.id);
   }
 
-  /** `booking.canceled` — who cancelled decides which template. */
-  async canceled(payload: { organizationId: string; bookingId: string }): Promise<void> {
+  /**
+   * `booking.canceled` — who cancelled decides which template.
+   *
+   * `customerNotificationAlreadyQueued` is set by a transaction that already composed a
+   * customer message about this cancellation — a decided cancellation request, which
+   * names the retained amount and the office's note. Sending the generic one as well
+   * would be two emails about one decision, the second saying less than the first.
+   */
+  async canceled(payload: {
+    organizationId: string;
+    bookingId: string;
+    customerNotificationAlreadyQueued?: boolean | undefined;
+  }): Promise<void> {
+    if (payload.customerNotificationAlreadyQueued === true) {
+      await this.reminders.cancelFor(payload.bookingId);
+      return;
+    }
+
     const booking = await this.data.load(payload.bookingId);
     if (booking === null) return;
 
@@ -175,31 +191,36 @@ export class BookingEventProcessor {
     bookingId: string;
     previousBookingId: string;
     managementToken?: string | undefined;
+    customerNotificationAlreadyQueued?: boolean | undefined;
   }): Promise<void> {
     const booking = await this.data.load(payload.bookingId);
     const previous = await this.data.load(payload.previousBookingId);
     if (booking === null || previous === null) return;
 
-    await withSerializationRetry(
-      () =>
-        this.prisma.$transaction(async (tx) => {
-          await this.notifications.queue(tx, {
-            organizationId: booking.organizationId,
-            kind: 'BOOKING_RESCHEDULED',
-            channel: 'EMAIL',
-            locale: booking.locale,
-            recipient: booking.customer.email,
-            bookingId: booking.id,
-            customerId: booking.customer.id,
-            data: {
-              ...this.data.appointmentData(booking),
-              manageUrl: this.data.manageUrl(payload.managementToken),
-              previousStartsAt: previous.startsAt,
-            },
-          });
-        }),
-      'notify-booking-rescheduled',
-    );
+    // An approved reschedule request already told the customer, with the office's note.
+    // The reminder work below still has to happen either way.
+    if (payload.customerNotificationAlreadyQueued !== true) {
+      await withSerializationRetry(
+        () =>
+          this.prisma.$transaction(async (tx) => {
+            await this.notifications.queue(tx, {
+              organizationId: booking.organizationId,
+              kind: 'BOOKING_RESCHEDULED',
+              channel: 'EMAIL',
+              locale: booking.locale,
+              recipient: booking.customer.email,
+              bookingId: booking.id,
+              customerId: booking.customer.id,
+              data: {
+                ...this.data.appointmentData(booking),
+                manageUrl: this.data.manageUrl(payload.managementToken),
+                previousStartsAt: previous.startsAt,
+              },
+            });
+          }),
+        'notify-booking-rescheduled',
+      );
+    }
 
     // The old booking's jobs are keyed on its own id and time, so they need removing
     // separately — and the new booking needs its own. Either way `fire` would refuse the

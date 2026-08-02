@@ -9,6 +9,7 @@ import { NotificationSendProcessor } from './processors/notification-send.proces
 import { ReminderProcessor } from './processors/reminder.processor.js';
 import { ReminderReconciler } from './reminder.reconciler.js';
 import { ReminderService } from './reminder.service.js';
+import { RequestNotificationService } from './request-notification.service.js';
 
 /**
  * Contacting people.
@@ -28,6 +29,7 @@ import { ReminderService } from './reminder.service.js';
     ReminderService,
     ReminderProcessor,
     ReminderReconciler,
+    RequestNotificationService,
   ],
   exports: [
     NotificationService,
@@ -39,6 +41,7 @@ import { ReminderService } from './reminder.service.js';
     ReminderService,
     ReminderProcessor,
     ReminderReconciler,
+    RequestNotificationService,
   ],
 })
 export class NotificationModule {}

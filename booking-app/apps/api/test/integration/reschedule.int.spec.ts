@@ -104,6 +104,70 @@ beforeEach(async () => {
   return testApp.close;
 });
 
+describe('the notifications a request produces', () => {
+  it('queues a notification row for every send event it records', async () => {
+    await openRequest();
+
+    const events = await prisma.outboxEvent.findMany({
+      where: { eventType: JOB.NOTIFICATION_SEND },
+    });
+    expect(events.length).toBeGreaterThan(0);
+
+    for (const event of events) {
+      const { notificationId } = event.payload as { notificationId: string };
+      await expect(
+        prisma.notification.findUniqueOrThrow({ where: { id: notificationId } }),
+      ).resolves.toBeDefined();
+    }
+
+    expect(
+      await prisma.notification.count({ where: { bookingId, kind: 'RESCHEDULE_REQUEST_RECEIVED' } }),
+    ).toBe(1);
+  });
+
+  it('tells the customer when their request is rejected, with no link to a moved booking', async () => {
+    const requestId = await openRequest();
+
+    await service.decide({
+      requestId,
+      officeUserId: ctx.owner.id,
+      decision: 'REJECTED',
+      note: 'an dem Tag ausgebucht',
+    });
+
+    const decided = await prisma.notification.findFirstOrThrow({
+      where: { bookingId, kind: 'RESCHEDULE_REQUEST_DECIDED' },
+    });
+    expect(decided.payload).toMatchObject({ approved: false, manageUrl: null });
+  });
+
+  it('tells the customer once when their request is approved', async () => {
+    const requestId = await openRequest();
+
+    const { newBookingId } = await service.decide({
+      requestId,
+      officeUserId: ctx.owner.id,
+      decision: 'APPROVED',
+    });
+    if (newBookingId === null) throw new Error('expected a replacement booking');
+
+    // Against the replacement, which is the booking the customer now has.
+    expect(
+      await prisma.notification.count({
+        where: { bookingId: newBookingId, kind: 'RESCHEDULE_REQUEST_DECIDED' },
+      }),
+    ).toBe(1);
+
+    const event = await prisma.outboxEvent.findFirstOrThrow({
+      where: { aggregateId: newBookingId, eventType: JOB.BOOKING_RESCHEDULED },
+    });
+    expect(
+      (event.payload as { customerNotificationAlreadyQueued?: boolean })
+        .customerNotificationAlreadyQueued,
+    ).toBe(true);
+  });
+});
+
 describe('asking for a new slot', () => {
   it('creates a request without touching the booking', async () => {
     const requestId = await openRequest();

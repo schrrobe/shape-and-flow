@@ -145,7 +145,7 @@ export const enTemplates: LocaleTemplates = {
         ? `Your appointment has been moved. New time: ${when(data)} with ${data.employeeName}.`
         : `We are not able to move your appointment. It stays at ${when(data)}.`,
       data.note === null ? `Any questions: ${data.businessPhone}` : `Note: ${data.note}`,
-      `Manage your booking: ${data.manageUrl}`,
+      ...(data.manageUrl === null ? [] : [`Manage your booking: ${data.manageUrl}`]),
     ],
   }),
 

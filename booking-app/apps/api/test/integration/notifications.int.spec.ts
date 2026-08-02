@@ -462,6 +462,24 @@ describe('other booking events', () => {
     expect(testApp.email.sent[0]?.text).toContain('10,00');
   });
 
+  it('adds no generic message when the decision already told the customer', async () => {
+    await prisma.booking.update({
+      where: { id: bookingId },
+      data: { status: 'CANCELED_BY_CUSTOMER', canceledAt: NOW },
+    });
+
+    // Approving a cancellation request queues CANCELLATION_REQUEST_DECIDED in the same
+    // transaction as the cancellation. The generic email would be a second message
+    // about the same decision, saying less.
+    await bookingEvents.canceled({
+      organizationId: ctx.organization.id,
+      bookingId,
+      customerNotificationAlreadyQueued: true,
+    });
+
+    expect(await prisma.notification.count({ where: { bookingId } })).toBe(0);
+  });
+
   it('uses the business template when the business cancelled', async () => {
     await prisma.booking.update({
       where: { id: bookingId },

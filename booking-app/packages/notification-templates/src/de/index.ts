@@ -149,7 +149,7 @@ export const deTemplates: LocaleTemplates = {
         ? `Ihr Termin wurde verschoben. Neu: ${when(data)} bei ${data.employeeName}.`
         : `leider können wir Ihren Termin nicht verschieben. Es bleibt bei ${when(data)}.`,
       data.note === null ? `Bei Fragen: ${data.businessPhone}` : `Anmerkung: ${data.note}`,
-      `Termin verwalten: ${data.manageUrl}`,
+      ...(data.manageUrl === null ? [] : [`Termin verwalten: ${data.manageUrl}`]),
     ],
   }),
 
