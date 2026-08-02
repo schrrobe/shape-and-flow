@@ -203,6 +203,32 @@ export function createEslintConfig(options = {}) {
       rules: { 'no-restricted-syntax': 'off' },
     },
 
+    // The one restriction that has to survive the exemption above. A committed
+    // `it.only` shrinks the suite to a single case and CI still reports green,
+    // so the failure mode is a silent loss of coverage rather than a red build.
+    // It is restated here instead of joining the main list because that list is
+    // switched off for exactly the files this needs to cover.
+    {
+      files: ['**/*.spec.{ts,tsx}', '**/*.int.spec.ts', '**/test/**', '**/e2e/**'],
+      rules: {
+        'no-restricted-syntax': [
+          'error',
+          {
+            // `it.only`, `test.only`, `describe.only`, `suite.only`, `bench.only`.
+            selector:
+              "MemberExpression[object.name=/^(it|test|describe|suite|bench)$/][property.name='only']",
+            message: 'Remove .only before committing: CI would run a green but nearly empty suite.',
+          },
+          {
+            // The chained forms: `it.concurrent.only`, `test.describe.only`.
+            selector:
+              "MemberExpression[object.object.name=/^(it|test|describe)$/][property.name='only']",
+            message: 'Remove .only before committing: CI would run a green but nearly empty suite.',
+          },
+        ],
+      },
+    },
+
     // Re-assert the Vue parser for SFCs.
     //
     // `strictTypeChecked` sets `parser: tseslint.parser` for every file it matches, which for a
