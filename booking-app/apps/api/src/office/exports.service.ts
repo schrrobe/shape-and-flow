@@ -170,7 +170,17 @@ export class ExportsService {
         },
       }),
       this.prisma.refund.findMany({
-        where: { organizationId, requestedAt: { gte: from, lt: to } },
+        where: {
+          organizationId,
+          // Filtered on the date the row is *dated* with below — settlement, falling back
+          // to the request. Filtering on `requestedAt` while printing `settledAt` files a
+          // refund requested on the 30th and settled on the 2nd under the wrong month and
+          // then omits it from the right one, so neither file reconciles.
+          OR: [
+            { settledAt: { gte: from, lt: to } },
+            { settledAt: null, requestedAt: { gte: from, lt: to } },
+          ],
+        },
         select: {
           id: true,
           amountCents: true,

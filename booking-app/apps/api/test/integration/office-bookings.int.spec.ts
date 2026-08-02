@@ -1073,6 +1073,74 @@ describe('CSV export', () => {
     expect(response.text).toContain('-10,00');
   });
 
+  it('files a refund under the month it settled in', async () => {
+    // The ledger dates each refund at its settlement. Selecting them by request date
+    // instead put a refund requested in August and settled in September into August's
+    // file — carrying a September date — and left it out of September's altogether, so
+    // neither month reconciled against Stripe.
+    const owner = await signedInAs('OWNER');
+    const booking = await bookingAt(berlin(NEXT_MONDAY, '10:00'));
+    await paidWithCard(booking.id, 4500);
+
+    const payment = await prisma.payment.findFirstOrThrow({ where: { bookingId: booking.id } });
+    await prisma.refund.create({
+      data: {
+        organizationId: ctx.organization.id,
+        bookingId: booking.id,
+        paymentId: payment.id,
+        amountCents: 1000,
+        currency: 'EUR',
+        status: 'SUCCEEDED',
+        reason: 'GOODWILL',
+        idempotencyKey: randomUUID(),
+        requestedAt: new Date('2026-08-31T20:00:00.000Z'),
+        settledAt: new Date('2026-09-01T06:00:00.000Z'),
+      },
+    });
+
+    const august = await owner
+      .get('/api/office/exports/payments.csv')
+      .query({ from: '2026-08-01', to: '2026-08-31' })
+      .expect(200);
+    expect(august.text).not.toContain('REFUND');
+
+    const september = await owner
+      .get('/api/office/exports/payments.csv')
+      .query({ from: '2026-09-01', to: '2026-09-30' })
+      .expect(200);
+    expect(september.text).toContain('REFUND');
+    expect(september.text).toContain('-10,00');
+  });
+
+  it('keeps an unsettled refund at the date it was requested', async () => {
+    const owner = await signedInAs('OWNER');
+    const booking = await bookingAt(berlin(NEXT_MONDAY, '10:00'));
+    await paidWithCard(booking.id, 4500);
+
+    const payment = await prisma.payment.findFirstOrThrow({ where: { bookingId: booking.id } });
+    await prisma.refund.create({
+      data: {
+        organizationId: ctx.organization.id,
+        bookingId: booking.id,
+        paymentId: payment.id,
+        amountCents: 1000,
+        currency: 'EUR',
+        status: 'PENDING',
+        reason: 'GOODWILL',
+        idempotencyKey: randomUUID(),
+        requestedAt: new Date('2026-08-20T09:00:00.000Z'),
+        settledAt: null,
+      },
+    });
+
+    const august = await owner
+      .get('/api/office/exports/payments.csv')
+      .query({ from: '2026-08-01', to: '2026-08-31' })
+      .expect(200);
+
+    expect(august.text).toContain('REFUND');
+  });
+
   it('is closed to an EMPLOYEE', async () => {
     const employee = await signedInAs('EMPLOYEE', { employeeId: ctx.employee1.id });
 
