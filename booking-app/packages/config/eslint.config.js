@@ -4,6 +4,7 @@ import { createTypeScriptImportResolver } from 'eslint-import-resolver-typescrip
 import importX from 'eslint-plugin-import-x';
 import sonarjs from 'eslint-plugin-sonarjs';
 import pluginVue from 'eslint-plugin-vue';
+import pluginVueA11y from 'eslint-plugin-vuejs-accessibility';
 import globals from 'globals';
 import tseslint from 'typescript-eslint';
 import vueParser from 'vue-eslint-parser';
@@ -69,6 +70,29 @@ export function createEslintConfig(options = {}) {
     js.configs.recommended,
 
     ...(vue ? pluginVue.configs['flat/recommended'] : []),
+
+    ...(vue ? pluginVueA11y.configs['flat/recommended'] : []),
+
+    ...(vue
+      ? [
+          {
+            files: ['**/*.vue'],
+            rules: {
+              // `some` rather than the default `every`. The default demands that
+              // a label both wrap its control and carry a `for`, which is
+              // stricter than the accessibility it stands for: a `for` pointing
+              // at the control's id is a complete association on its own, and so
+              // is wrapping a checkbox in its own label. Left at the default,
+              // the rule reports correct markup in the field components and in
+              // the exports form, and a rule that cries wolf gets switched off.
+              'vuejs-accessibility/label-has-for': [
+                'error',
+                { required: { some: ['nesting', 'id'] } },
+              ],
+            },
+          },
+        ]
+      : []),
 
     ...(vue
       ? [
