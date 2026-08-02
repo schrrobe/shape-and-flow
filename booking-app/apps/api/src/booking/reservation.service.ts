@@ -7,6 +7,7 @@ import { isSlotBookable } from '../domain/availability/engine.js';
 import { asOfficeSnapshot } from '../domain/availability/office-view.js';
 import { selectEmployee } from '../domain/employee-selection/select-employee.js';
 import { Money } from '../domain/money/money.js';
+import { resolveEffectivePrice } from '../domain/pricing/pricing.js';
 import { CLOCK } from '../domain/time/clock.js';
 import { instantToLocalDate } from '../domain/time/local-time.js';
 import { ManagementTokenService } from '../manage/management-token.service.js';
@@ -26,7 +27,7 @@ import type { CustomerInput } from './customer-upsert.service.js';
 import type { AvailabilitySnapshot } from '../domain/availability/types.js';
 import type { EmployeeCandidate } from '../domain/employee-selection/select-employee.js';
 import type { Clock } from '../domain/time/clock.js';
-import type { Booking, BookingOrigin } from '../prisma/client.js';
+import type { Booking, BookingOrigin, Prisma } from '../prisma/client.js';
 import type { Locale } from '@shape-and-flow/booking-contracts';
 
 /** How many references to try before giving up. Each collision is a 1-in-a-billion event. */
@@ -144,15 +145,18 @@ export class ReservationService {
     );
   }
 
-  /** The service, with the buffers and price the booking will snapshot. */
+  /**
+   * The service, with the buffers and name the booking will snapshot.
+   *
+   * Not the price: that depends on which employee performs it, so it is read with the
+   * assignment inside the transaction — see `loadEffectiveAssignment`.
+   */
   private async loadService(serviceId: string): Promise<{
     id: string;
     name: string;
     durationMinutes: number;
     prepBufferMinutes: number;
     cleanupBufferMinutes: number;
-    priceCents: number;
-    currency: string;
   }> {
     const organizationId = this.organizations.getOrganizationId();
 
@@ -164,8 +168,6 @@ export class ReservationService {
         durationMinutes: true,
         prepBufferMinutes: true,
         cleanupBufferMinutes: true,
-        priceCents: true,
-        currency: true,
       },
     });
 
@@ -271,6 +273,60 @@ export class ReservationService {
     }));
   }
 
+  /**
+   * The employee-service pairing, and the price that pairing actually costs.
+   *
+   * Two things the reservation cannot take on trust, resolved by one row read inside
+   * the transaction that will do the insert:
+   *
+   *  - **That this employee performs this service at all.** An explicitly requested
+   *    employee never passes through the availability snapshot's assignment filter —
+   *    `resolveEmployee` hands the id straight back — and the slot re-check only asks
+   *    whether the calendar is free. Without this read, naming an employee who was
+   *    never assigned the service, was hidden from online booking, or was archived
+   *    books them anyway.
+   *  - **What it costs.** `EmployeeService.priceOverrideCents` is what the public
+   *    catalog quotes; the booking has to snapshot the same number, or the customer is
+   *    shown one price and charged another.
+   *
+   * A missing pairing is a `NOT_FOUND` with the service's own message, deliberately
+   * indistinguishable from an unknown service: whether a particular employee exists,
+   * is hidden or is archived is not something a public caller gets to learn by probing.
+   * The office may book somebody who is not offered online — that is what
+   * `isBookableOnline` means — but nobody may book an archived one.
+   */
+  private async loadEffectiveAssignment(
+    tx: Prisma.TransactionClient,
+    input: { organizationId: string; serviceId: string; employeeId: string; actor: ReserveActor },
+  ): Promise<{ employee: { id: string; displayName: string }; price: Money }> {
+    const assignment = await tx.employeeService.findFirst({
+      where: {
+        organizationId: input.organizationId,
+        serviceId: input.serviceId,
+        employeeId: input.employeeId,
+        employee: {
+          archivedAt: null,
+          ...(input.actor.type === 'CUSTOMER' ? { isBookableOnline: true } : {}),
+        },
+        service: { archivedAt: null },
+      },
+      select: {
+        priceOverrideCents: true,
+        employee: { select: { id: true, displayName: true } },
+        service: { select: { priceCents: true, currency: true } },
+      },
+    });
+
+    if (assignment === null) {
+      throw new AppError('NOT_FOUND', { message: 'Service not found.' });
+    }
+
+    return {
+      employee: assignment.employee,
+      price: resolveEffectivePrice(assignment.service, assignment),
+    };
+  }
+
   /** The transaction: lock, re-check, upsert the customer, insert, record history. */
   private async insert(
     input: ReserveInput & { employeeId: string; actor: ReserveActor },
@@ -280,8 +336,6 @@ export class ReservationService {
       durationMinutes: number;
       prepBufferMinutes: number;
       cleanupBufferMinutes: number;
-      priceCents: number;
-      currency: string;
     },
     expiresAt: Date | null,
   ): Promise<ReserveResult> {
@@ -329,8 +383,6 @@ export class ReservationService {
       durationMinutes: number;
       prepBufferMinutes: number;
       cleanupBufferMinutes: number;
-      priceCents: number;
-      currency: string;
     },
     expiresAt: Date | null,
     organizationId: string,
@@ -353,9 +405,11 @@ export class ReservationService {
             });
           }
 
-          const employee = await tx.employee.findFirstOrThrow({
-            where: { id: employeeId, organizationId },
-            select: { id: true, displayName: true },
+          const { employee, price } = await this.loadEffectiveAssignment(tx, {
+            organizationId,
+            serviceId: service.id,
+            employeeId,
+            actor: input.actor,
           });
 
           const customer = await this.customers.upsert(tx, organizationId, input.customer);
@@ -393,8 +447,8 @@ export class ReservationService {
               durationMinutesSnapshot: snapshot.service.durationMinutes,
               prepBufferMinutesSnapshot: snapshot.service.prepBufferMinutes,
               cleanupBufferMinutesSnapshot: snapshot.service.cleanupBufferMinutes,
-              priceCentsSnapshot: service.priceCents,
-              currency: service.currency,
+              priceCentsSnapshot: price.amountCents,
+              currency: price.currency,
               status,
               expiresAt,
               locale: input.locale,
@@ -440,19 +494,10 @@ export class ReservationService {
               payload: { organizationId, bookingId: booking.id, managementToken: token },
             });
 
-            return {
-              booking,
-              employee,
-              price: Money.fromCents(service.priceCents, service.currency),
-              managementToken: token,
-            };
+            return { booking, employee, price, managementToken: token };
           }
 
-          return {
-            booking,
-            employee,
-            price: Money.fromCents(service.priceCents, service.currency),
-          };
+          return { booking, employee, price };
         }),
       // Generous but bounded. The lock is held for the whole transaction, so a
       // stuck one delays other reservations for the same employee.

@@ -107,6 +107,33 @@ describe('a successful booking', () => {
     expect(event.dispatchedAt).toBeNull();
   });
 
+  it('quotes, snapshots and charges the employee price override', async () => {
+    // The catalog already shows this price. A booking that snapshotted the list price
+    // instead would show one number and take another.
+    await prisma.employeeService.update({
+      where: {
+        employeeId_serviceId: { employeeId: ctx.employee1.id, serviceId: ctx.service30.id },
+      },
+      data: { priceOverrideCents: 9900 },
+    });
+
+    const response = await post().expect(201);
+    const created = response.body as {
+      bookingId: string;
+      price: { amountCents: number; currency: string };
+    };
+
+    expect(created.price.amountCents).toBe(9900);
+
+    const booking = await prisma.booking.findUniqueOrThrow({ where: { id: created.bookingId } });
+    expect(booking.priceCentsSnapshot).toBe(9900);
+
+    const payment = await prisma.payment.findFirstOrThrow({
+      where: { bookingId: created.bookingId },
+    });
+    expect(payment.amountCents).toBe(9900);
+  });
+
   it('resolves the employee itself when the client does not name one', async () => {
     const response = await post(body({ employeeId: null })).expect(201);
     const created = response.body as { employeeId: string };

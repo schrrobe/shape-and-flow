@@ -133,6 +133,103 @@ describe('a successful reservation', () => {
   });
 });
 
+describe('the employee-service assignment', () => {
+  it('snapshots the resolved employee price override', async () => {
+    await prisma.employeeService.update({
+      where: {
+        employeeId_serviceId: { employeeId: ctx.employee1.id, serviceId: ctx.service30.id },
+      },
+      data: { priceOverrideCents: 9900 },
+    });
+
+    const { booking, price } = await service.reserve(input());
+
+    expect(booking.priceCentsSnapshot).toBe(9900);
+    expect(price.amountCents).toBe(9900);
+  });
+
+  it('keeps a zero override at zero instead of falling back to the list price', async () => {
+    // `??` not `||`: a service one employee performs free of charge is a real case,
+    // and the fallback would quietly charge 45 euros for it.
+    await prisma.employeeService.update({
+      where: {
+        employeeId_serviceId: { employeeId: ctx.employee1.id, serviceId: ctx.service30.id },
+      },
+      data: { priceOverrideCents: 0 },
+    });
+
+    const { booking, price } = await service.reserve(input());
+
+    expect(booking.priceCentsSnapshot).toBe(0);
+    expect(price.amountCents).toBe(0);
+  });
+
+  it('uses the override of the employee it selected, not the one it was asked about', async () => {
+    for (const [employeeId, priceOverrideCents] of [
+      [ctx.employee1.id, 9900],
+      [ctx.employee2.id, 1200],
+    ] as const) {
+      await prisma.employeeService.update({
+        where: { employeeId_serviceId: { employeeId, serviceId: ctx.service30.id } },
+        data: { priceOverrideCents },
+      });
+    }
+
+    const result = await service.reserve(input({ employeeId: null }));
+    const assignment = await prisma.employeeService.findUniqueOrThrow({
+      where: {
+        employeeId_serviceId: { employeeId: result.employee.id, serviceId: ctx.service30.id },
+      },
+    });
+
+    expect(result.price.amountCents).toBe(
+      assignment.priceOverrideCents ?? ctx.service30.priceCents,
+    );
+    expect(result.booking.priceCentsSnapshot).toBe(result.price.amountCents);
+  });
+
+  it.each([
+    [
+      'unassigned',
+      async (): Promise<unknown> =>
+        await prisma.employeeService.deleteMany({
+          where: { employeeId: ctx.employee1.id, serviceId: ctx.service30.id },
+        }),
+    ],
+    [
+      'hidden',
+      async (): Promise<unknown> =>
+        await prisma.employee.update({
+          where: { id: ctx.employee1.id },
+          data: { isBookableOnline: false },
+        }),
+    ],
+    [
+      'archived',
+      async (): Promise<unknown> =>
+        await prisma.employee.update({
+          where: { id: ctx.employee1.id },
+          data: { archivedAt: NOW },
+        }),
+    ],
+  ])('rejects an explicitly requested %s employee', async (_label, arrange) => {
+    await arrange();
+
+    // A first-time customer, so the rollback is observable: the seeded organization
+    // already contains anna@example.com, and counting every row would count that one.
+    await expect(
+      service.reserve(
+        input({ customer: { ...input().customer, email: 'first-timer@example.com' } }),
+      ),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+
+    expect(await prisma.booking.count()).toBe(0);
+    expect(
+      await prisma.customer.count({ where: { emailNormalized: 'first-timer@example.com' } }),
+    ).toBe(0);
+  });
+});
+
 describe('any available employee', () => {
   it('resolves to a concrete employee, so the constraint has something to constrain', async () => {
     const { booking, employee } = await service.reserve(input({ employeeId: null }));
