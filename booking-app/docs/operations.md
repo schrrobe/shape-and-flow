@@ -1,0 +1,505 @@
+# Operations
+
+Everything needed to put this on a server, keep it there, and get it back after something
+goes wrong. Each runbook is meant to be followed by one person at an awkward hour, so the
+commands are complete and copy-pasteable rather than illustrative.
+
+Every command is run **from the repository root**.
+
+---
+
+## What runs
+
+Six containers, one of which exits before the others start.
+
+| Container            | What it is                            | Reachable from                |
+| -------------------- | ------------------------------------- | ----------------------------- |
+| `sf-booking-postgres` | PostgreSQL 17, one named volume       | the compose network only      |
+| `sf-booking-redis`    | Redis 7, append-only                  | the compose network only      |
+| `sf-booking-migrate`  | one-shot `prisma migrate deploy`      | nothing; it exits             |
+| `sf-booking-api`      | the HTTP API                          | `127.0.0.1:3001`              |
+| `sf-booking-worker`   | queues, sweeps and notifications      | nothing; it serves no port    |
+| `sf-booking-web`      | nginx serving the built bundle        | `127.0.0.1:8080`              |
+
+In front of them, on the host, is nginx: `infrastructure/nginx/booking.conf`. It terminates
+TLS, sends `/api` to the API container and everything else to the web container. It is the
+only thing listening on a public interface.
+
+`/api` goes to the API **directly**, never through the web container. The API trusts exactly
+one proxy hop (`app.set('trust proxy', 1)`); a second one would make every rate limit and
+every audit row record nginx's address instead of the caller's.
+
+### Health
+
+| Endpoint             | Who         | What it answers                                                       |
+| -------------------- | ----------- | --------------------------------------------------------------------- |
+| `/api/health/live`   | anyone      | the process is up. Touches nothing, so a database blip cannot restart it |
+| `/api/health/ready`  | anyone      | database, Redis and applied migrations, each named if it is the one down |
+| `/api/health/detail` | OWNER/ADMIN | queue depths, failed jobs, stuck outbox rows, unprocessed webhooks, pending notifications, oldest `EXPIRING` booking |
+
+`/api/health/ready` is what the container healthcheck asks and what a load balancer should
+ask. It reports 503 when a migration in the image has not been applied to the database —
+which catches the deploy where the migrate step did not run, a failure no connection check
+sees.
+
+### What the worker does on a schedule
+
+| Job                        | Cadence           | Why it exists                                              |
+| -------------------------- | ----------------- | ---------------------------------------------------------- |
+| `sweep.expired_reservations` | every minute    | releases slots whose payment window closed                 |
+| `sweep.stuck_expiring`     | every minute      | resolves bookings left mid-expiry                          |
+| `sweep.inbox`              | every 2 minutes   | re-drives webhooks that committed but never reached a queue |
+| `sweep.outbox`             | every 5 minutes   | re-drives domain events that committed but never enqueued  |
+| `sweep.notifications`      | every 5 minutes   | retries sends that failed                                  |
+| `sweep.reminders`          | 03:00 Berlin      | reconciles tomorrow's reminders                            |
+| `sweep.idempotency_keys`   | 03:15 Berlin      | prunes expired keys                                        |
+| `sweep.retention`          | 03:30 Berlin      | applies the configured retention period                    |
+
+These are why most incidents resolve themselves. Before intervening, check whether the sweep
+that owns the problem has had a chance to run.
+
+---
+
+## Before the first deployment
+
+You need:
+
+- a host with Docker and the compose plugin, and nginx installed on the host
+- a DNS `A`/`AAAA` record for the hostname pointing at it
+- Stripe keys, and later a webhook endpoint pointing at
+  `https://<hostname>/api/webhooks/stripe`
+
+### A caveat that applies today
+
+`NODE_ENV=production` refuses `fake` for the email and SMS providers, and the real Resend and
+Twilio adapters are **Task 3.4 and are not written yet**. Selecting them throws a named error
+at start-up rather than quietly sending nothing.
+
+So a deployment made today can only run with `NODE_ENV=development` and the fake providers —
+which is a staging environment, not a production one. Everything in this document works; what
+does not yet exist is a configuration in which a customer receives an email. Finish 3.4 before
+taking bookings from real people.
+
+---
+
+## Runbook: first deployment
+
+**1. Fetch the code and write the configuration.**
+
+```bash
+git clone <repository> shape-and-flow && cd shape-and-flow
+cp booking-app/.env.production.example booking-app/.env.production
+chmod 600 booking-app/.env.production
+$EDITOR booking-app/.env.production
+```
+
+Every value marked `replace_me` has to change. `POSTGRES_PASSWORD` and the password inside
+`DATABASE_URL` are the same password written twice — the compose file configures Postgres from
+one and the API connects with the other, and they must agree.
+
+**2. Build the images.**
+
+```bash
+docker build -f booking-app/apps/api/Dockerfile --target api     -t sf-booking-api:local     .
+docker build -f booking-app/apps/api/Dockerfile --target worker  -t sf-booking-worker:local  .
+docker build -f booking-app/apps/api/Dockerfile --target migrate -t sf-booking-migrate:local .
+docker build -f booking-app/apps/web/Dockerfile                  -t sf-booking-web:local     .
+```
+
+Note the trailing `.`: the build context is the repository root, because the lockfile and the
+workspace manifest live there.
+
+**3. Create the schema.**
+
+```bash
+docker compose --env-file booking-app/.env.production \
+               -f booking-app/docker-compose.prod.yml up -d --wait postgres redis
+
+docker compose --env-file booking-app/.env.production \
+               -f booking-app/docker-compose.prod.yml run --rm migrate
+```
+
+`--env-file` is not optional. Without it compose reads `booking-app/.env`, which is the
+*development* configuration, and would deploy against a database that does not exist here.
+
+The API and the worker are held back until step 6 on purpose. A first deployment has a
+database that is migrated but **empty**, and the API resolves `DEFAULT_ORGANIZATION_SLUG` at
+bootstrap and refuses to start when that organization does not exist — correctly, since an API
+serving a business that is not there has nothing useful to do. Seed first, start second. On
+every subsequent deployment this is a single `up -d --wait`, because the organization is
+already there.
+
+**4. The `CREATE EXTENSION` grant.**
+
+The first migration runs `CREATE EXTENSION IF NOT EXISTS btree_gist`, which the two exclusion
+constraints — the things that make a double booking impossible — depend on. On the compose
+stack this just works: `POSTGRES_USER` owns the database, and `btree_gist` is a *trusted*
+extension in PostgreSQL 13 and later, so ownership is enough.
+
+On a managed Postgres it may not be. If the migrate container fails with
+`permission denied to create extension "btree_gist"`, ask whoever holds superuser to run, once:
+
+```sql
+CREATE EXTENSION IF NOT EXISTS btree_gist;
+```
+
+and then re-run the deployment. Do not work around it by removing the constraint.
+
+**5. Seed the business and its first login.**
+
+```bash
+docker compose --env-file booking-app/.env.production \
+               -f booking-app/docker-compose.prod.yml \
+               run --rm migrate pnpm prisma:seed
+```
+
+The seed runs from the migrate image, which is the only one carrying dev dependencies — the
+API image has neither `tsx` nor the Prisma CLI, deliberately.
+
+Through the package script rather than naming the seed file: where that file lives is the
+API package's business, and a runbook that hard-codes the path goes stale the first time
+somebody moves it — silently, because a runbook is not compiled.
+
+It prints an owner and a staff password **once**. Write them down, log in, and change them.
+The passwords are generated rather than fixed, so a seeded database is not a
+known-credentials database.
+
+The seed creates a demonstrable business: services, staff, opening hours. Edit all of it in
+the office area; none of it is special.
+
+**6. Start the application and check it.**
+
+```bash
+docker compose --env-file booking-app/.env.production \
+               -f booking-app/docker-compose.prod.yml up -d --wait
+
+docker compose --env-file booking-app/.env.production \
+               -f booking-app/docker-compose.prod.yml ps
+curl -fsS http://127.0.0.1:3001/api/health/ready | jq
+```
+
+Five containers running, the sixth exited 0, and `ready` reporting `database`, `redis` and
+`migrations` all up.
+
+**7. Put nginx in front.**
+
+```bash
+sudo cp booking-app/infrastructure/nginx/booking.conf /etc/nginx/sites-available/
+sudo sed -i 's/buchung.example.com/<your hostname>/g' /etc/nginx/sites-available/booking.conf
+sudo ln -s /etc/nginx/sites-available/booking.conf /etc/nginx/sites-enabled/
+sudo certbot certonly --webroot -w /var/www/certbot -d <your hostname>
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+TLS is not decoration here: the office session cookie is issued `Secure` whenever
+`NODE_ENV=production`, so over plain HTTP the browser discards it and every login appears to
+succeed and then fails.
+
+**8. Point Stripe at it.** In the Stripe dashboard, add an endpoint at
+`https://<hostname>/api/webhooks/stripe`, subscribe it to the checkout and refund events, and
+copy the signing secret into `STRIPE_WEBHOOK_SECRET`. It is per endpoint, not per account.
+
+**9. Take a backup before anyone uses it**, so the restore path has been walked once while
+nothing is at stake:
+
+```bash
+booking-app/infrastructure/scripts/backup.sh
+```
+
+---
+
+## Runbook: routine deployment
+
+```bash
+git pull
+export TAG=$(git rev-parse --short HEAD)
+
+docker build -f booking-app/apps/api/Dockerfile --target api     -t sf-booking-api:$TAG     .
+docker build -f booking-app/apps/api/Dockerfile --target worker  -t sf-booking-worker:$TAG  .
+docker build -f booking-app/apps/api/Dockerfile --target migrate -t sf-booking-migrate:$TAG .
+docker build -f booking-app/apps/web/Dockerfile                  -t sf-booking-web:$TAG     .
+
+sed -i "s/^IMAGE_TAG=.*/IMAGE_TAG=$TAG/" booking-app/.env.production
+
+booking-app/infrastructure/scripts/backup.sh
+
+docker compose --env-file booking-app/.env.production \
+               -f booking-app/docker-compose.prod.yml up -d --wait
+```
+
+Back up **before** deploying, not after. The backup you want during a bad deploy is the one
+taken before it.
+
+`up -d --wait` recreates only the containers whose image or configuration changed, runs the
+migrate container to completion first, and returns when the API reports ready. If it returns
+non-zero, nothing has been declared healthy — read the logs before doing anything else:
+
+```bash
+docker compose --env-file booking-app/.env.production \
+               -f booking-app/docker-compose.prod.yml logs --tail=200 migrate api
+```
+
+---
+
+## Runbook: rollback
+
+**Migrations are forward-only.** There are no down migrations in this project and there will
+not be. A down migration is written before anyone knows what the data will look like when it
+runs, and the moment it is needed is the moment that guess is tested against production for
+the first time.
+
+So a rollback rolls back **images**, not the schema:
+
+```bash
+sed -i "s/^IMAGE_TAG=.*/IMAGE_TAG=<previous tag>/" booking-app/.env.production
+docker compose --env-file booking-app/.env.production \
+               -f booking-app/docker-compose.prod.yml up -d --wait
+```
+
+This works whenever the newer migration was **additive** — a new column, a new table, a new
+enum value — because the older code simply does not use it. Design migrations that way and
+rollback stays a one-line change. Expand first, contract in a later release, once no running
+image needs the old shape.
+
+### When a migration really must be reversed
+
+Only when the schema change was destructive (a dropped column, a narrowed type, a rewritten
+value) does the schema itself have to go back. There is no automated path, and there should
+not be: the choice is always between losing the writes made since the migration and keeping
+a schema that the previous image cannot read.
+
+1. Stop the application: `docker compose ... stop api worker`. Do this first. Every second
+   it runs adds writes that a restore will discard.
+2. Decide, explicitly, what happens to the writes made since the migration. Export them if
+   they matter — that export is usually the real work.
+3. Restore the pre-deploy backup: `booking-app/infrastructure/scripts/restore.sh <dump> --force`
+4. Set `IMAGE_TAG` back and bring the stack up.
+5. Write the corrective forward migration. The reverted one stays in history; a migration
+   that has run in production is never edited, because other databases have already applied it.
+
+---
+
+## Runbook: rotating Stripe keys with no downtime
+
+The two secrets rotate differently. The API key can be swapped whenever; the webhook secret
+cannot, because a webhook signed with a secret the API does not yet hold is rejected — and a
+rejected `checkout.session.completed` is a customer who paid and has no booking.
+
+### `STRIPE_SECRET_KEY`
+
+1. Create a new restricted key in the Stripe dashboard, alongside the old one.
+2. Put it in `booking-app/.env.production`.
+3. `docker compose ... up -d --wait api worker` — this recreates both processes with the new
+   value. In-flight requests drain first; the API waits up to 25 seconds for them.
+4. Confirm a booking end to end.
+5. Revoke the old key in Stripe, and not before step 4.
+
+### `STRIPE_WEBHOOK_SECRET`
+
+Stripe allows several endpoints, each with its own secret. That is the whole trick — rotate by
+moving to a new endpoint, not by re-keying the old one.
+
+1. In Stripe, add a **second** endpoint pointing at the same URL, subscribed to the same
+   events. Note its signing secret.
+2. Disable the **old** endpoint. Stripe stops sending to it; anything already in flight is
+   still signed with the old secret.
+3. Set `STRIPE_WEBHOOK_SECRET` to the new one and recreate the API.
+4. Watch for rejected webhooks for a few minutes:
+
+   ```bash
+   curl -fsS -b <office session cookie> http://127.0.0.1:3001/api/health/detail | jq .unprocessedWebhooks
+   ```
+
+5. Anything signed with the old secret and rejected during the swap is replayed from the
+   Stripe dashboard: **Developers → Events → Resend**. The API is idempotent per Stripe event
+   id, so replaying an event that did land changes nothing.
+6. Delete the old endpoint.
+
+Rotating `RESEND_WEBHOOK_SECRET` and `TWILIO_AUTH_TOKEN` follows the same shape: add the new
+credential, swap, verify, then remove the old. A delivery receipt lost in the gap costs a
+`status` column that stays `SENT` — recoverable, unlike a payment.
+
+---
+
+## Backups
+
+### Schedule
+
+`backup.sh` takes a `pg_dump -Fc`, reads the archive back to verify it, and prunes. Run it
+nightly from the host's crontab, before the 03:00 sweeps:
+
+```cron
+30 2 * * * cd /srv/shape-and-flow && ./booking-app/infrastructure/scripts/backup.sh >> /var/log/booking-backup.log 2>&1
+```
+
+It exits non-zero on any failure, so cron mail — or whatever watches that log — is the alert.
+A silent backup script is indistinguishable from a working one.
+
+Defaults, all overridable by environment variable:
+
+| Variable         | Default          | Meaning                                        |
+| ---------------- | ---------------- | ---------------------------------------------- |
+| `BACKUP_DIR`     | `./backups`      | where dumps are written                        |
+| `RETENTION_DAYS` | `14`             | dumps older than this are pruned…              |
+| `KEEP_MINIMUM`   | `7`              | …but never below this many, whatever their age |
+
+The minimum matters: if backups have been failing for three weeks, pruning by age alone would
+delete the last good one on the day it is needed.
+
+**Copy the dumps off this machine.** A backup on the same disk as the database survives a
+mistake, not a disk. That copy is out of scope here and is not optional.
+
+### What "verified" means
+
+Each dump has its table of contents read back with `pg_restore --list` and is checked for a
+plausible object count and for `bookings_no_overlap` by name. A dump that fails is deleted
+rather than left on disk looking reassuring. Dumps are written to a `.partial` name and
+renamed only on success, so the directory never holds a file a restore could pick up
+mid-write.
+
+### The restore drill
+
+Do this quarterly, on a machine that is not the server. It takes ten minutes and it is the
+only evidence that any of the above works.
+
+```bash
+# A throwaway stack, from the same compose file.
+docker compose --env-file booking-app/.env.production \
+               -f booking-app/docker-compose.prod.yml up -d --wait postgres
+
+# Restore into it and confirm it still enforces what it should.
+booking-app/infrastructure/scripts/restore.sh backups/<newest>.dump --force
+
+# The constraints, from the outside.
+docker compose --env-file booking-app/.env.production \
+               -f booking-app/docker-compose.prod.yml exec -T postgres \
+  psql -U booking -d booking -c \
+  "SELECT conname FROM pg_constraint WHERE conname LIKE '%no_overlap';"
+```
+
+Two rows. `restore.sh` already runs the full inventory —
+`infrastructure/sql/constraint-inventory.sql`, eighteen constraints and fourteen indexes — and
+refuses to declare success if any is missing, including checking that
+`bookings_no_overlap` still names all three blocking statuses.
+
+`restore.sh` will not touch a database that already has tables unless given `--force`, and it
+stops `api` and `worker` before restoring and does **not** start them again. Half a schema
+behind a live application is worse than an outage.
+
+---
+
+## Incident: a customer paid but there is no booking
+
+The one that matters. Work in this order.
+
+**1. Is it actually missing, or is it just not confirmed yet?** Find the booking by the
+customer's email in the office area. A booking in `PENDING_PAYMENT` or `EXPIRING` is one whose
+webhook has not landed yet — which is normal for a few seconds and abnormal after a minute.
+
+**2. Did Stripe try to tell us?** In the Stripe dashboard, find the payment, then its
+`checkout.session.completed` event, and look at the delivery attempts.
+
+- **Delivered, 2xx** — we received it. Go to step 3.
+- **Failed, 4xx** — the signature was rejected. Almost always `STRIPE_WEBHOOK_SECRET` is
+  wrong or was rotated without the swap above. Fix the secret, then **Resend** the event.
+- **Failed, 5xx or timeout** — we were down. Stripe retries for days; the event will land on
+  its own. **Resend** to make it now.
+
+**3. It arrived — where did it stop?**
+
+```bash
+docker compose --env-file booking-app/.env.production \
+               -f booking-app/docker-compose.prod.yml exec -T postgres \
+  psql -U booking -d booking -c \
+  "SELECT stripe_event_id, type, received_at, processed_at, attempts, last_error
+     FROM stripe_webhook_events
+    WHERE processed_at IS NULL
+    ORDER BY received_at DESC LIMIT 20;"
+```
+
+An unprocessed row means the event committed to Postgres but its job never reached Redis — the
+one gap no transaction can span. `sweep.inbox` re-drives it every two minutes; a row is
+considered stalled after five and is retried up to ten times, after which it is reported and
+left alone. So:
+
+- **Row present, `attempts` climbing, `last_error` set** — the handler is failing. Read the
+  error; that is the bug.
+- **Row present, `attempts` 0, older than five minutes** — the worker is not running. Check
+  `docker compose ... ps worker` and its logs.
+- **No row at all** — we never received it, whatever the dashboard says. Resend.
+
+**4. Nothing worked and the customer is waiting.** Create the booking manually in the office
+area and record the payment as a manual payment with the Stripe reference in the note. The
+booking is what the customer needs; the reconciliation is bookkeeping, and the audit trail
+records who did it and why.
+
+## Incident: bookings stuck in `EXPIRING`
+
+`EXPIRING` is the state a reservation enters while its payment window closes — deliberately
+distinct from `EXPIRED`, so a customer who pays a moment late keeps their appointment instead
+of being refunded and re-booked.
+
+Stuck means the sweep is not running.
+
+```bash
+curl -fsS -b <office session cookie> http://127.0.0.1:3001/api/health/detail | jq '{oldestExpiring, failedJobs, queues}'
+```
+
+If `oldestExpiring` is older than a few minutes:
+
+1. Is the worker up? `docker compose ... ps worker`
+2. Is Redis up? `/api/health/ready` names it if not.
+3. Are jobs failing rather than not running? `failedJobs` above, and the worker's logs.
+4. Do the API and the worker agree on `REDIS_QUEUE_PREFIX`? If they disagree the workers
+   consume nothing, silently, and every queue depth grows while nothing errors. Both read the
+   same env file, so this only happens if one was started with an override.
+
+Restarting the worker re-installs every repeatable schedule on boot:
+
+```bash
+docker compose --env-file booking-app/.env.production \
+               -f booking-app/docker-compose.prod.yml restart worker
+```
+
+## Incident: a subject-access or erasure request
+
+**Access.** Everything held about one person is reachable from their customer record in the
+office area: their details, every appointment, what they paid and what was refunded. Export
+the range that covers them (Exports → Appointments and Money) and send the rows that are
+theirs.
+
+**Erasure.** Office → Customers → Erase. It pseudonymises the person — name, email and phone
+are replaced and cannot be recovered — and **keeps their bookings**, because those are the
+business's own record of what it sold and are subject to statutory retention. The confirmation
+says so in those words for a reason: "delete customer" would suggest the appointments go too.
+
+It is refused while a payment or refund is still unsettled. Settle it, then erase.
+
+Beyond that, the `sweep.retention` job applies `dataRetentionDays` from the office settings
+every night at 03:30 Berlin. Erasure is the answer to a request; retention is the answer to
+not being asked.
+
+---
+
+## Where to look
+
+```bash
+# Everything, following.
+docker compose --env-file booking-app/.env.production \
+               -f booking-app/docker-compose.prod.yml logs -f
+
+# One process, last 200 lines.
+docker compose ... logs --tail=200 api
+
+# One request, end to end. The id is in the response header and in every line the
+# request produced, including the worker's if it enqueued something.
+docker compose ... logs api | grep <request id>
+```
+
+Logs are JSON, one line per request, rotated at 10 MB × 10 files per container. `LOG_LEVEL`
+and `LOG_SAMPLE_RATE` are in the env file; sampling applies only to
+`GET /public/availability`, which is polled on every date change a browsing customer makes and
+would otherwise dominate the volume.
+
+The edge nginx logs separately, in `/var/log/nginx/booking.access.log`. A request that appears
+there and not in the API log never reached the API.

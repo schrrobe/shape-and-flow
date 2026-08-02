@@ -54,6 +54,28 @@ COPY booking-app/apps/api booking-app/apps/api
 RUN pnpm --filter @shape-and-flow/booking-api exec prisma generate
 RUN pnpm -r --if-present build
 
+# ── migrate ──────────────────────────────────────────────────────────────────
+#
+# A third image, whose only job is `prisma migrate deploy`.
+#
+# It exists because the runtime image deliberately has no Prisma CLI, and that is a
+# property worth keeping: a container serving traffic must not be able to rewrite the
+# schema it is reading. So the migrator is built from the *build* stage — dev
+# dependencies, source and `prisma.config.ts` included — and is a separate, one-shot
+# container that has exited before the API starts.
+#
+# It is larger than the runtime image and that is fine: it runs for a few seconds per
+# deploy and is never exposed to a network.
+
+FROM build AS migrate
+ENV NODE_ENV=production
+WORKDIR /repo/booking-app/apps/api
+USER node
+# The binary directly rather than `pnpm exec`: one fewer process, and nothing here needs
+# a writable pnpm home. `migrate deploy` never generates, never opens a shadow database
+# and never writes to the image, so an unwritable tree is not a problem.
+CMD ["./node_modules/.bin/prisma", "migrate", "deploy"]
+
 # ── Production dependencies ──────────────────────────────────────────────────
 #
 # A separate install rather than pruning the built tree: `--prod` resolves the graph without
@@ -99,6 +121,11 @@ USER node
 
 FROM runtime AS api
 ENV APP_ROLE=api
+# The schema's default is 3000, which does not match the port declared and probed below —
+# so with PORT unset the process listened on 3000 while the healthcheck asked 3001 and every
+# container reported unhealthy. Setting it here makes the listener, EXPOSE and HEALTHCHECK
+# agree on one number; an operator who sets PORT still overrides all three at once.
+ENV PORT=3001
 EXPOSE 3001
 # Checks the process's own view of readiness, including its database connection, rather than
 # whether the port is open — a process that accepts connections and cannot reach Postgres is

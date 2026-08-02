@@ -71,6 +71,9 @@ constraint → Stripe Checkout → webhook confirms.
 | 8.4  | Staff, working hours, availability exceptions, catalog, settings, office users |
 | 8.5  | Office bookings, manual payments, refunds, requests, customers, CSV exports    |
 | 11.2 | Health indicators, operations counters, request logging, graceful shutdown     |
+| 10.2 | Office dashboard, calendar, booking list and detail                            |
+| 10.3 | Office management screens, request queues and exports                          |
+| 11.3 | Production compose, web image, edge nginx, verified backup and restore, runbooks |
 
 ## Next
 
@@ -89,12 +92,25 @@ the correlation id reaches the outbox row, and `SIGTERM` stops the listener and 
 in-flight requests. Verified against a booted process, not only by tests — see the bugs
 below, one of which was the development database being two migrations behind.
 
+**Task 11.3 is complete.** The production stack was brought up for real, not described:
+four images built, five containers healthy, the one-shot migrate container gating both
+application processes, a backup taken and verified, the volume destroyed, the backup
+restored, and the exclusion constraint then shown to still refuse an overlapping row.
+Three things only that exercise could have found:
+
+- The API image's healthcheck probed port 3001 while the schema's default made the process
+  listen on 3000, so **every API container would have reported unhealthy**. Fixed by pinning
+  `PORT` in the image so listener, `EXPOSE` and healthcheck agree.
+- A first deployment cannot be a single `up --wait`: the API resolves
+  `DEFAULT_ORGANIZATION_SLUG` at bootstrap and refuses to start against a migrated but
+  unseeded database. The runbook migrates, seeds, then starts.
+- `NODE_ENV=production` is not yet reachable. It refuses `fake` for email and SMS, and the
+  real adapters are Task 3.4, so a deployment made today can only run as staging. Recorded
+  at the top of `.env.production.example`, in `docs/operations.md`, and in the CI job.
+
 | Task | What is left                                                   |
 | ---- | -------------------------------------------------------------- |
-| 10.2 | Landed from the parallel stream as `603746f` while this was being written; not recorded in the Done table above because that stream verifies its own work |
-| 10.3 | Employees, working hours, services, availability, requests, customers, settings, users, exports |
-| 11.1 | End-to-end suite (needs 10.2 and 10.3 for the office journey)   |
-| 11.3 | Deployment, backup, documentation                              |
+| 11.1 | End-to-end suite; in progress in a parallel stream at the time of writing |
 | 3.4  | Real Resend and Twilio adapters, deferred out of the slice     |
 
 **Stages 5, 6 and 7 are complete.** A customer books and pays; the booking confirms
