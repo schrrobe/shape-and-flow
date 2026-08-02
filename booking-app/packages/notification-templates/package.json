@@ -16,7 +16,7 @@
   "scripts": {
     "prepare": "pnpm run build",
     "build": "tsc -p tsconfig.build.json",
-    "lint": "eslint .",
+    "lint": "eslint . --max-warnings=0",
     "format": "prettier --check .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"

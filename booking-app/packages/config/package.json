@@ -25,7 +25,7 @@
     "vitest.base.d.ts"
   ],
   "scripts": {
-    "lint": "eslint .",
+    "lint": "eslint . --max-warnings=0",
     "format": "prettier --check .",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "echo \"@shape-and-flow/booking-config has no runtime code to test\" && exit 0"
