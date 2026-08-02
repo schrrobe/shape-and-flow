@@ -13,13 +13,24 @@ const props = withDefaults(
   defineProps<{
     modelValue: string;
     label: string;
-    type?: 'text' | 'email' | 'tel' | 'password';
+    /**
+     * `date` and `number` are here for the office forms, which edit dates and minute
+     * counts. Native rather than a custom picker: the browser's is keyboard-complete, is
+     * localised by the operating system, and works on a phone — three things a
+     * hand-rolled one would each have to earn.
+     */
+    type?: 'text' | 'email' | 'tel' | 'password' | 'date' | 'number' | 'time';
     description?: string | null;
     error?: string | null;
     required?: boolean;
     autocomplete?: string;
     maxlength?: number;
     placeholder?: string;
+    /** For `number` and `date`, which have bounds a text field does not. */
+    min?: string | number;
+    max?: string | number;
+    step?: string | number;
+    inputmode?: 'text' | 'decimal' | 'numeric';
   }>(),
   // `autocomplete`, `maxlength` and `placeholder` get no default: an optional prop is already
   // undefined, and `exactOptionalPropertyTypes` rejects saying so twice.
@@ -57,6 +68,10 @@ const describedBy = computed(() => {
       :autocomplete="autocomplete"
       :maxlength="maxlength"
       :placeholder="placeholder"
+      :min="min"
+      :max="max"
+      :step="step"
+      :inputmode="inputmode"
       :aria-describedby="describedBy"
       :aria-invalid="error === null ? undefined : 'true'"
       class="rounded-sf border border-border bg-surface px-3 py-2.5 text-base text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring focus-visible:ring-offset-1"

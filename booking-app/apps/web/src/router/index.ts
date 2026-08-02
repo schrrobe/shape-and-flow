@@ -102,13 +102,28 @@ const routes: RouteRecordRaw[] = [
       // No `meta` of its own: vue-router merges every matched record's meta into
       // `route.meta`, so a child inherits the parent's `area` and `requiresSession`.
       //
-      // Named `office-dashboard` already, though it renders a landing page rather than the
-      // dashboard: task 10.2 replaces the component and the name, the path and the sidebar
-      // entry all stay put.
       {
         path: '',
         name: 'office-dashboard',
-        component: () => import('../pages/office/OfficeStart.vue'),
+        component: () => import('../pages/office/OfficeDashboard.vue'),
+      },
+      {
+        path: 'calendar',
+        name: 'office-calendar',
+        component: () => import('../pages/office/OfficeCalendar.vue'),
+      },
+      {
+        path: 'bookings',
+        name: 'office-bookings',
+        component: () => import('../pages/office/BookingList.vue'),
+      },
+      // After the list, so `/office/bookings` matches the list rather than the detail with
+      // an empty id — vue-router resolves static segments before dynamic ones, but the
+      // order is what makes that visible to a reader.
+      {
+        path: 'bookings/:id',
+        name: 'office-booking',
+        component: () => import('../pages/office/BookingDetail.vue'),
       },
     ],
   },

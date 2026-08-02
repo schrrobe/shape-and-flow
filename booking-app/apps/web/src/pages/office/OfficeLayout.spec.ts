@@ -88,7 +88,7 @@ describe('OfficeLayout', () => {
 
     // An owner holds every capability, so what is missing here is missing because the route
     // does not exist yet. A link to an unregistered name resolves to the customer-facing 404.
-    expect(rendered).toEqual(['office-dashboard']);
+    expect(rendered).toEqual(['office-dashboard', 'office-calendar', 'office-bookings']);
   });
 
   it('hides what a role may not reach', () => {

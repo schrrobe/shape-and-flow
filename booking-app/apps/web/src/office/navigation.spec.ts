@@ -61,8 +61,6 @@ describe('office navigation', () => {
     // member of staff to the customer-facing 404. Listing them here is what keeps that from
     // becoming a permanent silent hole: tasks 10.2 and 10.3 have to shorten this list.
     expect(missing).toEqual([
-      'office-calendar',
-      'office-bookings',
       'office-requests',
       'office-employees',
       'office-services',
