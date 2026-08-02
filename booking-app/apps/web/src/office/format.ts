@@ -60,6 +60,18 @@ export function money(value: MoneyDto | number): string {
   return MONEY.format((typeof value === 'number' ? value : value.amountCents) / 100);
 }
 
+/**
+ * The same amount as a plain decimal, for a form field.
+ *
+ * `money` formats for reading — `45,00 €` — which is not what an input holds. Both go
+ * through the one division, so the form and the label cannot disagree about a cent.
+ */
+export function euros(value: MoneyDto | number): string {
+  const cents = typeof value === 'number' ? value : value.amountCents;
+
+  return (cents / 100).toFixed(2);
+}
+
 export function time(instant: string | Date): string {
   return TIME.format(new Date(instant));
 }

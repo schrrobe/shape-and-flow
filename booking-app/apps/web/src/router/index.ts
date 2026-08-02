@@ -125,6 +125,46 @@ const routes: RouteRecordRaw[] = [
         name: 'office-booking',
         component: () => import('../pages/office/BookingDetail.vue'),
       },
+      {
+        path: 'requests',
+        name: 'office-requests',
+        component: () => import('../pages/office/RequestsPage.vue'),
+      },
+      {
+        path: 'employees',
+        name: 'office-employees',
+        component: () => import('../pages/office/EmployeesPage.vue'),
+      },
+      {
+        path: 'services',
+        name: 'office-services',
+        component: () => import('../pages/office/ServicesPage.vue'),
+      },
+      {
+        path: 'availability',
+        name: 'office-availability',
+        component: () => import('../pages/office/AvailabilityPage.vue'),
+      },
+      {
+        path: 'customers',
+        name: 'office-customers',
+        component: () => import('../pages/office/CustomersPage.vue'),
+      },
+      {
+        path: 'exports',
+        name: 'office-exports',
+        component: () => import('../pages/office/ExportsPage.vue'),
+      },
+      {
+        path: 'users',
+        name: 'office-users',
+        component: () => import('../pages/office/UsersPage.vue'),
+      },
+      {
+        path: 'settings',
+        name: 'office-settings',
+        component: () => import('../pages/office/SettingsPage.vue'),
+      },
     ],
   },
 
