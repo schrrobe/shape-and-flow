@@ -139,7 +139,7 @@ describe('a Redis-backed fake, seen from two processes', () => {
       worker.createRefund(context, args),
     ]);
 
-    expect(fromWorker?.refundId).toBe(fromApi?.refundId);
+    expect(fromWorker.refundId).toBe(fromApi.refundId);
     expect(await api.refundCalls()).toHaveLength(1);
   });
 

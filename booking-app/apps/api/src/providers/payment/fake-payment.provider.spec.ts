@@ -237,7 +237,7 @@ describe('createRefund', () => {
       provider.createRefund(context, args),
     ]);
 
-    expect(second?.refundId).toBe(first?.refundId);
+    expect(second.refundId).toBe(first.refundId);
     expect(await provider.refundCalls()).toHaveLength(1);
   });
 
