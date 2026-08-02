@@ -11,7 +11,7 @@ import { Money } from '../domain/money/money.js';
  */
 
 /** Card payments that represent money the business received. */
-const RECEIVED_PAYMENT_STATUSES = ['SUCCEEDED', 'PARTIALLY_REFUNDED', 'REFUNDED'];
+export const RECEIVED_PAYMENT_STATUSES = ['SUCCEEDED', 'PARTIALLY_REFUNDED', 'REFUNDED'];
 
 /**
  * Money that has left. A `PENDING` refund has been decided but not yet moved, and
