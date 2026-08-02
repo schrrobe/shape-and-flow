@@ -117,9 +117,14 @@ export function parseMinuteOfDay(value: string): number | null {
 
   const hour = Number(match[1]);
   const minute = Number(match[2]);
+
+  // Checked separately from the total, because a total is not enough: `09:75` sums to a
+  // legal 615 and would be saved back as a silent `10:15` nobody typed.
+  if (minute > 59) return null;
+
   const total = hour * 60 + minute;
 
-  return total >= 0 && total <= 1440 ? total : null;
+  return total <= 1440 ? total : null;
 }
 
 /**
