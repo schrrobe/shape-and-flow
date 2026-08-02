@@ -9,6 +9,7 @@ import StatusBadge from '../../components/office/StatusBadge.vue';
 import { useFocusStep } from '../../composables/useFocusStep.js';
 import { dateTime, money, today } from '../../office/format.js';
 import { officeMessage } from '../../office/messages.js';
+import { useSession } from '../../stores/session.js';
 
 import type { OfficeBookingListItem } from '@shape-and-flow/booking-contracts';
 
@@ -25,6 +26,7 @@ import type { OfficeBookingListItem } from '@shape-and-flow/booking-contracts';
  */
 const route = useRoute();
 const router = useRouter();
+const session = useSession();
 
 useFocusStep('Bookings');
 
@@ -132,9 +134,19 @@ watch(filters, load);
 
 <template>
   <section class="space-y-4">
-    <h1 ref="heading" tabindex="-1" class="text-xl font-semibold tracking-tight outline-none">
-      Bookings
-    </h1>
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <h1 ref="heading" tabindex="-1" class="text-xl font-semibold tracking-tight outline-none">
+        Bookings
+      </h1>
+
+      <SfButton
+        v-if="session.can('booking.create')"
+        data-test="new-booking"
+        @click="router.push({ name: 'office-booking-new' })"
+      >
+        New booking
+      </SfButton>
+    </div>
 
     <form
       class="grid gap-3 rounded-sf border border-border bg-surface p-4 sm:grid-cols-2 lg:grid-cols-5"

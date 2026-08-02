@@ -522,6 +522,20 @@ export const api = {
     },
 
     availability: {
+      /**
+       * Slots the office may book, which is a wider set than a customer is offered.
+       *
+       * The same shapes as `public.availability`, because it is the same question — the
+       * office route answers it without the minimum-notice window and without the
+       * horizon, which is what makes "come in this afternoon" bookable from a screen.
+       */
+      slots: (query: AvailabilityQuery, signal?: AbortSignal) =>
+        request<AvailabilityResponse>('/office/availability', {
+          query: { ...query },
+          session: true,
+          signal,
+        }),
+
       blockedTimes: (query: BlockedTimeListQuery, signal?: AbortSignal) =>
         request<BlockedTimeListResponse>('/office/blocked-times', {
           query: flatten(query),

@@ -124,6 +124,26 @@ watch([date, employeeFilter], run);
         <SfButton variant="ghost" data-test="today" @click="goTo({ date: today() })">
           Today
         </SfButton>
+
+        <!--
+          The day and the person on screen are carried into the form: the operator who
+          clicks this is looking at the gap they mean to fill.
+        -->
+        <SfButton
+          v-if="session.can('booking.create')"
+          data-test="new-booking"
+          @click="
+            router.push({
+              name: 'office-booking-new',
+              query: {
+                date,
+                ...(employeeFilter === '' ? {} : { employeeId: employeeFilter }),
+              },
+            })
+          "
+        >
+          New booking
+        </SfButton>
       </div>
     </div>
 

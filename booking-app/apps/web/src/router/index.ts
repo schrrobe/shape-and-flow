@@ -117,6 +117,14 @@ const routes: RouteRecordRaw[] = [
         name: 'office-bookings',
         component: () => import('../pages/office/BookingList.vue'),
       },
+      // Before `bookings/:id` for the same reason the detail sits after the list: the
+      // resolution order does not depend on it, but a reader should not have to know that
+      // to be sure "new" is a screen rather than a booking id.
+      {
+        path: 'bookings/new',
+        name: 'office-booking-new',
+        component: () => import('../pages/office/NewBooking.vue'),
+      },
       // After the list, so `/office/bookings` matches the list rather than the detail with
       // an empty id — vue-router resolves static segments before dynamic ones, but the
       // order is what makes that visible to a reader.
