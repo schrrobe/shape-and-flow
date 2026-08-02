@@ -5,6 +5,7 @@ import { computed, ref } from 'vue';
 
 import { api } from '../../api/client.js';
 import { useFocusStep } from '../../composables/useFocusStep.js';
+import { addDays } from '../../composables/useLocalDate.js';
 import { localDateLabel, today } from '../../office/format.js';
 
 /**
@@ -21,12 +22,6 @@ import { localDateLabel, today } from '../../office/format.js';
  * it does.
  */
 useFocusStep('Exports');
-
-function addDays(date: string, days: number): string {
-  const anchored = new Date(`${date}T12:00:00Z`);
-  anchored.setUTCDate(anchored.getUTCDate() + days);
-  return anchored.toISOString().slice(0, 10);
-}
 
 const from = ref(addDays(today(), -30));
 const to = ref(today());
