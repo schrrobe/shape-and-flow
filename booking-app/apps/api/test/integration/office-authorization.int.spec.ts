@@ -385,6 +385,11 @@ describe('the router walk', () => {
       'CustomersController.update',
       'CustomersController.erase',
       'OfficeBookingsController.recordManualPayment',
+      'OfficeBookingsController.cancel',
+      'OfficeBookingsController.complete',
+      'OfficeBookingsController.noShow',
+      'RequestsController.decideCancellation',
+      'RequestsController.decideReschedule',
     ]);
 
     const untraced = officeRoutes()

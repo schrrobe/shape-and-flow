@@ -12,7 +12,6 @@ import { Roles } from '../auth/roles.decorator.js';
 import { RolesGuard } from '../auth/roles.guard.js';
 import { CancellationService } from '../booking/cancellation.service.js';
 import { RescheduleService } from '../booking/reschedule.service.js';
-import { Audited } from '../common/audit/audit.interceptor.js';
 
 import { RequestsService } from './requests.service.js';
 
@@ -62,7 +61,9 @@ export class RequestsController {
    */
   @Post('cancellation-requests/:id/decide')
   @Roles('OWNER', 'ADMIN')
-  @Audited({ action: 'CANCELLATION_REQUEST_DECIDED', entityType: 'CancellationRequest' })
+  // No `@Audited`: CancellationService writes its row inside the decision transaction,
+  // where it can also name the retained amount. A second row here duplicated every
+  // decision in the log.
   async decideCancellation(
     @CurrentUser() session: OfficeSession,
     @Param('id') id: string,
@@ -101,7 +102,8 @@ export class RequestsController {
 
   @Post('reschedule-requests/:id/decide')
   @Roles('OWNER', 'ADMIN', 'EMPLOYEE')
-  @Audited({ action: 'RESCHEDULE_REQUEST_DECIDED', entityType: 'RescheduleRequest' })
+  // No `@Audited`: RescheduleService writes its row inside the decision transaction,
+  // where it can also name the replacement booking.
   async decideReschedule(
     @CurrentUser() session: OfficeSession,
     @Param('id') id: string,

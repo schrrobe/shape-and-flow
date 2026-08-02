@@ -769,6 +769,72 @@ describe('GET /api/office/audit-log', () => {
 
 /* ── CSV export ───────────────────────────────────────────────────────────────── */
 
+describe('the audit trail', () => {
+  it('writes exactly one row per booking status change', async () => {
+    // The service writes its row inside the transaction that changes the booking, and the
+    // interceptor wrote a second one afterwards. Two rows for one action means an auditor
+    // reading a count sees twice the activity, and the two disagree about the summary.
+    const owner = await signedInAs('OWNER');
+
+    for (const [path, action] of [
+      ['cancel', 'BOOKING_CANCELED'],
+      ['complete', 'BOOKING_MARKED_COMPLETED'],
+      ['no-show', 'BOOKING_MARKED_NO_SHOW'],
+    ] as const) {
+      const booking = await bookingAt(berlin(NEXT_MONDAY, '10:00'));
+      // Completing and no-showing need the appointment to be over.
+      await prisma.booking.update({
+        where: { id: booking.id },
+        data: { startsAt: berlin('2026-08-13', '10:00'), endsAt: berlin('2026-08-13', '10:30') },
+      });
+
+      await owner
+        .post(`/api/office/bookings/${booking.id}/${path}`)
+        .send(path === 'cancel' ? { reason: 'Krankheit' } : {})
+        .expect(201);
+
+      expect(await prisma.auditLog.count({ where: { action, entityId: booking.id } }), action).toBe(
+        1,
+      );
+    }
+  });
+
+  it('names the created booking, not the path, on a manual booking', async () => {
+    // There is no `:id` in the path and the response field is `bookingId`, not `id`, so
+    // the interceptor fell through to the placeholder and wrote a row pointing at "-".
+    const owner = await signedInAs('OWNER');
+
+    const created = await owner
+      .post('/api/office/bookings')
+      .set('Idempotency-Key', randomUUID())
+      .send(manualBookingBody())
+      .expect(201);
+
+    expect(
+      await prisma.auditLog.findFirstOrThrow({ where: { action: 'BOOKING_CREATED_MANUALLY' } }),
+    ).toMatchObject({ entityId: (created.body as { bookingId: string }).bookingId });
+  });
+
+  it('names the refund, not the booking, on a refund', async () => {
+    const owner = await signedInAs('OWNER');
+    const booking = await bookingAt(berlin(NEXT_MONDAY, '10:00'));
+    await paidWithCard(booking.id, 4500);
+
+    const refunded = await owner
+      .post(`/api/office/bookings/${booking.id}/refunds`)
+      .set('Idempotency-Key', randomUUID())
+      .send({ amountCents: 1000, reason: 'GOODWILL' })
+      .expect(201);
+
+    expect(
+      await prisma.auditLog.findFirstOrThrow({ where: { action: 'REFUND_ISSUED' } }),
+    ).toMatchObject({
+      entityId: (refunded.body as { refundId: string }).refundId,
+      entityType: 'Refund',
+    });
+  });
+});
+
 describe('deciding a cancellation request without the refund capability', () => {
   /** A pending request whose frozen suggestion decides whether money will move. */
   async function openCancellationRequest(suggestedRetainedAmountCents: number): Promise<string> {

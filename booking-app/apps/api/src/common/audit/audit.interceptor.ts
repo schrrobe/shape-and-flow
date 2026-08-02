@@ -21,6 +21,15 @@ export interface AuditSpec {
   action: AuditAction;
   /** The model the action is about, as it is named in the schema. */
   entityType: string;
+  /**
+   * Which response field names the entity, when it is not `id`.
+   *
+   * A creation has no `:id` in its path and rarely calls its new row `id` — a manual
+   * booking answers `bookingId`, a refund `refundId`. Without this the interceptor fell
+   * through to the path placeholder and wrote rows pointing at `-`, which is an audit
+   * trail that records that *something* was created.
+   */
+  responseIdField?: string;
 }
 
 /**
@@ -131,7 +140,9 @@ export class AuditInterceptor implements NestInterceptor {
     // declare the same name twice. `:id` never is, but narrowing beats asserting.
     const fromPath = request.params.id;
     const entityId =
-      detail.entityId ?? idFrom(body) ?? (typeof fromPath === 'string' ? fromPath : '-');
+      detail.entityId ??
+      idFrom(body, spec.responseIdField) ??
+      (typeof fromPath === 'string' ? fromPath : '-');
 
     try {
       await this.prisma.auditLog.create({
@@ -161,11 +172,17 @@ export class AuditInterceptor implements NestInterceptor {
 }
 
 /** The id in a response body, when it has one. */
-function idFrom(body: unknown): string | undefined {
+function idFrom(body: unknown, field?: string): string | undefined {
   if (body === null || typeof body !== 'object') return undefined;
 
-  const id = (body as { id?: unknown }).id;
-  return typeof id === 'string' ? id : undefined;
+  const record = body as Record<string, unknown>;
+  const candidate = field === undefined ? record.id : record[field];
+
+  if (typeof candidate === 'string') return candidate;
+
+  // A declared field that is missing falls back to `id` rather than to the path, so a
+  // renamed response field degrades to the old behaviour instead of writing `-`.
+  return typeof record.id === 'string' ? record.id : undefined;
 }
 
 /** Redacted, and reduced to what a JSONB column can hold. */
