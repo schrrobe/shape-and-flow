@@ -5,6 +5,8 @@ import { BLOCKING_BOOKING_STATUSES } from '../../src/booking/booking-status.mach
 import { CustomerUpsertService } from '../../src/booking/customer-upsert.service.js';
 import { ReservationService } from '../../src/booking/reservation.service.js';
 import { FixedClock } from '../../src/domain/time/clock.js';
+import { ManagementTokenService } from '../../src/manage/management-token.service.js';
+import { OutboxRecorder } from '../../src/messaging/outbox/outbox.recorder.js';
 import { AvailabilitySnapshotService } from '../../src/public/availability-snapshot.service.js';
 import { prisma, resetDatabase } from '../database.harness.js';
 import { SLOT_FRIDAY_0900, seedOrganization } from '../factories/index.js';
@@ -74,6 +76,8 @@ beforeEach(async () => {
     organizations,
     snapshots,
     new CustomerUpsertService(),
+    new ManagementTokenService(db, clock),
+    new OutboxRecorder(),
     clock,
   );
 });

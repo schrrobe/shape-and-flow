@@ -8,6 +8,9 @@ import { selectEmployee } from '../domain/employee-selection/select-employee.js'
 import { Money } from '../domain/money/money.js';
 import { CLOCK } from '../domain/time/clock.js';
 import { instantToLocalDate } from '../domain/time/local-time.js';
+import { ManagementTokenService } from '../manage/management-token.service.js';
+import { OutboxRecorder } from '../messaging/outbox/outbox.recorder.js';
+import { JOB } from '../messaging/queues/job-contracts.js';
 import { OrganizationContextService } from '../organization/organization-context.service.js';
 import { BookingStatus } from '../prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
@@ -19,6 +22,7 @@ import { withCalendarLock } from './calendar-lock.js';
 import { CustomerUpsertService } from './customer-upsert.service.js';
 
 import type { CustomerInput } from './customer-upsert.service.js';
+import type { AvailabilitySnapshot } from '../domain/availability/types.js';
 import type { EmployeeCandidate } from '../domain/employee-selection/select-employee.js';
 import type { Clock } from '../domain/time/clock.js';
 import type { Booking, BookingOrigin } from '../prisma/client.js';
@@ -26,6 +30,31 @@ import type { Locale } from '@shape-and-flow/booking-contracts';
 
 /** How many references to try before giving up. Each collision is a 1-in-a-billion event. */
 const REFERENCE_ATTEMPTS = 5;
+
+/**
+ * Who is booking, which decides four things at once.
+ *
+ * A single discriminant rather than four flags — `skipNoticeCheck`, `confirmed`,
+ * `origin`, `officeUserId` — because they are not independent. There is no such thing
+ * as an office booking that respects the notice window but is born unpaid, and a set of
+ * booleans invites exactly that combination to be assembled by accident.
+ *
+ * What it decides:
+ *
+ *  - **The booking window.** A customer may not book inside the minimum-notice window
+ *    or past the horizon; the office may. Those are rules about what a customer may
+ *    self-serve, not about what the business may write into its own calendar.
+ *  - **The starting status.** A customer's booking is PENDING_PAYMENT with an expiry,
+ *    held while Stripe answers. An office booking is CONFIRMED with no expiry and no
+ *    payment: the money is settled at the desk, or recorded later as a manual payment.
+ *  - **The origin**, which the calendar and the exports show.
+ *  - **The actor** on the status-history row.
+ *
+ * What it does *not* decide is the collision rules. Both paths take the same advisory
+ * lock, re-check the same snapshot and meet the same exclusion constraint, which is the
+ * point of them sharing this file.
+ */
+export type ReserveActor = { type: 'CUSTOMER' } | { type: 'OFFICE'; officeUserId: string };
 
 export interface ReserveInput {
   serviceId: string;
@@ -36,12 +65,22 @@ export interface ReserveInput {
   locale: Locale;
   customerNote?: string | undefined;
   origin?: BookingOrigin | undefined;
+  /** Absent means a customer, which is what every pre-Stage-8 caller meant. */
+  actor?: ReserveActor | undefined;
 }
 
 export interface ReserveResult {
   booking: Booking;
   employee: { id: string; displayName: string };
   price: Money;
+  /**
+   * Minted only for an office booking, which is confirmed the moment it is created.
+   *
+   * The plaintext exists here and in the outbox payload and nowhere else — the database
+   * keeps a hash — so the confirmation email can carry the /manage link while a database
+   * read cannot reconstruct it.
+   */
+  managementToken?: string;
 }
 
 /**
@@ -70,27 +109,36 @@ export class ReservationService {
     private readonly organizations: OrganizationContextService,
     private readonly snapshots: AvailabilitySnapshotService,
     private readonly customers: CustomerUpsertService,
+    private readonly tokens: ManagementTokenService,
+    private readonly outbox: OutboxRecorder,
     @Inject(CLOCK) private readonly clock: Clock,
   ) {}
 
   async reserve(input: ReserveInput): Promise<ReserveResult> {
     const organization = this.organizations.get();
     const settings = organization.settings;
+    const actor = input.actor ?? { type: 'CUSTOMER' };
 
     const service = await this.loadService(input.serviceId);
-    this.assertWithinBookingWindow(input.startsAt);
+    // Skipped for the office, which is the one rule the two paths differ on. Everything
+    // below this line is identical for both.
+    if (actor.type === 'CUSTOMER') this.assertWithinBookingWindow(input.startsAt);
 
     // Resolved before the transaction opens, because "any available employee" needs a
     // snapshot read and there is no reason to hold a lock while doing it. The
     // re-check inside the lock is what makes the choice safe.
     const employeeId = await this.resolveEmployee(input, service);
 
-    const expiresAt = new Date(
-      this.clock.now().getTime() + settings.reservationTtlMinutes * 60_000,
-    );
+    // Null for the office: the CHECK constraint requires `expiresAt` to be non-null
+    // exactly while a booking is PENDING_PAYMENT or EXPIRING, and an office booking is
+    // neither.
+    const expiresAt =
+      actor.type === 'CUSTOMER'
+        ? new Date(this.clock.now().getTime() + settings.reservationTtlMinutes * 60_000)
+        : null;
 
     return await withSerializationRetry(
-      () => this.insert({ ...input, employeeId }, service, expiresAt),
+      () => this.insert({ ...input, employeeId, actor }, service, expiresAt),
       'reserve',
     );
   }
@@ -224,7 +272,7 @@ export class ReservationService {
 
   /** The transaction: lock, re-check, upsert the customer, insert, record history. */
   private async insert(
-    input: ReserveInput & { employeeId: string },
+    input: ReserveInput & { employeeId: string; actor: ReserveActor },
     service: {
       id: string;
       name: string;
@@ -234,7 +282,7 @@ export class ReservationService {
       priceCents: number;
       currency: string;
     },
-    expiresAt: Date,
+    expiresAt: Date | null,
   ): Promise<ReserveResult> {
     const organizationId = this.organizations.getOrganizationId();
     const { employeeId } = input;
@@ -273,7 +321,7 @@ export class ReservationService {
 
   /** One attempt at the transaction: lock, re-check, upsert the customer, insert, record. */
   private async insertOnce(
-    input: ReserveInput & { employeeId: string },
+    input: ReserveInput & { employeeId: string; actor: ReserveActor },
     service: {
       id: string;
       name: string;
@@ -283,7 +331,7 @@ export class ReservationService {
       priceCents: number;
       currency: string;
     },
-    expiresAt: Date,
+    expiresAt: Date | null,
     organizationId: string,
     employeeId: string,
   ): Promise<ReserveResult> {
@@ -298,7 +346,7 @@ export class ReservationService {
             startsAt: input.startsAt,
           });
 
-          if (!isSlotBookable(snapshot, employeeId, input.startsAt)) {
+          if (!isSlotBookable(forActor(snapshot, input.actor), employeeId, input.startsAt)) {
             throw new AppError('SLOT_UNAVAILABLE', {
               message: 'That slot is no longer available.',
             });
@@ -323,13 +371,16 @@ export class ReservationService {
             endsAt.getTime() + snapshot.service.cleanupBufferMinutes * 60_000,
           );
 
-          assertTransition(null, BookingStatus.PENDING_PAYMENT);
+          const office = input.actor.type === 'OFFICE' ? input.actor : null;
+          const status = office === null ? BookingStatus.PENDING_PAYMENT : BookingStatus.CONFIRMED;
+
+          assertTransition(null, status);
 
           const booking = await tx.booking.create({
             data: {
               reference: generateBookingReference(),
               organizationId,
-              origin: input.origin ?? 'ONLINE',
+              origin: input.origin ?? (office === null ? 'ONLINE' : 'OFFICE'),
               customerId: customer.id,
               employeeId,
               serviceId: service.id,
@@ -343,10 +394,16 @@ export class ReservationService {
               cleanupBufferMinutesSnapshot: snapshot.service.cleanupBufferMinutes,
               priceCentsSnapshot: service.priceCents,
               currency: service.currency,
-              status: BookingStatus.PENDING_PAYMENT,
+              status,
               expiresAt,
               locale: input.locale,
               ...(input.customerNote === undefined ? {} : { customerNote: input.customerNote }),
+              ...(office === null
+                ? {}
+                : {
+                    confirmedAt: this.clock.now(),
+                    createdByOfficeUserId: office.officeUserId,
+                  }),
             },
           });
 
@@ -357,10 +414,38 @@ export class ReservationService {
               organizationId,
               bookingId: booking.id,
               fromStatus: null,
-              toStatus: BookingStatus.PENDING_PAYMENT,
-              actorType: 'CUSTOMER',
+              toStatus: status,
+              actorType: office === null ? 'CUSTOMER' : 'OFFICE_USER',
+              ...(office === null ? {} : { actorOfficeUserId: office.officeUserId }),
             },
           });
+
+          // An office booking is confirmed on creation, so everything the webhook does
+          // on confirmation has to happen here too — otherwise the customer gets no
+          // email and no link to their own appointment.
+          if (office !== null) {
+            const { token } = await this.tokens.issue(
+              tx,
+              booking.id,
+              organizationId,
+              booking.endsAt,
+            );
+
+            await this.outbox.record(tx, {
+              organizationId,
+              aggregateType: 'Booking',
+              aggregateId: booking.id,
+              eventType: JOB.BOOKING_CONFIRMED,
+              payload: { organizationId, bookingId: booking.id, managementToken: token },
+            });
+
+            return {
+              booking,
+              employee,
+              price: Money.fromCents(service.priceCents, service.currency),
+              managementToken: token,
+            };
+          }
 
           return {
             booking,
@@ -373,4 +458,32 @@ export class ReservationService {
       { isolationLevel: 'ReadCommitted', timeout: 15_000, maxWait: 10_000 },
     );
   }
+}
+
+/**
+ * The snapshot as this actor's rules see it.
+ *
+ * The re-check inside the lock runs the same engine the public endpoint runs, and that
+ * engine refuses a slot inside the minimum-notice window or past the horizon. For the
+ * office those are not the question being asked: an office booking somebody in two
+ * hours is the normal case, and the check that matters is whether the slot is *free*.
+ *
+ * Expressed by overriding two settings rather than by branching around the check, so
+ * everything else the engine enforces — the rota, breaks, closed days, approved leave,
+ * and every existing booking — still applies to both paths from the same code.
+ */
+function forActor(snapshot: AvailabilitySnapshot, actor: ReserveActor): AvailabilitySnapshot {
+  if (actor.type === 'CUSTOMER') return snapshot;
+
+  return {
+    ...snapshot,
+    settings: {
+      ...snapshot.settings,
+      minimumNoticeHours: 0,
+      // Far enough that the engine's clamp cannot cut off a date the office typed. The
+      // horizon exists to bound what a customer is *offered*, not what the business may
+      // write down.
+      bookingHorizonDays: 3650,
+    },
+  };
 }

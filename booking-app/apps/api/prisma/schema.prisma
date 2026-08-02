@@ -197,6 +197,11 @@ enum AuditAction {
   SERVICE_CATEGORY_CREATED
   SERVICE_CATEGORY_UPDATED
   SERVICE_CATEGORY_ARCHIVED
+  // Erasure especially: the row recording that somebody was pseudonymised is the only
+  // thing that survives the data, and is what answers a later request to prove it
+  // happened.
+  CUSTOMER_UPDATED
+  CUSTOMER_ERASED
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

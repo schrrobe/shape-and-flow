@@ -81,6 +81,92 @@ export const timeOffStatusSchema = z.enum(['REQUESTED', 'APPROVED', 'REJECTED'])
 export type TimeOffStatus = z.infer<typeof timeOffStatusSchema>;
 
 /**
+ * Where a card payment stands.
+ *
+ * `PARTIALLY_REFUNDED` and `REFUNDED` still count as money that was received: the
+ * refund is a second movement, not an undoing of the first, which is why the ledger
+ * export lists both rather than netting them.
+ */
+export const paymentStatusSchema = z.enum([
+  'PENDING',
+  'SUCCEEDED',
+  'FAILED',
+  'PARTIALLY_REFUNDED',
+  'REFUNDED',
+]);
+export type PaymentStatus = z.infer<typeof paymentStatusSchema>;
+
+/** How money arrived outside Stripe. `CARD` is the terminal in the studio, not Stripe. */
+export const manualPaymentMethodSchema = z.enum(['CASH', 'CARD', 'BANK_TRANSFER', 'OTHER']);
+export type ManualPaymentMethod = z.infer<typeof manualPaymentMethodSchema>;
+
+export const refundStatusSchema = z.enum(['PENDING', 'SUCCEEDED', 'FAILED', 'CANCELED']);
+export type RefundStatus = z.infer<typeof refundStatusSchema>;
+
+/**
+ * Why money went back.
+ *
+ * Recorded rather than derived, because the same amount returned for a customer
+ * cancellation and as goodwill are different facts to a bookkeeper.
+ */
+export const refundReasonSchema = z.enum([
+  'CUSTOMER_CANCELLATION',
+  'BUSINESS_CANCELLATION',
+  'GOODWILL',
+  'DUPLICATE_PAYMENT',
+]);
+export type RefundReason = z.infer<typeof refundReasonSchema>;
+
+export const requestDecisionSchema = z.enum(['PENDING', 'APPROVED', 'REJECTED']);
+export type RequestDecision = z.infer<typeof requestDecisionSchema>;
+
+/**
+ * Every office action that leaves a permanent trace.
+ *
+ * In the contracts package because the audit log is filterable by action, and a client
+ * offering a filter needs the list. `enum-drift.spec.ts` cross-checks it against Prisma,
+ * so a value added on one side and forgotten on the other fails a test rather than
+ * silently making a filter option that matches nothing.
+ */
+export const auditActionSchema = z.enum([
+  'BOOKING_CREATED_MANUALLY',
+  'BOOKING_CANCELED',
+  'BOOKING_RESCHEDULED',
+  'BOOKING_MARKED_NO_SHOW',
+  'BOOKING_MARKED_COMPLETED',
+  'CANCELLATION_REQUEST_DECIDED',
+  'RESCHEDULE_REQUEST_DECIDED',
+  'MANUAL_PAYMENT_RECORDED',
+  'REFUND_ISSUED',
+  'SETTINGS_UPDATED',
+  'EMPLOYEE_CREATED',
+  'EMPLOYEE_UPDATED',
+  'EMPLOYEE_ARCHIVED',
+  'SERVICE_CREATED',
+  'SERVICE_UPDATED',
+  'SERVICE_ARCHIVED',
+  'OFFICE_USER_CREATED',
+  'OFFICE_USER_UPDATED',
+  'OFFICE_USER_ARCHIVED',
+  'WORKING_HOURS_REPLACED',
+  'EMPLOYEE_SERVICES_REPLACED',
+  'AVAILABILITY_EXCEPTION_CREATED',
+  'AVAILABILITY_EXCEPTION_DELETED',
+  'TIME_OFF_CREATED',
+  'TIME_OFF_UPDATED',
+  'BLOCKED_TIME_CREATED',
+  'BLOCKED_TIME_DELETED',
+  'CLOSED_DAY_CREATED',
+  'CLOSED_DAY_DELETED',
+  'SERVICE_CATEGORY_CREATED',
+  'SERVICE_CATEGORY_UPDATED',
+  'SERVICE_CATEGORY_ARCHIVED',
+  'CUSTOMER_UPDATED',
+  'CUSTOMER_ERASED',
+]);
+export type AuditAction = z.infer<typeof auditActionSchema>;
+
+/**
  * What a notification is about.
  *
  * Here rather than only in Prisma because the notification-templates package is

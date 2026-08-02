@@ -6,7 +6,7 @@ import { PublicBookingsController } from '../public/public-bookings.controller.j
 import { PublicModule } from '../public/public.module.js';
 
 import { AttendanceService } from './attendance.service.js';
-import { AuditService } from './audit.service.js';
+import { AuditWriterModule } from './audit.module.js';
 import { BookingCheckoutService } from './booking-checkout.service.js';
 import { BookingConfirmationService } from './booking-confirmation.service.js';
 import { CancellationService } from './cancellation.service.js';
@@ -30,7 +30,7 @@ import { ReservationService } from './reservation.service.js';
  * mutually dependent modules and a payment provider in every catalog test.
  */
 @Module({
-  imports: [PublicModule, ManagementTokenModule, PaymentModule],
+  imports: [PublicModule, ManagementTokenModule, PaymentModule, AuditWriterModule],
   controllers: [PublicBookingsController],
   providers: [
     ReservationService,
@@ -41,12 +41,12 @@ import { ReservationService } from './reservation.service.js';
     ExpiryService,
     ExpirySweeper,
     ExpiryProcessor,
-    AuditService,
     CancellationService,
     RescheduleService,
     AttendanceService,
   ],
   exports: [
+    AuditWriterModule,
     ReservationService,
     CustomerUpsertService,
     BookingCheckoutService,
@@ -55,7 +55,6 @@ import { ReservationService } from './reservation.service.js';
     ExpiryService,
     ExpirySweeper,
     ExpiryProcessor,
-    AuditService,
     CancellationService,
     RescheduleService,
     AttendanceService,

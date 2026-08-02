@@ -1,5 +1,7 @@
+export * from './bookings.js';
 export * from './calendar.js';
 export * from './catalog.js';
+export * from './customers.js';
 export * from './dashboard.js';
 export * from './settings.js';
 export * from './staff.js';
