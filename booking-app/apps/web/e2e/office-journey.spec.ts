@@ -2,8 +2,10 @@ import { expect, test } from '@playwright/test';
 
 import {
   completeBooking,
+  drain,
   emailTo,
   emails,
+  fillManualBooking,
   login,
   manageUrlFrom,
   reserveSlot,
@@ -21,14 +23,20 @@ import type { Page } from '@playwright/test';
  * the office's job is to deal with bookings that already exist and a fixture that
  * inserted them would skip the half of the system that produces them.
  *
- * One scenario from the plan is missing and cannot be written yet: creating a booking
- * by hand from the calendar. `POST /office/bookings` exists and the API suite covers
- * it, but no screen calls it — see the progress notes. The manual *payment* below is
- * recorded against a reservation the customer left unpaid, which is the same situation
- * a walk-in creates and the closest thing the interface currently allows.
+ * The walk-in is the exception, and deliberately so: it is the one booking here that
+ * never had a customer at a keyboard, which is exactly what the manual-booking screen is
+ * for.
  */
 
 const CUSTOMER = { firstName: 'Anna', lastName: 'Becker', email: 'anna@example.com' };
+
+/** Somebody who rang up. They never see the website at all. */
+const WALK_IN = {
+  firstName: 'Ingo',
+  lastName: 'Halm',
+  email: 'ingo@example.com',
+  phone: '+4915100000001',
+};
 
 test.beforeEach(async ({ request }) => {
   await resetStack(request);
@@ -43,6 +51,33 @@ async function openBooking(page: Page, reference: string): Promise<void> {
   await page.getByTestId(`row-${reference}`).click();
   await expect(page.getByTestId('actions')).toBeVisible();
 }
+
+test('the office books a walk-in by hand and takes cash for it', async ({ page, request }) => {
+  await login(page, 'owner');
+
+  await page.getByTestId('nav-office-calendar').click();
+  await page.getByTestId('new-booking').click();
+
+  await fillManualBooking(page, WALK_IN);
+
+  // Confirmed on the spot, with no payment and no Checkout session: §6.5. Landing on
+  // the booking rather than on a list is what makes the next step — the money — one click.
+  await expect(page.getByTestId('status-CONFIRMED')).toBeVisible();
+  await expect(page.getByTestId('actions')).toBeVisible();
+
+  await page.getByTestId('action-payment').click();
+  await page.getByTestId('payment-amount').fill('45.00');
+  await page.getByTestId('payment-method').selectOption('CASH');
+  await page.getByTestId('confirm').click();
+
+  await expect(page.getByTestId('paid')).toContainText('45,00');
+
+  // The customer still hears about the appointment, exactly as an online booking would
+  // make them: the office typed the address, not the booking.
+  await drain(request);
+  const confirmation = await emailTo(request, WALK_IN.email);
+  expect(confirmation.kind).toBe('BOOKING_CONFIRMATION');
+});
 
 test('the office signs in, sees the day, and records a cash payment', async ({ page, request }) => {
   const reserved = await reserveSlot(page, CUSTOMER, { serviceName: 'Facial Massage' });
@@ -98,6 +133,31 @@ test('the office decides a cancellation request and overrides the retained amoun
 
   await page.getByTestId('approve').click();
   await expect(page.getByTestId('decided')).toBeVisible();
+});
+
+test('the owner switches the cancellation fee on from the settings screen', async ({
+  page,
+  request,
+}) => {
+  await login(page, 'owner');
+
+  // Through the form, not through the API. Until the policy control existed, a
+  // percentage typed here did nothing at all: the policy stayed `NONE` and every late
+  // cancellation was refunded in full, which is the opposite of what the screen implied.
+  await page.getByTestId('nav-office-settings').click();
+  await page.getByTestId('fee-policy').selectOption('PERCENTAGE');
+  await page.getByTestId('fee-percent').fill('50');
+  await page.getByTestId('free-cancellation').fill('72');
+  await page.getByTestId('save').click();
+  await expect(page.getByTestId('saved')).toBeVisible();
+
+  // What the customer is then told is the proof that the setting took effect.
+  await page.goto('/?lang=de');
+  await completeBooking(page, request, CUSTOMER, { serviceName: 'Facial Massage' });
+
+  await page.goto(manageUrlFrom(await emailTo(request, CUSTOMER.email)));
+  await page.getByTestId('cancel').click();
+  await expect(page.getByTestId('confirm-consequence')).toContainText('22,50');
 });
 
 test('the office blocks a time and it is gone from the public calendar', async ({ page }) => {

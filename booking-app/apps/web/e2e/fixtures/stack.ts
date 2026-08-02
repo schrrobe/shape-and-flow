@@ -382,11 +382,13 @@ export async function completeBooking(
 /**
  * Switch the cancellation fee on, as an owner would.
  *
- * Through the office API with the session the browser is holding, not through the
- * settings screen — the screen offers "fee inside that window (%)" but nothing that
- * sets `cancellationFeePolicy`, so a percentage typed into it has no effect while the
- * policy stays `NONE`. That is a real gap in the settings screen and is recorded as
- * one; this helper works around it so the manage-page behaviour can still be proven.
+ * Through the office API with the session the browser is holding, rather than through
+ * the settings screen, because in most specs the fee is a *precondition* and not the
+ * thing under test — a form filled in on the way to the real scenario is three clicks
+ * that can only fail for reasons the test is not about.
+ *
+ * The screen itself is proven once, in `office-journey.spec.ts`: the policy control it
+ * needed was missing until then, and this helper existed to work around that gap.
  */
 export async function setCancellationFee(
   page: Page,
@@ -403,6 +405,60 @@ export async function setCancellationFee(
   });
 
   expect(response.ok(), `settings update failed: ${await response.text()}`).toBe(true);
+}
+
+/**
+ * Fill in the manual-booking screen and book it, from wherever the form was opened.
+ *
+ * The day is *found* rather than computed: the form is asked for the first day that has
+ * anything free, walking forward from the one it opened on. The seeded week is
+ * Monday–Friday with two public holidays in it, and a test that hard-coded "tomorrow"
+ * would fail on a Saturday for reasons that have nothing to do with what it checks.
+ */
+export async function fillManualBooking(
+  page: Page,
+  customer: { firstName: string; lastName: string; email: string; phone?: string },
+  options: { serviceName?: string } = {},
+): Promise<void> {
+  // Chosen by the text an operator reads, not by an id a fixture would have to know.
+  // `selectOption({ label })` matches the whole label, and the label here carries the
+  // duration and the price as well as the name.
+  const option = page
+    .getByTestId('service')
+    .locator('option', { hasText: options.serviceName ?? 'Facial Massage' })
+    .first();
+
+  await page.getByTestId('service').selectOption(String(await option.getAttribute('value')));
+
+  const day = page.getByTestId('date');
+
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    // The slot list is loaded per day; either it has buttons or it says it has none.
+    await expect(page.getByTestId('slot').first().or(page.getByTestId('no-slots'))).toBeVisible();
+
+    if ((await page.getByTestId('slot').count()) > 0) break;
+
+    const next = new Date(`${await day.inputValue()}T12:00:00Z`);
+    next.setUTCDate(next.getUTCDate() + 1);
+    await day.fill(next.toISOString().slice(0, 10));
+  }
+
+  await expect(page.getByTestId('slot').first()).toBeVisible();
+  await page.getByTestId('slot').first().click();
+
+  // One free person is chosen for the operator, several are offered — either way the
+  // select holds a real employee before the booking is sent.
+  const employee = page.getByTestId('employee');
+  if ((await employee.inputValue()) === '') {
+    await employee.selectOption({ index: 1 });
+  }
+
+  await page.getByTestId('first-name').fill(customer.firstName);
+  await page.getByTestId('last-name').fill(customer.lastName);
+  await page.getByTestId('email').fill(customer.email);
+  if (customer.phone !== undefined) await page.getByTestId('phone').fill(customer.phone);
+
+  await page.getByTestId('create').click();
 }
 
 export async function login(page: Page, who: 'owner' | 'staff' = 'owner'): Promise<void> {

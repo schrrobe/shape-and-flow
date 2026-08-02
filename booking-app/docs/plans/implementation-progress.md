@@ -8,9 +8,9 @@ while implementing that the plan could not have known.
 | ----------------- | --------------------------------------------------------------------------------- |
 | Branch            | `feat/phase-1-booking-app` (nothing pushed)                                       |
 | Tasks complete    | 48 of 49 — only Task 3.4 remains                                                  |
-| Unit tests        | 834 passing (488 api + 201 web + 37 contracts + 41 ui + 67 templates)             |
-| Integration tests | 683 passing                                                                       |
-| End-to-end tests  | 32 passing (16 scenarios × desktop and 360-pixel mobile)                           |
+| Unit tests        | 849 passing (489 api + 215 web + 37 contracts + 41 ui + 67 templates)             |
+| Integration tests | 695 passing                                                                       |
+| End-to-end tests  | 36 passing (18 scenarios × desktop and 360-pixel mobile)                           |
 | Gates             | `pnpm lint`, `format`, `typecheck`, `test`, `test:integration`, `test:e2e`, `build` all green |
 
 ## Execution order — vertical slice
@@ -110,6 +110,28 @@ Three things only that exercise could have found:
   real adapters are Task 3.4, so a deployment made today can only run as staging. Recorded
   at the top of `.env.production.example`, in `docs/operations.md`, and in the CI job.
 
+**The office's own booking.** The two screen-level gaps recorded under "Plan errors" are
+closed: `NewBooking.vue` calls `POST /office/bookings`, and the settings card sets
+`cancellationFeePolicy`. Three things about the first one are worth keeping:
+
+- **It needed a new endpoint, `GET /office/availability`.** The office may book inside the
+  minimum-notice window, and with the default 24 hours `/public/availability` answers
+  *nothing* for today — the day somebody is most likely to ring about. A screen built on
+  the public route could not have offered this afternoon at all. The new route is the same
+  engine, the same query and the same response, over a snapshot with the notice and the
+  horizon lifted. That lift is now `asOfficeSnapshot` in
+  `domain/availability/office-view.ts`, which the reservation transaction's own re-check
+  also uses: what the office is offered and what it is allowed to book are one definition,
+  so a slot cannot be shown and then refused.
+- **The slot decides the person, not the other way round.** `employeeId` is required by the
+  contract, and the office is asked *after* the time is picked, from that slot's
+  `employeeIds` — "who is free at four" is the question actually being asked, and a single
+  candidate is filled in rather than asked about.
+- **Only a conflict re-reads the day.** A `SLOT_UNAVAILABLE` clears the picked slot,
+  because continuing to offer it would be a lie. A 500 or a dropped connection leaves the
+  form and its idempotency key alone — throwing those away would turn a retriable failure
+  into a re-typed booking, and the key exists precisely so that a second attempt is safe.
+
 **Task 11.1 is complete.** Sixteen scenarios run against a real browser, a real API
 process, a real worker process, real Postgres and real Redis, with only the payment, mail
 and SMS providers faked — and the built bundle behind `vite preview`, not a dev server. A
@@ -130,9 +152,9 @@ absent from the container unless `ENABLE_TEST_SUPPORT` is true, the environment 
 refuses that in production, and the reset refuses any database not named `booking_test` or
 `booking_e2e`.
 
-Two scenarios from the plan are not in the suite, both for reasons worth reading: the
-manual booking (no screen calls `POST /office/bookings` — see the plan errors below) and
-the intermediate `EXPIRING` state (unobservable from outside, see deviation 58).
+One scenario from the plan is not in the suite: the intermediate `EXPIRING` state, which
+is unobservable from outside (see deviation 58). The manual booking was the other one, and
+it is covered now — see "The office's own booking" below.
 
 | Task | What is left                                                   |
 | ---- | -------------------------------------------------------------- |
@@ -477,20 +499,20 @@ constructable`. The named import gives both the class and the type.
 
 ## Plan errors found while implementing
 
-- **Task 11.1's office journey cannot be written as specified: there is no manual-booking
-  screen.** The plan's office journey opens with `new-booking` on the calendar and fills a
-  manual booking. `POST /office/bookings` exists, the API suite covers it and the typed
-  client has `office.bookings.create` — but no page in the office area calls it. This is a
-  gap in Task 10.2/10.3 rather than a plan error, and it is the one plan scenario the
-  suite omits. The manual *payment* is instead recorded against a reservation the customer
-  left unpaid, which is the same situation a walk-in creates.
-- **The settings screen cannot switch the cancellation fee on.** It offers "fee inside
-  that window (%)" but nothing that sets `cancellationFeePolicy`, which defaults to `NONE`
-  — so a percentage typed into it has no effect at all, and the field reads as working.
-  The contract carries the field; the form does not send it. The e2e suite sets the policy
-  through `PATCH /office/settings` with the browser's own session as a workaround, so the
-  manage-page behaviour is still proven. **Adding a policy control is the fix, and it is
-  not in this commit** — the screen belongs to the stream that built it.
+- **Task 11.1's office journey could not be written as specified: there was no
+  manual-booking screen.** ~~The plan's office journey opens with `new-booking` on the
+  calendar and fills a manual booking. `POST /office/bookings` exists, the API suite
+  covers it and the typed client has `office.bookings.create` — but no page in the office
+  area calls it.~~ **Closed.** `NewBooking.vue` is that screen, reached from a
+  `new-booking` button on the calendar and on the booking list, and the plan's journey is
+  in the suite. See "The office's own booking" below for what building it turned up.
+- **The settings screen could not switch the cancellation fee on.** ~~It offers "fee
+  inside that window (%)" but nothing that sets `cancellationFeePolicy`, which defaults to
+  `NONE` — so a percentage typed into it has no effect at all, and the field reads as
+  working.~~ **Closed.** The card now sets the policy itself, and offers the percentage or
+  the fixed amount according to which one the chosen policy uses.
+  `setCancellationFee()` in the e2e fixtures stays an API call, because in most specs the
+  fee is a precondition rather than the subject; one journey now sets it through the form.
 - **Task 11.1's `day-tab` and `checkout-session-id` selectors describe a different UI.**
   The slot picker shows a week of day *sections* with a week-forward control, not tabs, and
   the hand-off page shows a Checkout link rather than a bare session id. The suite reads
