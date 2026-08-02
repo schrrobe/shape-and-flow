@@ -7,9 +7,9 @@ while implementing that the plan could not have known.
 |                   |                                                                                   |
 | ----------------- | --------------------------------------------------------------------------------- |
 | Branch            | `feat/phase-1-booking-app` (nothing pushed)                                       |
-| Tasks complete    | 41 of 49                                                                          |
-| Unit tests        | 639 passing (399 api + 166 web + 37 contracts + 37 ui)                            |
-| Integration tests | 388 passing                                                                       |
+| Tasks complete    | 44 of 49                                                                          |
+| Unit tests        | 720 passing (480 api + 166 web + 37 contracts + 37 ui)                            |
+| Integration tests | 676 passing                                                                       |
 | Gates             | `pnpm lint`, `format`, `typecheck`, `test`, `test:integration`, `build` all green |
 
 ## Execution order — vertical slice
@@ -68,38 +68,34 @@ constraint → Stripe Checkout → webhook confirms.
 | 8.2  | §10.5 role matrix enforced, refund capability, employee scope, audit trail     |
 | 8.3  | Office dashboard and calendar, derived display statuses                        |
 | 10.1 | Office shell, login, forgot and reset password, session store and route guard  |
+| 8.4  | Staff, working hours, availability exceptions, catalog, settings, office users |
+| 8.5  | Office bookings, manual payments, refunds, requests, customers, CSV exports    |
+| 11.2 | Health indicators, operations counters, request logging, graceful shutdown     |
 
 ## Next
 
-**Stage 9 (public web) and task 10.1 are complete.** A customer can browse, book, pay,
-land back on a confirmation that polls for the webhook, and then cancel or request a
-reschedule through the link in their email. A member of staff can sign in, land in the
-office shell, and sign out. Verified in a browser against the running API at every step,
-not only by tests.
+**Stage 8 is complete and 10.2/10.3 are unblocked.** Tasks 8.1 to 8.3 were built in a
+**parallel session** (`ab6b9f3`, `9c0a03c`, `c811428`), and 8.4 and 8.5 followed from the
+same stream (`2636921`, `f57abbc`). The office API is now whole: staff, availability,
+catalog, settings, users, bookings, manual payments, refunds, requests, customers and the
+two CSV exports. Every stage-9 and stage-10 commit was staged by explicit path so the two
+streams never mixed.
 
-Tasks 8.1 to 8.3 were built in a **parallel session** and are committed as `ab6b9f3`,
-`9c0a03c` and `c811428` — all three are API work; no office *web* code came from there.
-Stage 9 and 10.1 were staged by explicit path so the two streams never mixed.
+**Task 11.2 is complete.** `/api/health/live` answers with the database and Redis both
+unreachable; `/api/health/ready` names whichever of database, Redis or migrations is
+down; `/api/health/detail` reports queue depths and the stuck-row counts to an `OWNER`
+or `ADMIN`. Every request writes one structured line at a level that matches its status,
+the correlation id reaches the outbox row, and `SIGTERM` stops the listener and waits for
+in-flight requests. Verified against a booted process, not only by tests — see the bugs
+below, one of which was the development database being two migrations behind.
 
-**Stopped, waiting on stage 8.** Tasks 10.2 and 10.3 cannot be finished yet:
-
-| Needs                | For                                                     | State                            |
-| -------------------- | ------------------------------------------------------- | -------------------------------- |
-| 8.4 staff, availability, catalog, settings | 10.3 management screens            | in the working tree, uncommitted |
-| 8.5 bookings, manual payments, refunds, exports | 10.2 list and detail, 10.3 requests and exports | not started        |
-
-Building against uncommitted contracts would produce a commit that does not compile on
-its own, and building 8.5 in parallel would collide in `office.module.ts`,
-`packages/contracts/src/office/` and the integration harness — the files the other stream
-has open. So 10.2 and 10.3 wait for those two commits, by the user's decision.
-
-What is buildable the moment 8.4 and 8.5 land:
-
-| Task | What it is                                                     |
+| Task | What is left                                                   |
 | ---- | -------------------------------------------------------------- |
-| 10.2 | Office dashboard, calendar grid, booking list and detail        |
+| 10.2 | Landed from the parallel stream as `603746f` while this was being written; not recorded in the Done table above because that stream verifies its own work |
 | 10.3 | Employees, working hours, services, availability, requests, customers, settings, users, exports |
-| 11.x | End-to-end tests, ops, docs                                    |
+| 11.1 | End-to-end suite (needs 10.2 and 10.3 for the office journey)   |
+| 11.3 | Deployment, backup, documentation                              |
+| 3.4  | Real Resend and Twilio adapters, deferred out of the slice     |
 
 **Stages 5, 6 and 7 are complete.** A customer books and pays; the booking confirms
 by webhook or releases the slot; they can cancel, reschedule or be marked no-show
@@ -335,7 +331,61 @@ constructable`. The named import gives both the class and the type.
     specification is the stronger comparison anyway, and it is what caught §10.5's
     one ambiguous cell.
 
+45. **The request log is pino-http's automatic log, configured, not the plan's
+    `RequestLogInterceptor`.** A Nest interceptor cannot see the requests an incident
+    starts from: guards run *before* interceptors, so every 401, 403 and 429 — and every
+    404, which never reaches a handler at all — would be missing, and keeping both would
+    mean two lines per request with the wrong one incomplete. pino-http logs on the
+    response's `finish` event, which happens for all of them. The decisions that were to
+    be the interceptor's — level by status, sampling, the fields on the line — live in
+    `common/logging/request-log.ts` as pure functions with their own tests.
+46. `/health/detail` is its own controller. `HealthController` is `@Public()` at class
+    level, and handler metadata does not override a class-level `@Public()` — a third
+    route there would be reachable by anyone, with only the session guard between the
+    public and the business's queue depths.
+47. Terminus signals a failed readiness check by throwing, and the global exception
+    filter is caught in `HealthController.ready` rather than taught about it. The error
+    envelope is the contract for API clients; a supervisor's probe is not one, and
+    turning the indicator names into a generic 500 body would remove the only thing a
+    readiness response is for.
+48. `ShutdownService` closes the listener and drains in-flight requests, and stops there.
+    The plan also has it closing BullMQ workers, Redis and Prisma; those already close
+    through their own `onApplicationShutdown` hooks, which Nest runs after this one, and
+    two owners for one socket is how a shutdown starts hanging. The API process has no
+    BullMQ workers at all — `worker.main.ts` drains those.
+49. The database indicator is Terminus's own `PrismaHealthIndicator`; the Redis one is
+    ours (`queue.indicator.ts`) and pings the shared BullMQ connection rather than one of
+    its own. What readiness has to answer is "can *this* process reach the Redis it
+    enqueues to", and a second connection can be healthy while the shared one is wedged.
+50. `/health/detail` counts what is **stuck** — each component's own staleness window,
+    five minutes for outbox and inbox, fifteen for notifications — while the office
+    dashboard's tiles count what is **outstanding**. Both read the same `health()`
+    methods, so there is still one definition of each; the two endpoints ask different
+    questions. `DashboardService.operations()` predates `OperationsService` and still has
+    its own copy of the aggregation: now that 8.5 has landed it could delegate, which is
+    the obvious follow-up when someone is next in that file.
+51. The pino serializers are narrower than the defaults: `req` keeps id, method, url,
+    remote address and user agent, `res` keeps the status. See the bug below — the
+    default `res` serializer emits `Set-Cookie`.
+52. `statusCode` is added by `customSuccessObject`/`customErrorObject`, not by
+    `customProps`. Also a bug below: `customProps` decorates every line logged during a
+    request, and while a handler is running the response still reports Node's default.
+
 ## Plan errors found while implementing
+
+- **Task 11.2's migration assertion cannot match.** It expects
+  `details.migrations.pending` to contain `'calendar_constraints'`, but a migration is
+  named by its directory — `20260731210500_calendar_constraints`. The test asserts the
+  suffix instead.
+- **Task 11.2's `withDatabaseDown` and `withRedisDown` have nothing to switch off.**
+  Stopping a container mid-suite would take every other test with it. The readiness
+  cases build the controller with a Prisma that rejects and a Redis pointed at a closed
+  port, which is the same failure from the process's point of view and costs no
+  infrastructure.
+- **Task 7.4's Docker healthcheck asks for a 404.** It requests `/api/health`, and
+  nothing is mounted on the bare prefix — every container would have reported unhealthy,
+  which is also what `docker compose --wait` in 11.3 would have hit. It is
+  `/api/health/ready` now, which is what the comment beside it always claimed.
 
 - **Task 9.1's `tailwind-preset.ts` describes Tailwind 3.** Tailwind 4 has no JavaScript
   preset — the theme *is* CSS custom properties — so the token mapping lives in
@@ -463,6 +513,29 @@ connecting/connected` on a second `connect()`. The hook does a `PING` instead,
 ## Bugs caught by verifying rather than assuming
 
 Each of these would have passed a casual "it works" check.
+
+- **`Set-Cookie` was going into the log.** pino's automatic request log has been on since
+  the logger module landed, and its default response serializer emits every response
+  header. The redaction list covers `req.headers.cookie` but nothing on the response, so
+  `POST /api/auth/login` wrote a live session id into the log file. Found by reading an
+  actual line from a booted process rather than the configuration that produces it. The
+  serializers now keep the status and nothing else, which is a fix that cannot be
+  forgotten the next time a route sets a header.
+- **Every log line inside a request claimed `statusCode: 200`.** `customProps` decorates
+  each line pino writes during a request, and it read `res.statusCode` — which is Node's
+  default until the response is written. So the exception filter's own line about a 401
+  said 200. The status now comes from `customSuccessObject`/`customErrorObject`, which
+  run only on the line that completes the request.
+- **The development database was two migrations behind, and nothing had said so.**
+  `/api/health/ready` answered 503 on its first real request, naming
+  `20260801190000_audit_actions_for_configuration` and
+  `20260802080000_audit_actions_for_customers`. Exactly the failure the indicator exists
+  for, found by curling it rather than by trusting the integration test that had just
+  passed against a migrated test database.
+- **`import pinoHttp from 'pino-http'` is not callable.** Same shape as the ioredis
+  import: CJS types with no `exports` map, so under NodeNext the default import resolves
+  to the module namespace. Only `typecheck` catches it — the suite passes, because SWC's
+  interop hands back something callable at runtime.
 
 - **`vue-tsc --noEmit | grep "error TS"` matches nothing.** Its default formatter does not
   print that string, so the web app's typecheck was reported clean while eleven errors
@@ -593,6 +666,13 @@ Each of these would have passed a casual "it works" check.
   `pnpm test`, `pnpm test:integration`, and `prisma migrate diff --from-migrations
   --to-schema --exit-code`. The last one needs the `booking_shadow` database, which
   `docker/postgres-init.sql` creates on first volume init.
+- **Two sessions must not run the integration suite at once.** One run of
+  `health.int.spec.ts` failed with a foreign-key violation and a `40P01 deadlock
+  detected` inside `seedOrganization`, and passed unchanged immediately afterwards. The
+  cause was the other stream running its own suite against `booking_test` at the same
+  moment: `resetDatabase()` truncates every table, so one suite's TRUNCATE lands in the
+  middle of the other's seed. Worth reading the "unexplained" entry below in that light —
+  a 409 that became a 404 is what a row deleted mid-test looks like.
 - **One intermittent integration failure, unexplained.** Two full-suite runs failed
   with a single assertion each — `idempotency.int.spec.ts` "stores nothing when the
   handler fails", then `public-bookings.int.spec.ts` expecting 409 and getting 404 —
@@ -604,6 +684,13 @@ Each of these would have passed a casual "it works" check.
   become a generic 500; a 404 needs a deliberate `AppError`). If it recurs, capture
   the response body — the 404 can only come from a service or booking lookup, which
   would mean the row genuinely was not there.
+- `LOG_SAMPLE_RATE` is the share of `GET /public/availability` lines that are written,
+  and it applies to that endpoint alone. Everything else is logged in full, because a
+  sampled-out booking or webhook is a hole in the story exactly where an investigation
+  needs it. Health probes are never logged at all.
+- `/api/health/detail` caches its counters for ten seconds. A dashboard polling it cannot
+  turn a diagnostic into a load source, and none of these numbers means anything at a
+  finer resolution than that.
 - Reminders are the one place a *fresh* management token is minted outside
   confirmation and reschedule. It happens inside the transaction that queues the
   message, so a rollback cannot leave a live credential for a message never sent.

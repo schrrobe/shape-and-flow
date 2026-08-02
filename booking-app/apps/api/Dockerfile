@@ -103,8 +103,11 @@ EXPOSE 3001
 # Checks the process's own view of readiness, including its database connection, rather than
 # whether the port is open — a process that accepts connections and cannot reach Postgres is
 # the failure worth restarting.
+#
+# `/api/health/ready`, not `/api/health`: nothing is mounted on the bare prefix, so the check
+# as first written asked for a 404 and would have reported every container unhealthy.
 HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=3 \
-  CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT??3001)+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+  CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT??3001)+'/api/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 CMD ["node", "dist/main.js"]
 
 # ── worker ───────────────────────────────────────────────────────────────────

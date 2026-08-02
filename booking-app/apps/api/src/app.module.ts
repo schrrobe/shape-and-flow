@@ -8,6 +8,8 @@ import { AuditModule } from './common/audit/audit.module.js';
 import { GlobalExceptionFilter } from './common/errors/global-exception.filter.js';
 import { AuthGuard } from './common/guards/auth.guard.js';
 import { LoggingModule } from './common/logging/logger.module.js';
+import { InFlightRequests } from './common/shutdown/inflight.js';
+import { ShutdownService } from './common/shutdown/shutdown.service.js';
 import { ThrottlingModule } from './common/throttling/throttling.module.js';
 import { ConfigModule } from './config/config.module.js';
 import { DomainModule } from './domain/domain.module.js';
@@ -55,6 +57,10 @@ import { WebhooksModule } from './webhooks/webhooks.module.js';
     // Registered as a provider rather than with useGlobalFilters so it can take
     // dependencies later without changing how it is wired.
     { provide: APP_FILTER, useClass: GlobalExceptionFilter },
+    // The graceful stop. Its middleware is mounted in main.ts, because the counter
+    // has to see a request before any guard can reject it.
+    InFlightRequests,
+    ShutdownService,
     // Order matters: guards run in registration order, so the cheap in-memory
     // authorisation check happens before the one that talks to Redis.
     { provide: APP_GUARD, useClass: AuthGuard },

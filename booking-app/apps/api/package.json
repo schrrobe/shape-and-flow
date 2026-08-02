@@ -27,6 +27,7 @@
     "@nestjs/common": "11.1.28",
     "@nestjs/core": "11.1.28",
     "@nestjs/platform-express": "11.1.28",
+    "@nestjs/terminus": "11.1.1",
     "@nestjs/throttler": "6.5.0",
     "@node-rs/argon2": "2.0.2",
     "@prisma/adapter-pg": "7.9.1",
