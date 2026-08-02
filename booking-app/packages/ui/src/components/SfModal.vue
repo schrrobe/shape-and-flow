@@ -102,12 +102,20 @@ onBeforeUnmount(() => {
     <div
       v-if="open"
       class="fixed inset-0 z-50 flex items-end justify-center bg-text-primary/40 p-0 sm:items-center sm:p-4"
-      @keydown="onKeydown"
     >
       <!-- The backdrop closes on click; the panel stops the click so an in-panel click does
            not. `mousedown` rather than `click`, so a drag that ends outside does not close. -->
-      <div class="absolute inset-0" @mousedown="emit('close')"></div>
+      <div aria-hidden="true" class="absolute inset-0" @mousedown="emit('close')"></div>
 
+      <!-- Keydown belongs on the panel rather than the overlay: the panel is
+           what takes focus when the modal opens and what the focus trap keeps
+           focus inside, so every key the dialog cares about bubbles to here.
+
+           The rule wants an interactive role, and `dialog` is not on its list,
+           but the thing it guards against — a handler on something a keyboard
+           user cannot reach — is not the case here: this element carries
+           tabindex and is focused on open. -->
+      <!-- eslint-disable-next-line vuejs-accessibility/no-static-element-interactions -->
       <div
         ref="panel"
         role="dialog"
@@ -115,6 +123,7 @@ onBeforeUnmount(() => {
         :aria-labelledby="titleId"
         tabindex="-1"
         class="relative w-full max-w-lg rounded-sf border border-border bg-surface p-5 shadow-card sm:w-auto sm:min-w-[24rem]"
+        @keydown="onKeydown"
       >
         <h2 :id="titleId" class="text-lg font-semibold text-text-primary">{{ title }}</h2>
 
