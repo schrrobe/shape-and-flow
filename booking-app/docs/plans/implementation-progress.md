@@ -871,6 +871,12 @@ Each of these would have passed a casual "it works" check.
   It provisions its own `booking_e2e` database — Prisma creates it — and uses Redis logical
   database 1, so it cannot reach the integration suite's data. A run takes about a minute
   for 32 tests across two viewports.
+- **An e2e test that only failed after lunch.** `a reserved slot disappears for the next
+  visitor` reserved the first free slot on the first free day and then asserted that day
+  still had others. The earliest bookable day is the one the 24-hour notice window is
+  eating into, so from mid-afternoon it is down to its last few slots and one reservation
+  clears it. Both visitors now step a week along. Worth remembering as a shape: any e2e
+  assertion about "the first free day" is an assertion about the time of day it runs at.
 - **Two sessions must not run the e2e suite at once either**, and not for the integration
   suite's reason: the API listens on 3100 and the preview server on 4173, and
   `reuseExistingServer` means the second run would silently drive the first run's
