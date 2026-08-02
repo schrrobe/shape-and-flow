@@ -180,11 +180,12 @@ export class StripePaymentProvider implements PaymentProvider {
 
     const paymentIntent =
       typeof session.payment_intent === 'string' ? null : session.payment_intent;
-    const latestCharge = paymentIntent
-      ? typeof paymentIntent.latest_charge === 'string'
+    // Falsy rather than `=== null`: an unexpanded session has no
+    // `payment_intent` key at all, so this is undefined as often as it is null.
+    const latestCharge =
+      !paymentIntent || typeof paymentIntent.latest_charge === 'string'
         ? null
-        : paymentIntent.latest_charge
-      : null;
+        : paymentIntent.latest_charge;
 
     return {
       sessionId: session.id,

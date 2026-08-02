@@ -155,12 +155,8 @@ async function signedInAs(
 ): Promise<{ cookie: string; officeUserId: string; session: OfficeSession }> {
   userCounter += 1;
 
-  const employeeId =
-    overrides.employeeId === undefined
-      ? role === 'EMPLOYEE'
-        ? ctx.employee1.id
-        : null
-      : overrides.employeeId;
+  const defaultEmployeeId = role === 'EMPLOYEE' ? ctx.employee1.id : null;
+  const employeeId = overrides.employeeId === undefined ? defaultEmployeeId : overrides.employeeId;
 
   const user = await prisma.officeUser.create({
     data: {

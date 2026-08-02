@@ -244,15 +244,19 @@ export function parseJobPayload<Name extends JobName>(
  * dispatcher whose ids are rejected loses deduplication, and the symptom is
  * duplicate confirmation emails rather than an error anyone sees.
  */
+function invalidJobIdReason(jobId: string): string | null {
+  if (jobId.length === 0) return 'must not be empty';
+  if (jobId.includes(':')) return 'must not contain ":" — BullMQ reserves it as a key separator';
+
+  if (String(Number.parseInt(jobId, 10)) === jobId) {
+    return 'must not be an integer — those collide with BullMQ-generated ids';
+  }
+
+  return null;
+}
+
 export function assertValidJobId(jobId: string): void {
-  const reason =
-    jobId.length === 0
-      ? 'must not be empty'
-      : jobId.includes(':')
-        ? 'must not contain ":" — BullMQ reserves it as a key separator'
-        : String(Number.parseInt(jobId, 10)) === jobId
-          ? 'must not be an integer — those collide with BullMQ-generated ids'
-          : null;
+  const reason = invalidJobIdReason(jobId);
 
   if (reason !== null) {
     throw new AppError('INVALID_JOB_ID', {

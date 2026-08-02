@@ -389,6 +389,13 @@ describe('GET /api/office/calendar', () => {
 });
 
 describe('GET /api/office/dashboard', () => {
+  const unpaidCount = async (cookie: string): Promise<number> =>
+    (
+      (await get(cookie, '/api/office/dashboard').expect(200)).body as {
+        unpaidConfirmedBookings: number;
+      }
+    ).unpaidConfirmedBookings;
+
   it('returns every tile plus the operations block, in the published shape', async () => {
     const cookie = await signedInAs('OWNER');
 
@@ -447,21 +454,14 @@ describe('GET /api/office/dashboard', () => {
     const booking = await bookingAt(berlin(TODAY, '10:00'));
     const price = ctx.service30.priceCents;
 
-    const unpaid = async (): Promise<number> =>
-      (
-        (await get(cookie, '/api/office/dashboard').expect(200)).body as {
-          unpaidConfirmedBookings: number;
-        }
-      ).unpaidConfirmedBookings;
-
-    expect(await unpaid()).toBe(1);
+    expect(await unpaidCount(cookie)).toBe(1);
 
     await recordManualPayment(booking.id, price - 500);
     // Still short, so still something to chase.
-    expect(await unpaid()).toBe(1);
+    expect(await unpaidCount(cookie)).toBe(1);
 
     await recordManualPayment(booking.id, 500);
-    expect(await unpaid()).toBe(0);
+    expect(await unpaidCount(cookie)).toBe(0);
   });
 
   it('does not chase a rescheduled booking whose money is on the original row', async () => {
@@ -472,14 +472,7 @@ describe('GET /api/office/dashboard', () => {
     const original = await bookingAt(berlin(TODAY, '10:00'));
     await recordManualPayment(original.id, ctx.service30.priceCents);
 
-    const unpaid = async (): Promise<number> =>
-      (
-        (await get(cookie, '/api/office/dashboard').expect(200)).body as {
-          unpaidConfirmedBookings: number;
-        }
-      ).unpaidConfirmedBookings;
-
-    expect(await unpaid()).toBe(0);
+    expect(await unpaidCount(cookie)).toBe(0);
 
     await prisma.booking.update({
       where: { id: original.id },
@@ -499,7 +492,7 @@ describe('GET /api/office/dashboard', () => {
       },
     });
 
-    expect(await unpaid()).toBe(0);
+    expect(await unpaidCount(cookie)).toBe(0);
   });
 
   it('adds card and cash into one figure for today, and ignores yesterday', async () => {

@@ -1,6 +1,6 @@
 import { formatDate, formatDateTime, formatMoneyCents, formatTime } from '../format.js';
 
-import type { AppointmentData, Locale, LocaleTemplates } from '../types.js';
+import type { AppointmentData, Locale, LocaleTemplates, TemplateData } from '../types.js';
 
 const LOCALE: Locale = 'de';
 
@@ -15,6 +15,22 @@ function price(data: AppointmentData): string {
 
 function money(cents: number, data: AppointmentData): string {
   return formatMoneyCents(cents, data.currency, LOCALE);
+}
+
+/**
+ * What the customer is told about their money after a cancellation decision.
+ *
+ * Three outcomes, not a complicated rule, but written inline it was a ternary
+ * inside a ternary in the middle of a list of sentences.
+ */
+function refundOutcome(data: TemplateData['CANCELLATION_REQUEST_DECIDED']): string {
+  if (!data.approved) return `Wir freuen uns, Sie zum Termin zu sehen.`;
+
+  if (data.retainedCents > 0) {
+    return `Wir erstatten ${money(data.refundedCents, data)}; einbehalten wird eine Ausfallgebühr von ${money(data.retainedCents, data)}.`;
+  }
+
+  return `Wir erstatten den vollen Betrag von ${money(data.refundedCents, data)}.`;
 }
 
 /**
@@ -121,11 +137,7 @@ export const deTemplates: LocaleTemplates = {
       data.approved
         ? `Ihre Stornierung für den ${when(data)} ist bestätigt.`
         : `wir können Ihre Stornierung für den ${when(data)} leider nicht annehmen. Ihr Termin bleibt bestehen.`,
-      data.approved
-        ? data.retainedCents > 0
-          ? `Wir erstatten ${money(data.refundedCents, data)}; einbehalten wird eine Ausfallgebühr von ${money(data.retainedCents, data)}.`
-          : `Wir erstatten den vollen Betrag von ${money(data.refundedCents, data)}.`
-        : `Wir freuen uns, Sie zum Termin zu sehen.`,
+      refundOutcome(data),
       data.note === null ? `Bei Fragen: ${data.businessPhone}` : `Anmerkung: ${data.note}`,
     ],
   }),

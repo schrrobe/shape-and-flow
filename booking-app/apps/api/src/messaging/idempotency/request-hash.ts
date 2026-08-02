@@ -19,6 +19,18 @@ import { createHash } from 'node:crypto';
 const NORMALISED_FIELDS = new Set(['email']);
 
 /**
+ * Code-unit order, not locale order.
+ *
+ * `localeCompare` would be the idiomatic choice and the wrong one: its result
+ * depends on the runtime's locale data, so the same body could hash differently
+ * on two machines and a legitimate retry would look like key reuse.
+ */
+function compareKeys(a: string, b: string): number {
+  if (a < b) return -1;
+  return a > b ? 1 : 0;
+}
+
+/**
  * Rebuild a value with object keys in a fixed order and emails normalised.
  *
  * Recursive rather than a `JSON.stringify` replacer, because a replacer sees keys
@@ -38,7 +50,7 @@ function canonicalise(value: unknown, key?: string): unknown {
     // `undefined` would be dropped by JSON.stringify anyway; dropping it here keeps
     // the sorted key list honest.
     .filter(([, item]) => item !== undefined)
-    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    .sort(([a], [b]) => compareKeys(a, b));
 
   return Object.fromEntries(entries.map(([name, item]) => [name, canonicalise(item, name)]));
 }

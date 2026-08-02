@@ -49,5 +49,6 @@ export function selectEmployee(candidates: readonly EmployeeCandidate[]): string
 function compareCandidates(a: EmployeeCandidate, b: EmployeeCandidate): number {
   if (a.bookingsThatDay !== b.bookingsThatDay) return a.bookingsThatDay - b.bookingsThatDay;
   if (a.displayOrder !== b.displayOrder) return a.displayOrder - b.displayOrder;
-  return a.employeeId < b.employeeId ? -1 : a.employeeId > b.employeeId ? 1 : 0;
+  if (a.employeeId < b.employeeId) return -1;
+  return a.employeeId > b.employeeId ? 1 : 0;
 }
