@@ -279,6 +279,128 @@ describe('a cancellation on top of an earlier refund', () => {
       }),
     ).toBe(0);
   });
+
+  it('promises the customer what is actually being sent back', async () => {
+    // The number in this response is rendered on the /manage page as a commitment. Saying
+    // the gross paid total when 10,00 has already gone back promises money that will
+    // never arrive, and the customer finds out from their bank statement.
+    const booking = await confirmedPaid();
+    await existingRefund(booking.id, 1000, 'SUCCEEDED');
+
+    const result = await service.cancelByCustomer(booking.id);
+    if (result.outcome !== 'CANCELED') throw new Error('expected an immediate cancellation');
+
+    expect(result.refundExpected.amountCents).toBe(ctx.service30.priceCents - 1000);
+  });
+});
+
+describe('a booking whose money is on an earlier row', () => {
+  /** Two hours after the seeded slot, so the replacement is still outside the fee window. */
+  const MOVED_TO = new Date(SLOT_FRIDAY_0900.getTime() + 2 * 60 * 60_000);
+
+  /**
+   * What a reschedule leaves behind: the original cancelled with the payment still on it,
+   * and a replacement that points at it as its financial root.
+   */
+  async function rescheduledFrom(original: Booked): Promise<Booked> {
+    await prisma.booking.update({
+      where: { id: original.id },
+      data: { status: 'CANCELED_BY_BUSINESS', canceledAt: NOW },
+    });
+
+    const replacement = await prisma.booking.create({
+      data: {
+        ...makeBooking(ctx, { status: 'CONFIRMED', expiresAt: null, startsAt: MOVED_TO }),
+        confirmedAt: NOW,
+        rescheduledFromBookingId: original.id,
+        financialRootBookingId: original.id,
+      },
+    });
+
+    return { id: replacement.id, reference: replacement.reference };
+  }
+
+  it('refunds what the root was paid, not what the replacement holds', async () => {
+    // The replacement has no payment rows of its own. Reading them gave a paid total of
+    // zero, so the booking cancelled with no refund at all while the customer was shown
+    // the full amount on the page they cancelled from.
+    const replacement = await rescheduledFrom(await confirmedPaid());
+
+    const result = await service.cancelByCustomer(replacement.id);
+    if (result.outcome !== 'CANCELED') throw new Error('expected an immediate cancellation');
+
+    expect(result.refundExpected.amountCents).toBe(ctx.service30.priceCents);
+
+    const refund = await prisma.refund.findFirstOrThrow({
+      where: { bookingId: replacement.id, reason: 'CUSTOMER_CANCELLATION' },
+    });
+    expect(refund.amountCents).toBe(ctx.service30.priceCents);
+  });
+
+  it('applies the fee policy to the paid total on the root', async () => {
+    await withSettings({ cancellationFeePolicy: 'PERCENTAGE', cancellationFeePercent: 50 });
+    const replacement = await rescheduledFrom(await confirmedPaid());
+    clock.set(new Date(MOVED_TO.getTime() - 60 * 60_000));
+
+    const result = await service.cancelByCustomer(replacement.id);
+    if (result.outcome !== 'REQUESTED') throw new Error('expected a request');
+
+    // Half of what was paid on the root. A paid total of zero would have suggested
+    // retaining nothing, and the office would have decided against a number that was
+    // never true.
+    expect(result.suggestedRetained.amountCents).toBe(ctx.service30.priceCents / 2);
+  });
+
+  it('refunds the difference when the office approves the request', async () => {
+    await withSettings({ cancellationFeePolicy: 'PERCENTAGE', cancellationFeePercent: 50 });
+    const replacement = await rescheduledFrom(await confirmedPaid());
+    clock.set(new Date(MOVED_TO.getTime() - 60 * 60_000));
+
+    const opened = await service.cancelByCustomer(replacement.id);
+    if (opened.outcome !== 'REQUESTED') throw new Error('expected a request');
+
+    await service.decideRequest({
+      requestId: opened.requestId,
+      officeUserId: ctx.owner.id,
+      decision: 'APPROVED',
+      mayIssueRefunds: true,
+    });
+
+    const refund = await prisma.refund.findFirstOrThrow({
+      where: { bookingId: replacement.id, reason: 'CUSTOMER_CANCELLATION' },
+    });
+    expect(refund.amountCents).toBe(ctx.service30.priceCents / 2);
+  });
+
+  it('counts cash taken at the desk towards what goes back', async () => {
+    // A manual payment is recorded against the root as well, so a booking settled partly
+    // in cash and partly by card has a paid total neither table knows on its own.
+    const original = await confirmedPaid({}, 1000);
+    await prisma.manualPayment.create({
+      data: {
+        organizationId: ctx.organization.id,
+        bookingId: original.id,
+        amountCents: 2000,
+        currency: 'EUR',
+        method: 'CASH',
+        paidAt: NOW,
+        recordedByOfficeUserId: ctx.owner.id,
+      },
+    });
+
+    const replacement = await rescheduledFrom(original);
+    const result = await service.cancelByCustomer(replacement.id);
+    if (result.outcome !== 'CANCELED') throw new Error('expected an immediate cancellation');
+
+    // Only the card charge can be reversed electronically — Stripe cannot give back
+    // money it never took — so that is what the customer is promised here.
+    expect(result.refundExpected.amountCents).toBe(1000);
+
+    const refund = await prisma.refund.findFirstOrThrow({
+      where: { bookingId: replacement.id, reason: 'CUSTOMER_CANCELLATION' },
+    });
+    expect(refund.amountCents).toBe(1000);
+  });
 });
 
 describe('the notifications a request produces', () => {

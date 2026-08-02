@@ -9,9 +9,11 @@ import { CLOCK } from '../domain/time/clock.js';
 import { OutboxRecorder } from '../messaging/outbox/outbox.recorder.js';
 import { JOB } from '../messaging/queues/job-contracts.js';
 import { RequestNotificationService } from '../notification/request-notification.service.js';
+import { receivedFrom } from '../office/received.js';
 import { OrganizationContextService } from '../organization/organization-context.service.js';
+import { BookingFinancialsService } from '../payment/booking-financials.service.js';
 import { RefundService } from '../payment/refund.service.js';
-import { BookingStatus, PaymentStatus, Prisma, RefundReason } from '../prisma/client.js';
+import { BookingStatus, Prisma, RefundReason } from '../prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
 import { AuditService } from './audit.service.js';
@@ -50,7 +52,14 @@ export interface DecideRequestInput {
   mayIssueRefunds?: boolean | undefined;
 }
 
-/** The columns every cancellation path needs. */
+/**
+ * The columns every cancellation path needs.
+ *
+ * No `payments` relation, deliberately. A rescheduled booking's money sits on the row it
+ * was paid on, so the replacement's own relation is empty and reading it here answered
+ * "nothing was paid" for a booking the customer had paid in full. What was paid comes
+ * from `BookingFinancialsService`, which is the one thing that knows where the money is.
+ */
 const CANCELLABLE = {
   id: true,
   organizationId: true,
@@ -59,9 +68,6 @@ const CANCELLABLE = {
   endsAt: true,
   currency: true,
   priceCentsSnapshot: true,
-  payments: {
-    select: { id: true, status: true, amountCents: true, refundedAmountCents: true },
-  },
 } as const;
 
 /**
@@ -87,6 +93,7 @@ export class CancellationService {
     private readonly audit: AuditService,
     private readonly requestNotifications: RequestNotificationService,
     private readonly refunds: RefundService,
+    private readonly financials: BookingFinancialsService,
     @Inject(CLOCK) private readonly clock: Clock,
   ) {}
 
@@ -104,7 +111,7 @@ export class CancellationService {
       throw notCancellable('This appointment has already started.');
     }
 
-    const paid = this.paidTotal(booking);
+    const paid = await this.paidTotal(booking);
     const settings = this.organizations.getSettings();
 
     const policy = computeSuggestedRetainedAmount({
@@ -165,12 +172,14 @@ export class CancellationService {
             },
           });
 
-          const { refundId } = await this.reserveRefund(
+          const reserved = await this.reserveRefund(
             tx,
             booking,
             { kind: 'CUMULATIVE_TARGET', targetAmountCents: paid.amountCents },
             { reason: RefundReason.CUSTOMER_CANCELLATION },
           );
+
+          const refundId = reserved.refundId;
 
           await this.outbox.record(tx, {
             organizationId: booking.organizationId,
@@ -184,7 +193,14 @@ export class CancellationService {
             },
           });
 
-          return { outcome: 'CANCELED' as const, refundId, refundExpected: paid };
+          return {
+            outcome: 'CANCELED' as const,
+            refundId,
+            // What the reservation actually moves, not what was paid. A booking with an
+            // earlier partial refund, or one settled partly in cash, gives back less than
+            // its paid total — and this number is shown to the customer as a promise.
+            refundExpected: Money.fromCents(reserved.additionalAmountCents, booking.currency),
+          };
         }),
       'cancel-immediately',
     );
@@ -273,7 +289,7 @@ export class CancellationService {
             select: CANCELLABLE,
           });
 
-          const paid = this.paidTotal(booking);
+          const paid = await this.paidTotal(booking, tx);
           const retained = this.validateRetained(input, request, paid);
 
           const decided = {
@@ -297,7 +313,8 @@ export class CancellationService {
             return;
           }
 
-          const refundId = await this.approve(tx, booking, paid, retained, input);
+          const reserved = await this.approve(tx, booking, paid, retained, input);
+          const refundId = reserved.refundId;
 
           await tx.cancellationRequest.update({
             where: { id: request.id },
@@ -313,7 +330,9 @@ export class CancellationService {
             bookingId: booking.id,
             approved: true,
             retainedCents: retained.amountCents,
-            refundedCents: paid.minus(retained).amountCents,
+            // What the reservation moves, for the same reason the immediate path reports
+            // it: the customer is being told a number they will check against their bank.
+            refundedCents: reserved.additionalAmountCents,
             note: input.note ?? null,
           });
 
@@ -330,7 +349,7 @@ export class CancellationService {
     paid: Money,
     retained: Money,
     input: DecideRequestInput,
-  ): Promise<string | null> {
+  ): Promise<RefundReservationResult> {
     const now = this.clock.now();
     const current = await this.lock(tx, booking.id);
 
@@ -363,7 +382,7 @@ export class CancellationService {
       },
     });
 
-    const { refundId } = await this.reserveRefund(
+    const reserved = await this.reserveRefund(
       tx,
       booking,
       { kind: 'CUMULATIVE_TARGET', targetAmountCents: paid.minus(retained).amountCents },
@@ -373,6 +392,8 @@ export class CancellationService {
         ...(input.mayIssueRefunds === undefined ? {} : { mayIssueRefunds: input.mayIssueRefunds }),
       },
     );
+
+    const refundId = reserved.refundId;
 
     await this.outbox.record(tx, {
       organizationId: booking.organizationId,
@@ -389,7 +410,7 @@ export class CancellationService {
       },
     });
 
-    return refundId;
+    return reserved;
   }
 
   /**
@@ -622,20 +643,21 @@ export class CancellationService {
     return booking;
   }
 
-  /** What actually settled. A PENDING payment has not been received. */
-  private paidTotal(booking: CancellableBooking): Money {
-    const settled: PaymentStatus[] = [
-      PaymentStatus.SUCCEEDED,
-      PaymentStatus.PARTIALLY_REFUNDED,
-      PaymentStatus.REFUNDED,
-    ];
+  /**
+   * What the customer has actually handed over, card and cash together.
+   *
+   * Read through the financial root rather than off the booking's own relation. A
+   * reschedule leaves the payment on the row it arrived on, so a replacement booking
+   * looks unpaid to anything that asks it directly — and a cancellation that believed
+   * that refunded nothing while telling the customer the money was on its way.
+   */
+  private async paidTotal(
+    booking: CancellableBooking,
+    tx?: Prisma.TransactionClient,
+  ): Promise<Money> {
+    const financials = await this.financials.load(booking.id, tx);
 
-    return Money.sum(
-      booking.payments
-        .filter((payment) => settled.includes(payment.status))
-        .map((payment) => Money.fromCents(payment.amountCents, booking.currency)),
-      booking.currency,
-    );
+    return receivedFrom(financials, booking.currency);
   }
 }
 
@@ -647,12 +669,6 @@ interface CancellableBooking {
   endsAt: Date;
   currency: string;
   priceCentsSnapshot: number;
-  payments: {
-    id: string;
-    status: PaymentStatus;
-    amountCents: number;
-    refundedAmountCents: number;
-  }[];
 }
 
 function notCancellable(message: string): AppError {
