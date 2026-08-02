@@ -83,12 +83,12 @@ export class AvailabilitySnapshotService {
     const zone = organization.timezone;
     const settings = organization.settings;
 
-    const service = await this.loadService(organizationId, input.serviceId);
-    const employeeIds = await this.loadEmployeeIds(
-      organizationId,
-      input.serviceId,
-      input.employeeId,
-    );
+    // Independent of each other, so they cost one round trip rather than two. This is the
+    // hottest read in the app — every slot-picker render lands here.
+    const [service, employeeIds] = await Promise.all([
+      this.loadService(organizationId, input.serviceId),
+      this.loadEmployeeIds(organizationId, input.serviceId, input.employeeId),
+    ]);
 
     // No employee performs this service, so there is nothing to generate. Returned
     // as an empty snapshot rather than a 404: the service exists and is bookable,
