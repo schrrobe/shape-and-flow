@@ -2,6 +2,7 @@ import js from '@eslint/js';
 import eslintConfigPrettier from 'eslint-config-prettier';
 import { createTypeScriptImportResolver } from 'eslint-import-resolver-typescript';
 import importX from 'eslint-plugin-import-x';
+import sonarjs from 'eslint-plugin-sonarjs';
 import pluginVue from 'eslint-plugin-vue';
 import globals from 'globals';
 import tseslint from 'typescript-eslint';
@@ -99,7 +100,7 @@ export function createEslintConfig(options = {}) {
           ...(vue ? { parser: tseslint.parser, extraFileExtensions: ['.vue'] } : {}),
         },
       },
-      plugins: { 'import-x': importX },
+      plugins: { 'import-x': importX, sonarjs },
       settings: {
         // no-cycle has to follow imports to real files to mean anything, and it
         // fails silently in both directions if either half of that is missing.
@@ -165,6 +166,22 @@ export function createEslintConfig(options = {}) {
             alphabetize: { order: 'asc', caseInsensitive: true },
           },
         ],
+
+        // A subset, not the recommended set: most of the rest overlaps with
+        // what strictTypeChecked already reports, and a second opinion on the
+        // same line is noise rather than coverage.
+        //
+        // `sonarjs/cognitive-complexity` is deliberately absent. Six functions
+        // are over a threshold of 12 — the availability engine at 30, the web
+        // API client at 35, the demo seed at 18, an authorization integration
+        // test at 24, and two more at 15 and 14 — so it cannot be switched on
+        // as an error without either refactoring them first or picking a
+        // ceiling so high the rule never fires. Both of those are their own
+        // piece of work, and neither belongs in the commit that installs the
+        // plugin.
+        'sonarjs/no-identical-functions': 'error',
+        'sonarjs/no-duplicated-branches': 'error',
+        'sonarjs/no-nested-conditional': 'error',
 
         'no-restricted-syntax': [
           'error',
