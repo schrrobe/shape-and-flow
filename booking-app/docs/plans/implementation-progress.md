@@ -7,10 +7,11 @@ while implementing that the plan could not have known.
 |                   |                                                                                   |
 | ----------------- | --------------------------------------------------------------------------------- |
 | Branch            | `feat/phase-1-booking-app` (nothing pushed)                                       |
-| Tasks complete    | 44 of 49                                                                          |
-| Unit tests        | 720 passing (480 api + 166 web + 37 contracts + 37 ui)                            |
-| Integration tests | 676 passing                                                                       |
-| Gates             | `pnpm lint`, `format`, `typecheck`, `test`, `test:integration`, `build` all green |
+| Tasks complete    | 48 of 49 — only Task 3.4 remains                                                  |
+| Unit tests        | 834 passing (488 api + 201 web + 37 contracts + 41 ui + 67 templates)             |
+| Integration tests | 683 passing                                                                       |
+| End-to-end tests  | 32 passing (16 scenarios × desktop and 360-pixel mobile)                           |
+| Gates             | `pnpm lint`, `format`, `typecheck`, `test`, `test:integration`, `test:e2e`, `build` all green |
 
 ## Execution order — vertical slice
 
@@ -74,6 +75,7 @@ constraint → Stripe Checkout → webhook confirms.
 | 10.2 | Office dashboard, calendar, booking list and detail                            |
 | 10.3 | Office management screens, request queues and exports                          |
 | 11.3 | Production compose, web image, edge nginx, verified backup and restore, runbooks |
+| 11.1 | Playwright suite: customer, expiry, self-service, office and axe journeys      |
 
 ## Next
 
@@ -108,9 +110,32 @@ Three things only that exercise could have found:
   real adapters are Task 3.4, so a deployment made today can only run as staging. Recorded
   at the top of `.env.production.example`, in `docs/operations.md`, and in the CI job.
 
+**Task 11.1 is complete.** Sixteen scenarios run against a real browser, a real API
+process, a real worker process, real Postgres and real Redis, with only the payment, mail
+and SMS providers faked — and the built bundle behind `vite preview`, not a dev server. A
+customer books in German and gets a reference and a management link; the slot they hold
+vanishes for the next visitor; an English visitor gets English copy and an English email;
+a double-clicked submit produces one booking; an abandoned checkout blocks the slot and
+the expiry job gives it back; paying after the deadline keeps the appointment; cancelling
+outside the window refunds at once and inside it opens a request for the amount quoted; a
+wrong token gets a friendly page; the office signs in, finds a booking, takes cash, decides
+a request with its own retained amount, blocks time and exports CSV; an `EMPLOYEE` can
+neither see nor reach settings; ten routes have no serious or critical axe violation; and
+the whole booking flow can be completed without a mouse.
+
+Everything the suite does, it does through the interface — except four things a browser
+cannot do, which is what `/api/test-support/*` exists for: reset and reseed, mark a fake
+Checkout session paid, sign a synthetic Stripe event, and read the mailbox. The router is
+absent from the container unless `ENABLE_TEST_SUPPORT` is true, the environment schema
+refuses that in production, and the reset refuses any database not named `booking_test` or
+`booking_e2e`.
+
+Two scenarios from the plan are not in the suite, both for reasons worth reading: the
+manual booking (no screen calls `POST /office/bookings` — see the plan errors below) and
+the intermediate `EXPIRING` state (unobservable from outside, see deviation 58).
+
 | Task | What is left                                                   |
 | ---- | -------------------------------------------------------------- |
-| 11.1 | End-to-end suite; in progress in a parallel stream at the time of writing |
 | 3.4  | Real Resend and Twilio adapters, deferred out of the slice     |
 
 **Stages 5, 6 and 7 are complete.** A customer books and pays; the booking confirms
@@ -386,9 +411,90 @@ constructable`. The named import gives both the class and the type.
 52. `statusCode` is added by `customSuccessObject`/`customErrorObject`, not by
     `customProps`. Also a bug below: `customProps` decorates every line logged during a
     request, and while a handler is running the response still reports Node's default.
+53. **The fake payment provider's state moved out of the provider and into a store.** It
+    was one Stripe *per process*: the API created a Checkout session, and the expiry job
+    — which runs in the worker — asked about a session its own instance had never heard
+    of and raised `FAKE_PROVIDER_UNKNOWN_SESSION`, so the slot stayed blocked forever
+    because the saga treats "no answer from the provider" as a reason not to release. The
+    refund processor had the same hole. Nothing in a single-container test can see it.
+    `FakePaymentStore` now has two implementations: in-memory for the suites, and
+    Redis-backed for a real process, bound in `ProvidersModule`. The affordances
+    (`markPaid`, `chargeIdFor`, `sessions`, `refundCalls`, `reset`) became asynchronous;
+    `failNextWith` and `callOrder` stayed synchronous because they are genuinely
+    per-process.
+54. **The seed moved to `src/organization/demo-seed.ts` with `src/seed.main.ts` as its
+    entrypoint.** Two callers need one definition of the demo business — `pnpm db:seed`
+    and the test-support reset — and two definitions would drift until a green e2e run
+    was proving something about a business no developer ever sees. Being under `src` also
+    means `nest build` compiles it, which is what lets the e2e stack and a first
+    deployment run `node dist/seed.main.js`.
+55. **The demo organization has a fixed id.** The organization is resolved once at
+    bootstrap and cached, independently in the API and in the worker. With a generated id
+    every reset minted a new organization that both caches then pointed past: an empty
+    catalog in the API and rows written against a deleted id in the worker.
+56. **The seed creates an `EMPLOYEE` login as well as the owner.** "An employee sees only
+    their own calendar and cannot reach settings" is a rule this product enforces, and a
+    seed with no such user leaves it undemonstrable — and untestable through the interface
+    a real one uses.
+57. **`data-test` on `SfInput`, `SfTextarea` and `SfSelect` now lands on the control.**
+    Vue puts a fallthrough attribute on the component's root, which for these is the
+    `<div>` holding the label and the hint — so `getByTestId('email').fill()` resolved a
+    div. Every office screen already wrote it the intended way; nothing had driven them
+    through a browser yet. Only the test id is relocated: `class` stays on the block.
+    `SfModal` gained `data-test="confirm"` and `modal-dismiss` on its own two buttons,
+    because a dialog's buttons mean the same thing wherever it opens.
+58. **The e2e expiry test does not assert the intermediate `EXPIRING` state.** It is real
+    and `expiry-saga.int.spec.ts` pins it under a controlled clock, but it cannot be
+    observed from outside: `SWEEP_EXPIRED_RESERVATIONS` runs every sixty seconds and
+    drives the whole saga to its end unaided, so whether a browser catches the middle is
+    luck. The e2e test asserts the two things that are deterministic — held before the
+    deadline, released after the job.
+59. **The test-support router has seven operations, not the plan's four.** The four are
+    there as written. The other three are the ones the plan's own scenarios need and did
+    not count: phase one of the expiry saga, phase two of it, and an *uncached* view of
+    outstanding work so a helper can wait for the worker rather than sleep. That last one
+    cannot be `/health/detail`: its snapshot is deliberately cached for ten seconds, which
+    makes it useless for deciding whether the worker has caught up.
+60. **The mailbox is read from the `notifications` table, re-rendered, not from the fake
+    provider's array.** The notification worker is a different process, so its in-memory
+    outbox is not reachable from the API at all. The row is also the better source: it is
+    what the product considers sent, and the body is a pure render of the payload frozen
+    at queue time, through the same `reviveDates` the send path uses (extracted to
+    `notification/revive-dates.ts` so there is one revival, not two).
+61. **`main.ts` imports `AppModule` dynamically.** Whether the test-support router is part
+    of the container is a question about the container, so `AppModule` answers it at
+    decorator-evaluation time — and a static import is hoisted above `loadEnvFile()`,
+    which would read an environment the `.env` file had not been applied to yet.
+62. **The e2e stack gets its own Postgres database and its own Redis logical database.**
+    `booking_e2e` and `redis://…/1`, against the same servers the integration suite uses.
+    Queues were already separated by prefix; sessions and rate-limit counters are not
+    prefixed at all, and the reset deletes those by pattern.
+63. **The checkout hand-off is intercepted with `204 No Content`.** The page redirects to
+    the provider two seconds after it renders, and the fake's host does not resolve. A stub
+    body replaces the document and an abort commits Chromium's network-error page; both
+    destroy the countdown, the reference and the Checkout link two seconds after they
+    appear, which is a race that passes on a quiet machine. A 204 leaves the document alone.
 
 ## Plan errors found while implementing
 
+- **Task 11.1's office journey cannot be written as specified: there is no manual-booking
+  screen.** The plan's office journey opens with `new-booking` on the calendar and fills a
+  manual booking. `POST /office/bookings` exists, the API suite covers it and the typed
+  client has `office.bookings.create` — but no page in the office area calls it. This is a
+  gap in Task 10.2/10.3 rather than a plan error, and it is the one plan scenario the
+  suite omits. The manual *payment* is instead recorded against a reservation the customer
+  left unpaid, which is the same situation a walk-in creates.
+- **The settings screen cannot switch the cancellation fee on.** It offers "fee inside
+  that window (%)" but nothing that sets `cancellationFeePolicy`, which defaults to `NONE`
+  — so a percentage typed into it has no effect at all, and the field reads as working.
+  The contract carries the field; the form does not send it. The e2e suite sets the policy
+  through `PATCH /office/settings` with the browser's own session as a workaround, so the
+  manage-page behaviour is still proven. **Adding a policy control is the fix, and it is
+  not in this commit** — the screen belongs to the stream that built it.
+- **Task 11.1's `day-tab` and `checkout-session-id` selectors describe a different UI.**
+  The slot picker shows a week of day *sections* with a week-forward control, not tabs, and
+  the hand-off page shows a Checkout link rather than a bare session id. The suite reads
+  `data-test="day"` with a `data-date`, and takes the session id out of the link's `href`.
 - **Task 11.2's migration assertion cannot match.** It expects
   `details.migrations.pending` to contain `'calendar_constraints'`, but a migration is
   named by its directory — `20260731210500_calendar_constraints`. The test asserts the
@@ -530,6 +636,58 @@ connecting/connected` on a second `connect()`. The hook does a `PING` instead,
 
 Each of these would have passed a casual "it works" check.
 
+- **The fake payment provider was one Stripe per process, so a slot could never be
+  released.** The API created the Checkout session; the expiry job runs in the worker and
+  asked about a session its own instance had never heard of. `FAKE_PROVIDER_UNKNOWN_SESSION`
+  propagates, the saga treats an unanswered provider as a reason *not* to release, and the
+  slot stays blocked forever. The refund processor had the same hole. Every unit and
+  integration test passed throughout, because each builds one container; the first thing
+  that ran two processes found it in a minute. Fixed by giving the fake a shared store —
+  deviation 53.
+- **Two concurrent refunds with the same idempotency key both refunded.** Introduced while
+  making that store asynchronous: `find` then `push` had no interleaving point while both
+  were synchronous, and gained one the moment the read was awaited. The refund integration
+  suite caught it on the next full run. Real Stripe is atomic on an idempotency key, so the
+  stand-in is now too — `claimRefund`, `HSETNX` across processes and a synchronous
+  check-and-set within one.
+- **`data-test` on a form field resolved to a `<div>`.** Two hundred of them across the
+  office screens, every one on an `SfInput`, `SfTextarea` or `SfSelect` — and Vue puts a
+  fallthrough attribute on the component's root, which is the wrapper holding the label and
+  the hint. `fill()` on a div fails, so the whole convention was unusable for exactly the
+  fields a test needs to type into. Nothing had driven those screens through a browser yet.
+- **The e2e run rate-limited itself and reported it as a broken booking form.** The reset
+  truncated the database and obliterated the queues but left Redis's rate-limit counters,
+  which are per IP and per hour and do not care that the database was emptied. The suite
+  spent its allowance on the first few bookings; every later one came back 429 and appeared
+  as "the countdown never rendered". Sessions had the same problem more quietly. The reset
+  now deletes both families by pattern — by pattern rather than `FLUSHDB`, because a
+  `FLUSHDB` inside the API would obey a `REDIS_URL` pointing somewhere it should not.
+- **A reseed left both processes pointing at an organization that no longer existed.** The
+  organization is resolved once at bootstrap and cached, in the API and in the worker
+  independently. A truncate-and-reseed minted a new id, so the API answered an empty
+  catalog and the worker wrote rows against a deleted one. The demo organization now has a
+  fixed id, and the reset refreshes the API's cached settings as well.
+- **The drain never finished, because a confirmed booking is never "done".** Waiting for
+  "no unprocessed outbox rows" waits forever: confirming a booking immediately schedules a
+  reminder for the day before the appointment, as an outbox row with a future `availableAt`.
+  The wait now counts only work that is *due*, which is the relay's own definition.
+- **The API cannot start against an empty database, and the router that seeds it lives
+  inside the API.** Circular, and only visible when something tries to start the stack from
+  nothing. The e2e stack now runs `prisma migrate deploy && node dist/seed.main.js` before
+  the API — which also means a developer cannot run the suite against a schema two
+  migrations behind, the mistake Task 11.2's readiness probe caught the hard way.
+- **`expect(page).toHaveURL(/\/office(\/|$)/)` is satisfied by `/office/login`.** So a
+  failed sign-in passed the login helper and surfaced as an unexplained 401 several steps
+  later, in a test about settings. The helper now waits for the signed-in chrome.
+- **The first attempt at the expiry test was a race, and it passed twice before failing.**
+  It asserted the intermediate `EXPIRING` state from the browser;
+  `SWEEP_EXPIRED_RESERVATIONS` runs every sixty seconds and had already finished the saga.
+  Rewritten to assert only what is deterministic — see deviation 58. Worth remembering that
+  two green runs proved nothing here.
+- **A slot label is not unique.** "09:00" is on every working day in the week the picker
+  shows, so `filter({ hasText: '09:00' })` matched five buttons and the assertion that a
+  reserved slot had disappeared could not fail. Scoped to the day by `data-date`.
+
 - **`Set-Cookie` was going into the log.** pino's automatic request log has been on since
   the logger module landed, and its default response serializer emits every response
   header. The redaction list covers `req.headers.cookie` but nothing on the response, so
@@ -656,8 +814,11 @@ Each of these would have passed a casual "it works" check.
   timeout the only symptom is "Hook timed out" 30 seconds later. If integration
   tests hang, look for an orphaned vitest process holding a transaction on
   `booking_test`.
-- The seeded owner password is generated and printed once. Re-running the seed
-  does not reset it.
+- The seeded owner and staff passwords are generated and printed once. Re-running the seed
+  does not reset an existing user's password — set `SEED_OWNER_PASSWORD` and
+  `SEED_STAFF_PASSWORD` to choose them on a fresh database, which is what the e2e stack
+  does. The seed's entrypoint is `src/seed.main.ts`, so `node dist/seed.main.js` works in a
+  built image; `pnpm db:seed` runs the same code through tsx.
 - `vitest.integration.config.ts` refuses to run unless `DATABASE_URL` names a
   database containing `booking_test`.
 - `test/redis.harness.ts` refuses to run unless `REDIS_QUEUE_PREFIX` starts with
@@ -678,10 +839,29 @@ Each of these would have passed a casual "it works" check.
   CPU and another was killed as out-of-memory — machine memory pressure, not the
   code; the same command was clean and fast immediately afterwards. If lint
   suddenly crawls, check free memory before suspecting a type.
-- Six gates before every commit: `pnpm typecheck`, `pnpm lint`, `pnpm format`,
-  `pnpm test`, `pnpm test:integration`, and `prisma migrate diff --from-migrations
-  --to-schema --exit-code`. The last one needs the `booking_shadow` database, which
-  `docker/postgres-init.sql` creates on first volume init.
+- Seven gates before every commit: `pnpm typecheck`, `pnpm lint`, `pnpm format`,
+  `pnpm test`, `pnpm test:integration`, `pnpm test:e2e`, and `prisma migrate diff
+  --from-migrations --to-schema --exit-code`. The last one needs the `booking_shadow`
+  database, which `docker/postgres-init.sql` creates on first volume init.
+- **The end-to-end suite.** `pnpm test:e2e` builds the workspace and then runs Playwright
+  against the built bundle; there is no separate setup step. It needs the *test* Compose
+  stack up (`pnpm test:infra:up`) and, once, `pnpm web exec playwright install chromium`.
+  It provisions its own `booking_e2e` database — Prisma creates it — and uses Redis logical
+  database 1, so it cannot reach the integration suite's data. A run takes about a minute
+  for 32 tests across two viewports.
+- **Two sessions must not run the e2e suite at once either**, and not for the integration
+  suite's reason: the API listens on 3100 and the preview server on 4173, and
+  `reuseExistingServer` means the second run would silently drive the first run's
+  processes.
+- `ENABLE_TEST_SUPPORT=true` mounts `/api/test-support/*`, which can truncate the database
+  and mark payments received. The environment schema refuses it when `NODE_ENV=production`,
+  the module is absent from the container when the flag is off, and the reset refuses any
+  database not named `booking_test` or `booking_e2e`. The API logs a `warn` line at
+  bootstrap whenever it is mounted — if that line appears anywhere unexpected, treat it as
+  an incident.
+- The e2e stack runs the worker at `LOG_LEVEL=info` while everything else is at `warn`.
+  Its "Worker running" line is what global setup waits for, and when a journey fails the
+  question is almost always which job ran.
 - **Two sessions must not run the integration suite at once.** One run of
   `health.int.spec.ts` failed with a foreign-key violation and a `40P01 deadlock
   detected` inside `seedOrganization`, and passed unchanged immediately afterwards. The

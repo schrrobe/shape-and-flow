@@ -120,11 +120,24 @@ onBeforeUnmount(() => {
 
         <div class="mt-3 text-text-primary"><slot /></div>
 
+        <!-- Named here rather than by every caller: a dialog's two buttons mean the same
+             thing wherever it is opened, only one dialog is ever open, and a test that
+             matched them by their label would break on a copy change or a locale. -->
         <div class="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-          <SfButton variant="secondary" :disabled="busy" @click="emit('close')">
+          <SfButton
+            variant="secondary"
+            data-test="modal-dismiss"
+            :disabled="busy"
+            @click="emit('close')"
+          >
             {{ cancelLabel }}
           </SfButton>
-          <SfButton :variant="confirmVariant" :loading="busy" @click="emit('confirm')">
+          <SfButton
+            data-test="confirm"
+            :variant="confirmVariant"
+            :loading="busy"
+            @click="emit('confirm')"
+          >
             {{ confirmLabel }}
           </SfButton>
         </div>

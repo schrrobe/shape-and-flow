@@ -106,7 +106,9 @@ onBeforeUnmount(() => {
     <template v-else>
       <SfCard as="section">
         <h1 ref="heading" tabindex="-1" class="text-xl font-semibold tracking-tight outline-none">
-          {{ confirmed ? t('success.confirmedTitle') : t('success.pendingTitle') }}
+          <span :data-test="confirmed ? 'confirmed' : 'pending'">
+            {{ confirmed ? t('success.confirmedTitle') : t('success.pendingTitle') }}
+          </span>
         </h1>
 
         <p v-if="confirmed" class="mt-2 text-text-secondary">
@@ -129,7 +131,7 @@ onBeforeUnmount(() => {
 
         <dl v-else-if="booking !== null" class="mt-4 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
           <dt class="text-text-secondary">{{ t('success.reference') }}</dt>
-          <dd class="font-mono">{{ booking.reference }}</dd>
+          <dd class="font-mono" data-test="reference">{{ booking.reference }}</dd>
 
           <dt class="text-text-secondary">{{ t('booking.summaryService') }}</dt>
           <dd>{{ booking.serviceName }}</dd>
@@ -138,7 +140,7 @@ onBeforeUnmount(() => {
           <dd>{{ booking.employeeDisplayName }}</dd>
 
           <dt class="text-text-secondary">{{ t('booking.summaryTime') }}</dt>
-          <dd>{{ d(new Date(booking.startsAt), 'full') }}</dd>
+          <dd data-test="confirmed-slot">{{ d(new Date(booking.startsAt), 'full') }}</dd>
 
           <dt class="text-text-secondary">{{ t('booking.summaryPrice') }}</dt>
           <dd>{{ money(booking.price) }}</dd>

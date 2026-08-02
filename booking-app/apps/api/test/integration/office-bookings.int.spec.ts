@@ -219,7 +219,7 @@ describe('POST /api/office/bookings', () => {
 
     // No money was taken: the customer is standing at the desk, not on a payment page.
     expect(await prisma.payment.count({ where: { bookingId } })).toBe(0);
-    expect(testApp.payments.sessions()).toHaveLength(0);
+    expect(await testApp.payments.sessions()).toHaveLength(0);
   });
 
   it('obeys the same collision rules as an online booking', async () => {

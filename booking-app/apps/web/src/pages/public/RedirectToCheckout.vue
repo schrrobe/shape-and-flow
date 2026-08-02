@@ -91,11 +91,11 @@ function onExpired(): void {
         <dd>{{ money(reservation.price) }}</dd>
 
         <dt class="text-text-secondary">{{ t('success.reference') }}</dt>
-        <dd class="font-mono">{{ reservation.reference }}</dd>
+        <dd class="font-mono" data-test="reference">{{ reservation.reference }}</dd>
       </dl>
     </SfCard>
 
-    <SfAlert v-if="expired" tone="danger">
+    <SfAlert v-if="expired" tone="danger" data-test="reservation-expired">
       {{ t('booking.countdownExpired') }}
       <div class="mt-3">
         <SfButton variant="secondary" @click="router.push({ name: 'booking-slot' })">
@@ -108,6 +108,7 @@ function onExpired(): void {
       <!-- A manual link as well as the redirect: a blocked `location.assign`, an extension, or a
            slow tab must not leave the customer stranded with a live reservation. -->
       <a
+        data-test="checkout-link"
         :href="reservation.checkoutUrl"
         class="rounded-sf underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
       >

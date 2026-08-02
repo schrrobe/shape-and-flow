@@ -286,3 +286,55 @@ describe('SfModal', () => {
     wrapper.unmount();
   });
 });
+
+/**
+ * A test id has to land on the control, not on the label-and-hint wrapper around it.
+ *
+ * `<SfInput data-test="email">` reads as "this is the email field", and every office
+ * screen already writes it that way. Vue's default is to put a fallthrough attribute
+ * on the component's root element, which here is the wrapping `<div>` — so a runner
+ * that resolves `email` gets a div and cannot type into it. The office suite never
+ * noticed because nothing had driven those screens through a browser yet.
+ */
+describe('the test id on a field', () => {
+  it('lands on the input', () => {
+    const wrapper = mount(SfInput, {
+      props: { modelValue: '', label: 'Email' },
+      attrs: { 'data-test': 'email' },
+    });
+
+    expect(wrapper.get('input').attributes('data-test')).toBe('email');
+    // And nowhere else, or a runner resolving the id gets two matches.
+    expect(wrapper.attributes('data-test')).toBeUndefined();
+  });
+
+  it('lands on the textarea', () => {
+    const wrapper = mount(SfTextarea, {
+      props: { modelValue: '', label: 'Note' },
+      attrs: { 'data-test': 'note' },
+    });
+
+    expect(wrapper.get('textarea').attributes('data-test')).toBe('note');
+  });
+
+  it('lands on the select', () => {
+    const wrapper = mount(SfSelect, {
+      props: { modelValue: 'a', label: 'Role', options: [{ value: 'a', label: 'A' }] },
+      attrs: { 'data-test': 'role' },
+    });
+
+    expect(wrapper.get('select').attributes('data-test')).toBe('role');
+  });
+
+  it('leaves every other attribute where it was', () => {
+    // Only the test id moves. A class passed by a caller is styling the block, not
+    // the control, and relocating it would silently restyle every existing form.
+    const wrapper = mount(SfInput, {
+      props: { modelValue: '', label: 'Email' },
+      attrs: { 'data-test': 'email', class: 'sm:col-span-2' },
+    });
+
+    expect(wrapper.classes()).toContain('sm:col-span-2');
+    expect(wrapper.get('input').classes()).not.toContain('sm:col-span-2');
+  });
+});

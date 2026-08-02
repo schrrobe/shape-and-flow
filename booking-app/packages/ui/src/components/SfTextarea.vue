@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, useId } from 'vue';
 
+import { useFieldTestId } from './field-test-id.js';
+
 /**
  * The multi-line sibling of `SfInput`, with a live character counter.
  *
@@ -45,14 +47,19 @@ const describedBy = computed(() =>
     .filter((value): value is string => value !== null)
     .join(' '),
 );
+
+// The test id belongs on the control, not on the block around it.
+defineOptions({ inheritAttrs: false });
+const { testId, wrapperAttrs } = useFieldTestId();
 </script>
 
 <template>
-  <div class="flex flex-col gap-1.5">
+  <div class="flex flex-col gap-1.5" v-bind="wrapperAttrs">
     <label :for="id" class="text-sm font-medium text-text-primary">{{ label }}</label>
 
     <textarea
       :id="id"
+      :data-test="testId"
       :value="modelValue"
       :rows="rows"
       :maxlength="maxlength"

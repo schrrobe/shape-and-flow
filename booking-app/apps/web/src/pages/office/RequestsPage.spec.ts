@@ -165,7 +165,7 @@ describe('RequestsPage', () => {
 
     expect(wrapper.get('[data-test=suggested]').text()).toContain('22,50');
 
-    await wrapper.get('[data-test=retained] input').setValue('10.00');
+    await wrapper.get('[data-test=retained]').setValue('10.00');
     await wrapper.get('[data-test=approve]').trigger('click');
     await flushPromises();
 
@@ -195,7 +195,7 @@ describe('RequestsPage', () => {
   it('updates the refund preview as the retained amount is typed', async () => {
     const wrapper = await mountWithRequest({ paidCents: 4500, suggestedRetainedAmountCents: 2250 });
 
-    await wrapper.get('[data-test=retained] input').setValue('10.00');
+    await wrapper.get('[data-test=retained]').setValue('10.00');
 
     expect(wrapper.get('[data-test=refund-preview]').text()).toContain('35,00');
   });
@@ -211,7 +211,7 @@ describe('RequestsPage', () => {
   it('rejects a retained amount above the paid amount client-side', async () => {
     const wrapper = await mountWithRequest({ paidCents: 4500 });
 
-    await wrapper.get('[data-test=retained] input').setValue('50.00');
+    await wrapper.get('[data-test=retained]').setValue('50.00');
 
     expect(wrapper.get('[data-test=approve]').attributes('disabled')).toBeDefined();
     expect(wrapper.get('[data-test=refund-preview]').text()).toMatch(/more than/i);

@@ -136,7 +136,7 @@ describe('idempotent replay', () => {
     expect(second.body).toEqual(first.body);
     expect(second.headers['idempotent-replay']).toBe('true');
     expect(await prisma.booking.count()).toBe(1);
-    expect(payments.sessions()).toHaveLength(1);
+    expect(await payments.sessions()).toHaveLength(1);
   });
 
   it('rejects the same key with a different body', async () => {

@@ -111,19 +111,34 @@ jobs:
       NODE_ENV: test
       DATABASE_URL: postgresql://booking:booking@localhost:5432/booking_test?schema=public
       REDIS_URL: redis://localhost:6379
+      # What the stack Playwright starts connects to. Locally these default to the
+      # docker-compose test stack and a database of their own; here there is one
+      # Postgres service and no integration run to collide with, so the e2e stack uses
+      # it directly. Redis still gets its own logical database, because the reset
+      # deletes session and rate-limit keys by pattern.
+      E2E_DATABASE_URL: postgresql://booking:booking@localhost:5432/booking_test?schema=public
+      E2E_REDIS_URL: redis://localhost:6379/1
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup
-      - name: Apply migrations
-        run: pnpm api prisma:migrate:deploy
       - name: Install Playwright browsers
         run: pnpm web exec playwright install --with-deps chromium
+      # Builds the API and the web bundle, then runs the suite against them: the e2e
+      # stack serves `dist`, not a dev server. Migrations are applied by the API's own
+      # start command, so there is no separate step for them.
       - run: pnpm test:e2e
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
           name: playwright-report
           path: booking-app/apps/web/playwright-report
+          if-no-files-found: ignore
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-traces
+          path: booking-app/apps/web/test-results
           if-no-files-found: ignore
           retention-days: 7
 
