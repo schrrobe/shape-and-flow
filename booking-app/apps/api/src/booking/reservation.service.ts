@@ -4,6 +4,7 @@ import { AppError } from '../common/errors/app-error.js';
 import { isExclusionViolation, isUniqueViolation } from '../common/prisma-errors/prisma-errors.js';
 import { withSerializationRetry } from '../common/prisma-errors/serialization-retry.js';
 import { isSlotBookable } from '../domain/availability/engine.js';
+import { asOfficeSnapshot } from '../domain/availability/office-view.js';
 import { selectEmployee } from '../domain/employee-selection/select-employee.js';
 import { Money } from '../domain/money/money.js';
 import { CLOCK } from '../domain/time/clock.js';
@@ -468,22 +469,10 @@ export class ReservationService {
  * office those are not the question being asked: an office booking somebody in two
  * hours is the normal case, and the check that matters is whether the slot is *free*.
  *
- * Expressed by overriding two settings rather than by branching around the check, so
- * everything else the engine enforces — the rota, breaks, closed days, approved leave,
- * and every existing booking — still applies to both paths from the same code.
+ * The relaxation itself lives in `asOfficeSnapshot`, which is also what
+ * `GET /office/availability` offers slots from — so what the office is shown and what it
+ * is allowed to book are the same set by construction.
  */
 function forActor(snapshot: AvailabilitySnapshot, actor: ReserveActor): AvailabilitySnapshot {
-  if (actor.type === 'CUSTOMER') return snapshot;
-
-  return {
-    ...snapshot,
-    settings: {
-      ...snapshot.settings,
-      minimumNoticeHours: 0,
-      // Far enough that the engine's clamp cannot cut off a date the office typed. The
-      // horizon exists to bound what a customer is *offered*, not what the business may
-      // write down.
-      bookingHorizonDays: 3650,
-    },
-  };
+  return actor.type === 'CUSTOMER' ? snapshot : asOfficeSnapshot(snapshot);
 }
