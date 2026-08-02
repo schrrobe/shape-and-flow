@@ -3,7 +3,12 @@ import { Inject, Injectable } from '@nestjs/common';
 import { BLOCKING_BOOKING_STATUSES } from '../booking/booking-status.machine.js';
 import { AppError } from '../common/errors/app-error.js';
 import { CLOCK } from '../domain/time/clock.js';
-import { addLocalDays, eachLocalDate, instantToLocalDate } from '../domain/time/local-time.js';
+import {
+  addLocalDays,
+  dateColumnToLocalDate,
+  eachLocalDate,
+  instantToLocalDate,
+} from '../domain/time/local-time.js';
 import { OrganizationContextService } from '../organization/organization-context.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
@@ -336,9 +341,7 @@ export class AvailabilitySnapshotService {
     for (const row of exceptionRows) {
       const list = exceptions.get(row.employeeId) ?? [];
       list.push({
-        // A `@db.Date` column comes back as UTC midnight, which is the local date it
-        // was written as — not an instant to convert.
-        date: row.date.toISOString().slice(0, 10),
+        date: dateColumnToLocalDate(row.date),
         kind: row.kind,
         startMinute: row.startMinute,
         endMinute: row.endMinute,
@@ -349,8 +352,8 @@ export class AvailabilitySnapshotService {
     const timeOff = new Map<string, LocalDate[]>();
     for (const row of timeOffRows) {
       const list = timeOff.get(row.employeeId) ?? [];
-      const from = row.startDate.toISOString().slice(0, 10);
-      const to = row.endDate.toISOString().slice(0, 10);
+      const from = dateColumnToLocalDate(row.startDate);
+      const to = dateColumnToLocalDate(row.endDate);
       list.push(...eachLocalDate(from, to, zone));
       timeOff.set(row.employeeId, list);
     }
@@ -425,7 +428,7 @@ export class AvailabilitySnapshotService {
       select: { date: true },
     });
 
-    return rows.map((row) => row.date.toISOString().slice(0, 10));
+    return rows.map((row) => dateColumnToLocalDate(row.date));
   }
 }
 
