@@ -1,0 +1,47 @@
+{
+  "name": "@shape-and-flow/booking-web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Public booking flow and office area for Shape and Flow.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "lint": "eslint .",
+    "format": "prettier --check .",
+    "typecheck": "vue-tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui"
+  },
+  "dependencies": {
+    "@shape-and-flow/booking-contracts": "workspace:*",
+    "@shape-and-flow/booking-ui": "workspace:*",
+    "pinia": "4.0.2",
+    "vue": "3.5.40",
+    "vue-i18n": "11.4.8",
+    "vue-router": "5.2.0",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "4.12.1",
+    "@playwright/test": "1.62.1",
+    "@shape-and-flow/booking-config": "workspace:*",
+    "@tailwindcss/vite": "4.3.3",
+    "@types/node": "26.1.2",
+    "@vitejs/plugin-vue": "6.0.8",
+    "@vitest/coverage-v8": "4.1.10",
+    "@vue/test-utils": "2.4.11",
+    "eslint": "10.8.0",
+    "eslint-plugin-vue": "10.10.0",
+    "happy-dom": "20.11.1",
+    "prettier": "3.9.6",
+    "tailwindcss": "4.3.3",
+    "typescript": "6.0.3",
+    "vite": "8.2.0",
+    "vitest": "4.1.10",
+    "vue-tsc": "3.3.9"
+  }
+}

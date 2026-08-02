@@ -1,0 +1,41 @@
+/*
+ * Tokens, exposed as Tailwind utilities.
+ *
+ * Tailwind 4 has no JavaScript preset: the theme *is* CSS custom properties, and a
+ * `--color-*` entry under `@theme` generates `bg-*`, `text-*`, `border-*` and `ring-*`
+ * automatically. The plan's `tailwind-preset.ts` describes the Tailwind 3 mechanism, which no
+ * longer exists — this file is the same idea in the form the framework actually takes, and
+ * `tokens.spec.ts` checks the mapping is complete either way.
+ *
+ * `@theme inline` rather than plain `@theme`: it makes the generated utility resolve to
+ * `var(--sf-…)` instead of copying the value, so a token overridden further down the tree —
+ * a preview pane, a future dark mode — is followed rather than baked in.
+ */
+@theme inline {
+  --color-background: var(--sf-background);
+  --color-surface: var(--sf-surface);
+  --color-surface-muted: var(--sf-surface-muted);
+
+  --color-text-primary: var(--sf-text-primary);
+  --color-text-secondary: var(--sf-text-secondary);
+
+  --color-border: var(--sf-border);
+
+  --color-primary: var(--sf-primary);
+  --color-primary-hover: var(--sf-primary-hover);
+  --color-primary-contrast: var(--sf-primary-contrast);
+
+  --color-success: var(--sf-success);
+  --color-warning: var(--sf-warning);
+  --color-danger: var(--sf-danger);
+
+  --color-focus-ring: var(--sf-focus-ring);
+
+  --radius-sf: var(--sf-radius);
+  --shadow-card: var(--sf-shadow-card);
+
+  /* One family, self-hosted by the browser: a system stack makes no network request at all,
+   * which is the strongest form of "no external font". */
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+}

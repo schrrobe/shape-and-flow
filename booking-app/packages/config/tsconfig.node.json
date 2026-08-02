@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "display": "@shape-and-flow/booking-config node",
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023"],
+    "types": ["node"],
+
+    // NestJS reads constructor parameter types at runtime through the metadata
+    // these two options emit. Both are required by @nestjs/core's DI container.
+    //
+    // Note for consumers: `verbatimModuleSyntax` (inherited from the base) is
+    // safe here, because it only preserves what you wrote. What is NOT safe is
+    // rewriting an injected class import to `import type` — that erases the
+    // constructor metadata and DI resolves the parameter as Object. The API
+    // package therefore disables @typescript-eslint/consistent-type-imports.
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true
+  }
+}

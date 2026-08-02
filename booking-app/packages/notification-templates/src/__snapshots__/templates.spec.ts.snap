@@ -1,0 +1,537 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`snapshots > BOOKING_CANCELED_BY_BUSINESS matches the stored render > BOOKING_CANCELED_BY_BUSINESS-de 1`] = `
+{
+  "html": "<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f5f0e6;margin:0;padding:24px 0;"><tr><td align="center"><table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:600px;max-width:100%;background:#ffffff;border-radius:8px;"><tr><td style="padding:24px 32px;border-bottom:3px solid #d2691e;"><span style="font-size:20px;font-weight:700;color:#1c1c1c;letter-spacing:0.02em;">Shape and Flow</span></td></tr><tr><td style="padding:32px;"><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Guten Tag Anna,</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">leider müssen wir Ihren Termin am Freitag, 14.08.2026, 09:00–09:30 Uhr absagen. Der Grund: Krankheit im Team.</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Das tut uns aufrichtig leid.</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Wir erstatten 45,00 € vollständig zurück.</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Rufen Sie uns gern unter +49 30 1234567 an — wir finden zusammen einen neuen Termin.</p></td></tr><tr><td style="padding:16px 32px 24px;border-top:1px solid #e0d8c8;"><span style="font-size:12px;line-height:1.5;color:#6b6b6b;">Shape and Flow · Beispielstraße 1, 10115 Berlin · +49 30 1234567<br />Diese Nachricht wurde automatisch versendet. Antworten erreichen uns unter hallo@shape-and-flow.example.</span></td></tr></table></td></tr></table>",
+  "subject": "Wir müssen Ihren Termin am 14.08.2026 absagen",
+  "text": "Guten Tag Anna,
+
+leider müssen wir Ihren Termin am Freitag, 14.08.2026, 09:00–09:30 Uhr absagen. Der Grund: Krankheit im Team.
+
+Das tut uns aufrichtig leid.
+
+Wir erstatten 45,00 € vollständig zurück.
+
+Rufen Sie uns gern unter +49 30 1234567 an — wir finden zusammen einen neuen Termin.
+
+—
+Shape and Flow · Beispielstraße 1, 10115 Berlin · +49 30 1234567
+Diese Nachricht wurde automatisch versendet. Antworten erreichen uns unter hallo@shape-and-flow.example.",
+}
+`;
+
+exports[`snapshots > BOOKING_CANCELED_BY_BUSINESS matches the stored render > BOOKING_CANCELED_BY_BUSINESS-en 1`] = `
+{
+  "html": "<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f5f0e6;margin:0;padding:24px 0;"><tr><td align="center"><table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:600px;max-width:100%;background:#ffffff;border-radius:8px;"><tr><td style="padding:24px 32px;border-bottom:3px solid #d2691e;"><span style="font-size:20px;font-weight:700;color:#1c1c1c;letter-spacing:0.02em;">Shape and Flow</span></td></tr><tr><td style="padding:32px;"><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Hello Anna,</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">We are sorry to say we have to cancel your appointment on Friday, 14/08/2026, 09:00–09:30. The reason: Krankheit im Team.</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">We sincerely apologise.</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">We are refunding €45.00 in full.</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Do call us on +49 30 1234567 and we will find you a new time.</p></td></tr><tr><td style="padding:16px 32px 24px;border-top:1px solid #e0d8c8;"><span style="font-size:12px;line-height:1.5;color:#6b6b6b;">Shape and Flow · Beispielstraße 1, 10115 Berlin · +49 30 1234567<br />This message was sent automatically. Replies reach us at hallo@shape-and-flow.example.</span></td></tr></table></td></tr></table>",
+  "subject": "We have to cancel your appointment on 14/08/2026",
+  "text": "Hello Anna,
+
+We are sorry to say we have to cancel your appointment on Friday, 14/08/2026, 09:00–09:30. The reason: Krankheit im Team.
+
+We sincerely apologise.
+
+We are refunding €45.00 in full.
+
+Do call us on +49 30 1234567 and we will find you a new time.
+
+—
+Shape and Flow · Beispielstraße 1, 10115 Berlin · +49 30 1234567
+This message was sent automatically. Replies reach us at hallo@shape-and-flow.example.",
+}
+`;
+
+exports[`snapshots > BOOKING_CANCELED_BY_BUSINESS sms matches the stored render > BOOKING_CANCELED_BY_BUSINESS-de-sms 1`] = `"Shape and Flow: Wir müssen Ihren Termin am 14.08.2026, 09:00 Uhr leider absagen. Grund: Krankheit im Team. Bitte rufen Sie uns an: +49 30 1234567"`;
+
+exports[`snapshots > BOOKING_CANCELED_BY_BUSINESS sms matches the stored render > BOOKING_CANCELED_BY_BUSINESS-en-sms 1`] = `"Shape and Flow: we must cancel your appointment on 14/08/2026 at 09:00. Reason: Krankheit im Team. Please call us: +49 30 1234567"`;
+
+exports[`snapshots > BOOKING_CANCELED_BY_CUSTOMER matches the stored render > BOOKING_CANCELED_BY_CUSTOMER-de 1`] = `
+{
+  "html": "<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f5f0e6;margin:0;padding:24px 0;"><tr><td align="center"><table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:600px;max-width:100%;background:#ffffff;border-radius:8px;"><tr><td style="padding:24px 32px;border-bottom:3px solid #d2691e;"><span style="font-size:20px;font-weight:700;color:#1c1c1c;letter-spacing:0.02em;">Shape and Flow</span></td></tr><tr><td style="padding:32px;"><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Guten Tag Anna,</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Ihr Termin am Freitag, 14.08.2026, 09:00–09:30 Uhr wurde storniert.</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Wir erstatten den vollen Betrag von 45,00 €. Die Rückbuchung erscheint je nach Bank innerhalb von fünf bis zehn Werktagen.</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Buchungsnummer SF-7K3QD2. Sie sind jederzeit willkommen, einen neuen Termin zu buchen.</p></td></tr><tr><td style="padding:16px 32px 24px;border-top:1px solid #e0d8c8;"><span style="font-size:12px;line-height:1.5;color:#6b6b6b;">Shape and Flow · Beispielstraße 1, 10115 Berlin · +49 30 1234567<br />Diese Nachricht wurde automatisch versendet. Antworten erreichen uns unter hallo@shape-and-flow.example.</span></td></tr></table></td></tr></table>",
+  "subject": "Termin storniert: Rückenmassage 30 Minuten am 14.08.2026",
+  "text": "Guten Tag Anna,
+
+Ihr Termin am Freitag, 14.08.2026, 09:00–09:30 Uhr wurde storniert.
+
+Wir erstatten den vollen Betrag von 45,00 €. Die Rückbuchung erscheint je nach Bank innerhalb von fünf bis zehn Werktagen.
+
+Buchungsnummer SF-7K3QD2. Sie sind jederzeit willkommen, einen neuen Termin zu buchen.
+
+—
+Shape and Flow · Beispielstraße 1, 10115 Berlin · +49 30 1234567
+Diese Nachricht wurde automatisch versendet. Antworten erreichen uns unter hallo@shape-and-flow.example.",
+}
+`;
+
+exports[`snapshots > BOOKING_CANCELED_BY_CUSTOMER matches the stored render > BOOKING_CANCELED_BY_CUSTOMER-en 1`] = `
+{
+  "html": "<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f5f0e6;margin:0;padding:24px 0;"><tr><td align="center"><table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:600px;max-width:100%;background:#ffffff;border-radius:8px;"><tr><td style="padding:24px 32px;border-bottom:3px solid #d2691e;"><span style="font-size:20px;font-weight:700;color:#1c1c1c;letter-spacing:0.02em;">Shape and Flow</span></td></tr><tr><td style="padding:32px;"><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Hello Anna,</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Your appointment on Friday, 14/08/2026, 09:00–09:30 has been cancelled.</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">We are refunding the full amount of €45.00. Depending on your bank, it will appear within five to ten working days.</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Booking reference SF-7K3QD2. You are welcome to book a new appointment at any time.</p></td></tr><tr><td style="padding:16px 32px 24px;border-top:1px solid #e0d8c8;"><span style="font-size:12px;line-height:1.5;color:#6b6b6b;">Shape and Flow · Beispielstraße 1, 10115 Berlin · +49 30 1234567<br />This message was sent automatically. Replies reach us at hallo@shape-and-flow.example.</span></td></tr></table></td></tr></table>",
+  "subject": "Booking cancelled: Rückenmassage 30 Minuten on 14/08/2026",
+  "text": "Hello Anna,
+
+Your appointment on Friday, 14/08/2026, 09:00–09:30 has been cancelled.
+
+We are refunding the full amount of €45.00. Depending on your bank, it will appear within five to ten working days.
+
+Booking reference SF-7K3QD2. You are welcome to book a new appointment at any time.
+
+—
+Shape and Flow · Beispielstraße 1, 10115 Berlin · +49 30 1234567
+This message was sent automatically. Replies reach us at hallo@shape-and-flow.example.",
+}
+`;
+
+exports[`snapshots > BOOKING_CONFIRMATION matches the stored render > BOOKING_CONFIRMATION-de 1`] = `
+{
+  "html": "<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f5f0e6;margin:0;padding:24px 0;"><tr><td align="center"><table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:600px;max-width:100%;background:#ffffff;border-radius:8px;"><tr><td style="padding:24px 32px;border-bottom:3px solid #d2691e;"><span style="font-size:20px;font-weight:700;color:#1c1c1c;letter-spacing:0.02em;">Shape and Flow</span></td></tr><tr><td style="padding:32px;"><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Guten Tag Anna,</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Ihr Termin ist bestätigt. Wir freuen uns auf Sie.</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Rückenmassage 30 Minuten<br />Freitag, 14.08.2026, 09:00–09:30 Uhr<br />bei Mara Vogt<br />45,00 €<br />Buchungsnummer SF-7K3QD2</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Bis Dienstag, 11.08.2026, 09:00 Uhr können Sie kostenfrei stornieren. Termin verwalten: https://booking.shape-and-flow.example/manage#tok_sample</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Sie finden uns in der Beispielstraße 1, 10115 Berlin. Bei Fragen erreichen Sie uns unter +49 30 1234567.</p></td></tr><tr><td style="padding:16px 32px 24px;border-top:1px solid #e0d8c8;"><span style="font-size:12px;line-height:1.5;color:#6b6b6b;">Shape and Flow · Beispielstraße 1, 10115 Berlin · +49 30 1234567<br />Diese Nachricht wurde automatisch versendet. Antworten erreichen uns unter hallo@shape-and-flow.example.</span></td></tr></table></td></tr></table>",
+  "subject": "Termin bestätigt: Rückenmassage 30 Minuten am 14.08.2026",
+  "text": "Guten Tag Anna,
+
+Ihr Termin ist bestätigt. Wir freuen uns auf Sie.
+
+Rückenmassage 30 Minuten
+Freitag, 14.08.2026, 09:00–09:30 Uhr
+bei Mara Vogt
+45,00 €
+Buchungsnummer SF-7K3QD2
+
+Bis Dienstag, 11.08.2026, 09:00 Uhr können Sie kostenfrei stornieren. Termin verwalten: https://booking.shape-and-flow.example/manage#tok_sample
+
+Sie finden uns in der Beispielstraße 1, 10115 Berlin. Bei Fragen erreichen Sie uns unter +49 30 1234567.
+
+—
+Shape and Flow · Beispielstraße 1, 10115 Berlin · +49 30 1234567
+Diese Nachricht wurde automatisch versendet. Antworten erreichen uns unter hallo@shape-and-flow.example.",
+}
+`;
+
+exports[`snapshots > BOOKING_CONFIRMATION matches the stored render > BOOKING_CONFIRMATION-en 1`] = `
+{
+  "html": "<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f5f0e6;margin:0;padding:24px 0;"><tr><td align="center"><table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:600px;max-width:100%;background:#ffffff;border-radius:8px;"><tr><td style="padding:24px 32px;border-bottom:3px solid #d2691e;"><span style="font-size:20px;font-weight:700;color:#1c1c1c;letter-spacing:0.02em;">Shape and Flow</span></td></tr><tr><td style="padding:32px;"><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Hello Anna,</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Your appointment is confirmed. We look forward to seeing you.</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Rückenmassage 30 Minuten<br />Friday, 14/08/2026, 09:00–09:30<br />with Mara Vogt<br />€45.00<br />Booking reference SF-7K3QD2</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">You can cancel free of charge until Tuesday, 11/08/2026, 09:00. Manage your booking: https://booking.shape-and-flow.example/manage#tok_sample</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">You will find us at Beispielstraße 1, 10115 Berlin. If you have any questions, call us on +49 30 1234567.</p></td></tr><tr><td style="padding:16px 32px 24px;border-top:1px solid #e0d8c8;"><span style="font-size:12px;line-height:1.5;color:#6b6b6b;">Shape and Flow · Beispielstraße 1, 10115 Berlin · +49 30 1234567<br />This message was sent automatically. Replies reach us at hallo@shape-and-flow.example.</span></td></tr></table></td></tr></table>",
+  "subject": "Booking confirmed: Rückenmassage 30 Minuten on 14/08/2026",
+  "text": "Hello Anna,
+
+Your appointment is confirmed. We look forward to seeing you.
+
+Rückenmassage 30 Minuten
+Friday, 14/08/2026, 09:00–09:30
+with Mara Vogt
+€45.00
+Booking reference SF-7K3QD2
+
+You can cancel free of charge until Tuesday, 11/08/2026, 09:00. Manage your booking: https://booking.shape-and-flow.example/manage#tok_sample
+
+You will find us at Beispielstraße 1, 10115 Berlin. If you have any questions, call us on +49 30 1234567.
+
+—
+Shape and Flow · Beispielstraße 1, 10115 Berlin · +49 30 1234567
+This message was sent automatically. Replies reach us at hallo@shape-and-flow.example.",
+}
+`;
+
+exports[`snapshots > BOOKING_CONFIRMATION sms matches the stored render > BOOKING_CONFIRMATION-de-sms 1`] = `"Shape and Flow: Termin bestätigt, Freitag, 14.08.2026, 09:00–09:30 Uhr, Rückenmassage 30 Minuten bei Mara Vogt. Nr. SF-7K3QD2. Verwalten: https://booking.shape-and-flow.example/manage#tok_sample"`;
+
+exports[`snapshots > BOOKING_CONFIRMATION sms matches the stored render > BOOKING_CONFIRMATION-en-sms 1`] = `"Shape and Flow: booking confirmed, Friday, 14/08/2026, 09:00–09:30, Rückenmassage 30 Minuten with Mara Vogt. Ref SF-7K3QD2. Manage: https://booking.shape-and-flow.example/manage#tok_sample"`;
+
+exports[`snapshots > BOOKING_RESCHEDULED matches the stored render > BOOKING_RESCHEDULED-de 1`] = `
+{
+  "html": "<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f5f0e6;margin:0;padding:24px 0;"><tr><td align="center"><table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:600px;max-width:100%;background:#ffffff;border-radius:8px;"><tr><td style="padding:24px 32px;border-bottom:3px solid #d2691e;"><span style="font-size:20px;font-weight:700;color:#1c1c1c;letter-spacing:0.02em;">Shape and Flow</span></td></tr><tr><td style="padding:32px;"><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Guten Tag Anna,</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Ihr Termin wurde verschoben.</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Bisher: Donnerstag, 13.08.2026, 09:00 Uhr<br />Neu: Freitag, 14.08.2026, 09:00–09:30 Uhr<br />bei Mara Vogt</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Buchungsnummer SF-7K3QD2. Der bezahlte Betrag von 45,00 € bleibt bestehen.</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Termin verwalten: https://booking.shape-and-flow.example/manage#tok_sample</p></td></tr><tr><td style="padding:16px 32px 24px;border-top:1px solid #e0d8c8;"><span style="font-size:12px;line-height:1.5;color:#6b6b6b;">Shape and Flow · Beispielstraße 1, 10115 Berlin · +49 30 1234567<br />Diese Nachricht wurde automatisch versendet. Antworten erreichen uns unter hallo@shape-and-flow.example.</span></td></tr></table></td></tr></table>",
+  "subject": "Neuer Termin: Rückenmassage 30 Minuten am 14.08.2026",
+  "text": "Guten Tag Anna,
+
+Ihr Termin wurde verschoben.
+
+Bisher: Donnerstag, 13.08.2026, 09:00 Uhr
+Neu: Freitag, 14.08.2026, 09:00–09:30 Uhr
+bei Mara Vogt
+
+Buchungsnummer SF-7K3QD2. Der bezahlte Betrag von 45,00 € bleibt bestehen.
+
+Termin verwalten: https://booking.shape-and-flow.example/manage#tok_sample
+
+—
+Shape and Flow · Beispielstraße 1, 10115 Berlin · +49 30 1234567
+Diese Nachricht wurde automatisch versendet. Antworten erreichen uns unter hallo@shape-and-flow.example.",
+}
+`;
+
+exports[`snapshots > BOOKING_RESCHEDULED matches the stored render > BOOKING_RESCHEDULED-en 1`] = `
+{
+  "html": "<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f5f0e6;margin:0;padding:24px 0;"><tr><td align="center"><table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:600px;max-width:100%;background:#ffffff;border-radius:8px;"><tr><td style="padding:24px 32px;border-bottom:3px solid #d2691e;"><span style="font-size:20px;font-weight:700;color:#1c1c1c;letter-spacing:0.02em;">Shape and Flow</span></td></tr><tr><td style="padding:32px;"><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Hello Anna,</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Your appointment has been moved.</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Previously: Thursday, 13/08/2026, 09:00<br />Now: Friday, 14/08/2026, 09:00–09:30<br />with Mara Vogt</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Booking reference SF-7K3QD2. The €45.00 you paid still stands.</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Manage your booking: https://booking.shape-and-flow.example/manage#tok_sample</p></td></tr><tr><td style="padding:16px 32px 24px;border-top:1px solid #e0d8c8;"><span style="font-size:12px;line-height:1.5;color:#6b6b6b;">Shape and Flow · Beispielstraße 1, 10115 Berlin · +49 30 1234567<br />This message was sent automatically. Replies reach us at hallo@shape-and-flow.example.</span></td></tr></table></td></tr></table>",
+  "subject": "New time: Rückenmassage 30 Minuten on 14/08/2026",
+  "text": "Hello Anna,
+
+Your appointment has been moved.
+
+Previously: Thursday, 13/08/2026, 09:00
+Now: Friday, 14/08/2026, 09:00–09:30
+with Mara Vogt
+
+Booking reference SF-7K3QD2. The €45.00 you paid still stands.
+
+Manage your booking: https://booking.shape-and-flow.example/manage#tok_sample
+
+—
+Shape and Flow · Beispielstraße 1, 10115 Berlin · +49 30 1234567
+This message was sent automatically. Replies reach us at hallo@shape-and-flow.example.",
+}
+`;
+
+exports[`snapshots > BOOKING_RESCHEDULED sms matches the stored render > BOOKING_RESCHEDULED-de-sms 1`] = `"Shape and Flow: Ihr Termin wurde verschoben auf Freitag, 14.08.2026, 09:00–09:30 Uhr bei Mara Vogt. Nr. SF-7K3QD2. Verwalten: https://booking.shape-and-flow.example/manage#tok_sample"`;
+
+exports[`snapshots > BOOKING_RESCHEDULED sms matches the stored render > BOOKING_RESCHEDULED-en-sms 1`] = `"Shape and Flow: your appointment has moved to Friday, 14/08/2026, 09:00–09:30 with Mara Vogt. Ref SF-7K3QD2. Manage: https://booking.shape-and-flow.example/manage#tok_sample"`;
+
+exports[`snapshots > CANCELLATION_REQUEST_DECIDED matches the stored render > CANCELLATION_REQUEST_DECIDED-de 1`] = `
+{
+  "html": "<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f5f0e6;margin:0;padding:24px 0;"><tr><td align="center"><table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:600px;max-width:100%;background:#ffffff;border-radius:8px;"><tr><td style="padding:24px 32px;border-bottom:3px solid #d2691e;"><span style="font-size:20px;font-weight:700;color:#1c1c1c;letter-spacing:0.02em;">Shape and Flow</span></td></tr><tr><td style="padding:32px;"><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Guten Tag Anna,</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Ihre Stornierung für den Freitag, 14.08.2026, 09:00–09:30 Uhr ist bestätigt.</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Wir erstatten 35,00 €; einbehalten wird eine Ausfallgebühr von 10,00 €.</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Anmerkung: Kulanz, halbe Gebühr</p></td></tr><tr><td style="padding:16px 32px 24px;border-top:1px solid #e0d8c8;"><span style="font-size:12px;line-height:1.5;color:#6b6b6b;">Shape and Flow · Beispielstraße 1, 10115 Berlin · +49 30 1234567<br />Diese Nachricht wurde automatisch versendet. Antworten erreichen uns unter hallo@shape-and-flow.example.</span></td></tr></table></td></tr></table>",
+  "subject": "Stornierung bestätigt (SF-7K3QD2)",
+  "text": "Guten Tag Anna,
+
+Ihre Stornierung für den Freitag, 14.08.2026, 09:00–09:30 Uhr ist bestätigt.
+
+Wir erstatten 35,00 €; einbehalten wird eine Ausfallgebühr von 10,00 €.
+
+Anmerkung: Kulanz, halbe Gebühr
+
+—
+Shape and Flow · Beispielstraße 1, 10115 Berlin · +49 30 1234567
+Diese Nachricht wurde automatisch versendet. Antworten erreichen uns unter hallo@shape-and-flow.example.",
+}
+`;
+
+exports[`snapshots > CANCELLATION_REQUEST_DECIDED matches the stored render > CANCELLATION_REQUEST_DECIDED-en 1`] = `
+{
+  "html": "<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f5f0e6;margin:0;padding:24px 0;"><tr><td align="center"><table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:600px;max-width:100%;background:#ffffff;border-radius:8px;"><tr><td style="padding:24px 32px;border-bottom:3px solid #d2691e;"><span style="font-size:20px;font-weight:700;color:#1c1c1c;letter-spacing:0.02em;">Shape and Flow</span></td></tr><tr><td style="padding:32px;"><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Hello Anna,</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Your cancellation for Friday, 14/08/2026, 09:00–09:30 is confirmed.</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">We are refunding €35.00; a late-cancellation fee of €10.00 has been retained.</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Note: Kulanz, halbe Gebühr</p></td></tr><tr><td style="padding:16px 32px 24px;border-top:1px solid #e0d8c8;"><span style="font-size:12px;line-height:1.5;color:#6b6b6b;">Shape and Flow · Beispielstraße 1, 10115 Berlin · +49 30 1234567<br />This message was sent automatically. Replies reach us at hallo@shape-and-flow.example.</span></td></tr></table></td></tr></table>",
+  "subject": "Cancellation confirmed (SF-7K3QD2)",
+  "text": "Hello Anna,
+
+Your cancellation for Friday, 14/08/2026, 09:00–09:30 is confirmed.
+
+We are refunding €35.00; a late-cancellation fee of €10.00 has been retained.
+
+Note: Kulanz, halbe Gebühr
+
+—
+Shape and Flow · Beispielstraße 1, 10115 Berlin · +49 30 1234567
+This message was sent automatically. Replies reach us at hallo@shape-and-flow.example.",
+}
+`;
+
+exports[`snapshots > CANCELLATION_REQUEST_RECEIVED matches the stored render > CANCELLATION_REQUEST_RECEIVED-de 1`] = `
+{
+  "html": "<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f5f0e6;margin:0;padding:24px 0;"><tr><td align="center"><table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:600px;max-width:100%;background:#ffffff;border-radius:8px;"><tr><td style="padding:24px 32px;border-bottom:3px solid #d2691e;"><span style="font-size:20px;font-weight:700;color:#1c1c1c;letter-spacing:0.02em;">Shape and Flow</span></td></tr><tr><td style="padding:32px;"><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Guten Tag Anna,</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">wir haben Ihre Stornierungsanfrage für den Termin am Freitag, 14.08.2026, 09:00–09:30 Uhr erhalten.</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Da der Termin kurzfristig ist, prüfen wir die Anfrage persönlich. Voraussichtlich einbehalten: 22,50 € von 45,00 €.</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Sie hören innerhalb eines Werktags von uns. Bis dahin bleibt Ihr Termin bestehen.</p></td></tr><tr><td style="padding:16px 32px 24px;border-top:1px solid #e0d8c8;"><span style="font-size:12px;line-height:1.5;color:#6b6b6b;">Shape and Flow · Beispielstraße 1, 10115 Berlin · +49 30 1234567<br />Diese Nachricht wurde automatisch versendet. Antworten erreichen uns unter hallo@shape-and-flow.example.</span></td></tr></table></td></tr></table>",
+  "subject": "Stornierungsanfrage erhalten (SF-7K3QD2)",
+  "text": "Guten Tag Anna,
+
+wir haben Ihre Stornierungsanfrage für den Termin am Freitag, 14.08.2026, 09:00–09:30 Uhr erhalten.
+
+Da der Termin kurzfristig ist, prüfen wir die Anfrage persönlich. Voraussichtlich einbehalten: 22,50 € von 45,00 €.
+
+Sie hören innerhalb eines Werktags von uns. Bis dahin bleibt Ihr Termin bestehen.
+
+—
+Shape and Flow · Beispielstraße 1, 10115 Berlin · +49 30 1234567
+Diese Nachricht wurde automatisch versendet. Antworten erreichen uns unter hallo@shape-and-flow.example.",
+}
+`;
+
+exports[`snapshots > CANCELLATION_REQUEST_RECEIVED matches the stored render > CANCELLATION_REQUEST_RECEIVED-en 1`] = `
+{
+  "html": "<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f5f0e6;margin:0;padding:24px 0;"><tr><td align="center"><table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:600px;max-width:100%;background:#ffffff;border-radius:8px;"><tr><td style="padding:24px 32px;border-bottom:3px solid #d2691e;"><span style="font-size:20px;font-weight:700;color:#1c1c1c;letter-spacing:0.02em;">Shape and Flow</span></td></tr><tr><td style="padding:32px;"><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Hello Anna,</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">We have received your request to cancel the appointment on Friday, 14/08/2026, 09:00–09:30.</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Because the appointment is close, we review these personally. Likely retained: €22.50 of €45.00.</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">You will hear from us within one working day. Until then your appointment stands.</p></td></tr><tr><td style="padding:16px 32px 24px;border-top:1px solid #e0d8c8;"><span style="font-size:12px;line-height:1.5;color:#6b6b6b;">Shape and Flow · Beispielstraße 1, 10115 Berlin · +49 30 1234567<br />This message was sent automatically. Replies reach us at hallo@shape-and-flow.example.</span></td></tr></table></td></tr></table>",
+  "subject": "Cancellation request received (SF-7K3QD2)",
+  "text": "Hello Anna,
+
+We have received your request to cancel the appointment on Friday, 14/08/2026, 09:00–09:30.
+
+Because the appointment is close, we review these personally. Likely retained: €22.50 of €45.00.
+
+You will hear from us within one working day. Until then your appointment stands.
+
+—
+Shape and Flow · Beispielstraße 1, 10115 Berlin · +49 30 1234567
+This message was sent automatically. Replies reach us at hallo@shape-and-flow.example.",
+}
+`;
+
+exports[`snapshots > OFFICE_CANCELLATION_REQUEST matches the stored render > OFFICE_CANCELLATION_REQUEST-de 1`] = `
+{
+  "html": "<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f5f0e6;margin:0;padding:24px 0;"><tr><td align="center"><table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:600px;max-width:100%;background:#ffffff;border-radius:8px;"><tr><td style="padding:24px 32px;border-bottom:3px solid #d2691e;"><span style="font-size:20px;font-weight:700;color:#1c1c1c;letter-spacing:0.02em;">Shape and Flow</span></td></tr><tr><td style="padding:32px;"><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Eine Stornierungsanfrage wartet auf Ihre Entscheidung.</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Anna Becker<br />Rückenmassage 30 Minuten<br />Freitag, 14.08.2026, 09:00–09:30 Uhr<br />Mara Vogt<br />Nr. SF-7K3QD2</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Vorschlag nach Ihrer Stornoregel: 22,50 € einbehalten von 45,00 €.</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Begründung: krank geworden</p></td></tr><tr><td style="padding:16px 32px 24px;border-top:1px solid #e0d8c8;"><span style="font-size:12px;line-height:1.5;color:#6b6b6b;">Shape and Flow · Beispielstraße 1, 10115 Berlin · +49 30 1234567<br />Diese Nachricht wurde automatisch versendet. Antworten erreichen uns unter hallo@shape-and-flow.example.</span></td></tr></table></td></tr></table>",
+  "subject": "Stornierungsanfrage: SF-7K3QD2 (14.08.2026)",
+  "text": "Eine Stornierungsanfrage wartet auf Ihre Entscheidung.
+
+Anna Becker
+Rückenmassage 30 Minuten
+Freitag, 14.08.2026, 09:00–09:30 Uhr
+Mara Vogt
+Nr. SF-7K3QD2
+
+Vorschlag nach Ihrer Stornoregel: 22,50 € einbehalten von 45,00 €.
+
+Begründung: krank geworden
+
+—
+Shape and Flow · Beispielstraße 1, 10115 Berlin · +49 30 1234567
+Diese Nachricht wurde automatisch versendet. Antworten erreichen uns unter hallo@shape-and-flow.example.",
+}
+`;
+
+exports[`snapshots > OFFICE_CANCELLATION_REQUEST matches the stored render > OFFICE_CANCELLATION_REQUEST-en 1`] = `
+{
+  "html": "<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f5f0e6;margin:0;padding:24px 0;"><tr><td align="center"><table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:600px;max-width:100%;background:#ffffff;border-radius:8px;"><tr><td style="padding:24px 32px;border-bottom:3px solid #d2691e;"><span style="font-size:20px;font-weight:700;color:#1c1c1c;letter-spacing:0.02em;">Shape and Flow</span></td></tr><tr><td style="padding:32px;"><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">A cancellation request is waiting for your decision.</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Anna Becker<br />Rückenmassage 30 Minuten<br />Friday, 14/08/2026, 09:00–09:30<br />Mara Vogt<br />Ref SF-7K3QD2</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Your policy suggests retaining €22.50 of €45.00.</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Reason: krank geworden</p></td></tr><tr><td style="padding:16px 32px 24px;border-top:1px solid #e0d8c8;"><span style="font-size:12px;line-height:1.5;color:#6b6b6b;">Shape and Flow · Beispielstraße 1, 10115 Berlin · +49 30 1234567<br />This message was sent automatically. Replies reach us at hallo@shape-and-flow.example.</span></td></tr></table></td></tr></table>",
+  "subject": "Cancellation request: SF-7K3QD2 (14/08/2026)",
+  "text": "A cancellation request is waiting for your decision.
+
+Anna Becker
+Rückenmassage 30 Minuten
+Friday, 14/08/2026, 09:00–09:30
+Mara Vogt
+Ref SF-7K3QD2
+
+Your policy suggests retaining €22.50 of €45.00.
+
+Reason: krank geworden
+
+—
+Shape and Flow · Beispielstraße 1, 10115 Berlin · +49 30 1234567
+This message was sent automatically. Replies reach us at hallo@shape-and-flow.example.",
+}
+`;
+
+exports[`snapshots > OFFICE_NEW_BOOKING matches the stored render > OFFICE_NEW_BOOKING-de 1`] = `
+{
+  "html": "<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f5f0e6;margin:0;padding:24px 0;"><tr><td align="center"><table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:600px;max-width:100%;background:#ffffff;border-radius:8px;"><tr><td style="padding:24px 32px;border-bottom:3px solid #d2691e;"><span style="font-size:20px;font-weight:700;color:#1c1c1c;letter-spacing:0.02em;">Shape and Flow</span></td></tr><tr><td style="padding:32px;"><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Neue Online-Buchung.</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Rückenmassage 30 Minuten<br />Freitag, 14.08.2026, 09:00–09:30 Uhr<br />Mara Vogt<br />45,00 €<br />Nr. SF-7K3QD2</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Kundin/Kunde: Anna Becker<br />anna@example.com<br />+49 151 12345678</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Anmerkung: Erstbesuch, Verspannungen im Schulterbereich</p></td></tr><tr><td style="padding:16px 32px 24px;border-top:1px solid #e0d8c8;"><span style="font-size:12px;line-height:1.5;color:#6b6b6b;">Shape and Flow · Beispielstraße 1, 10115 Berlin · +49 30 1234567<br />Diese Nachricht wurde automatisch versendet. Antworten erreichen uns unter hallo@shape-and-flow.example.</span></td></tr></table></td></tr></table>",
+  "subject": "Neue Buchung: Rückenmassage 30 Minuten, 14.08.2026",
+  "text": "Neue Online-Buchung.
+
+Rückenmassage 30 Minuten
+Freitag, 14.08.2026, 09:00–09:30 Uhr
+Mara Vogt
+45,00 €
+Nr. SF-7K3QD2
+
+Kundin/Kunde: Anna Becker
+anna@example.com
++49 151 12345678
+
+Anmerkung: Erstbesuch, Verspannungen im Schulterbereich
+
+—
+Shape and Flow · Beispielstraße 1, 10115 Berlin · +49 30 1234567
+Diese Nachricht wurde automatisch versendet. Antworten erreichen uns unter hallo@shape-and-flow.example.",
+}
+`;
+
+exports[`snapshots > OFFICE_NEW_BOOKING matches the stored render > OFFICE_NEW_BOOKING-en 1`] = `
+{
+  "html": "<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f5f0e6;margin:0;padding:24px 0;"><tr><td align="center"><table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:600px;max-width:100%;background:#ffffff;border-radius:8px;"><tr><td style="padding:24px 32px;border-bottom:3px solid #d2691e;"><span style="font-size:20px;font-weight:700;color:#1c1c1c;letter-spacing:0.02em;">Shape and Flow</span></td></tr><tr><td style="padding:32px;"><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">New online booking.</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Rückenmassage 30 Minuten<br />Friday, 14/08/2026, 09:00–09:30<br />Mara Vogt<br />€45.00<br />Ref SF-7K3QD2</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Customer: Anna Becker<br />anna@example.com<br />+49 151 12345678</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Note: Erstbesuch, Verspannungen im Schulterbereich</p></td></tr><tr><td style="padding:16px 32px 24px;border-top:1px solid #e0d8c8;"><span style="font-size:12px;line-height:1.5;color:#6b6b6b;">Shape and Flow · Beispielstraße 1, 10115 Berlin · +49 30 1234567<br />This message was sent automatically. Replies reach us at hallo@shape-and-flow.example.</span></td></tr></table></td></tr></table>",
+  "subject": "New booking: Rückenmassage 30 Minuten, 14/08/2026",
+  "text": "New online booking.
+
+Rückenmassage 30 Minuten
+Friday, 14/08/2026, 09:00–09:30
+Mara Vogt
+€45.00
+Ref SF-7K3QD2
+
+Customer: Anna Becker
+anna@example.com
++49 151 12345678
+
+Note: Erstbesuch, Verspannungen im Schulterbereich
+
+—
+Shape and Flow · Beispielstraße 1, 10115 Berlin · +49 30 1234567
+This message was sent automatically. Replies reach us at hallo@shape-and-flow.example.",
+}
+`;
+
+exports[`snapshots > OFFICE_PASSWORD_RESET matches the stored render > OFFICE_PASSWORD_RESET-de 1`] = `
+{
+  "html": "<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f5f0e6;margin:0;padding:24px 0;"><tr><td align="center"><table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:600px;max-width:100%;background:#ffffff;border-radius:8px;"><tr><td style="padding:24px 32px;border-bottom:3px solid #d2691e;"><span style="font-size:20px;font-weight:700;color:#1c1c1c;letter-spacing:0.02em;">Shape and Flow</span></td></tr><tr><td style="padding:32px;"><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Guten Tag Mara Vogt,</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">über diesen Link setzen Sie Ihr Passwort neu: https://booking.shape-and-flow.example/office/passwort/reset#tok_sample</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Der Link gilt bis Samstag, 01.08.2026, 12:00 Uhr und kann einmal verwendet werden.</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Falls Sie das nicht angefordert haben, ignorieren Sie diese Nachricht — Ihr Passwort bleibt unverändert.</p></td></tr><tr><td style="padding:16px 32px 24px;border-top:1px solid #e0d8c8;"><span style="font-size:12px;line-height:1.5;color:#6b6b6b;">Shape and Flow · Beispielstraße 1, 10115 Berlin · +49 30 1234567<br />Diese Nachricht wurde automatisch versendet. Antworten erreichen uns unter hallo@shape-and-flow.example.</span></td></tr></table></td></tr></table>",
+  "subject": "Passwort zurücksetzen",
+  "text": "Guten Tag Mara Vogt,
+
+über diesen Link setzen Sie Ihr Passwort neu: https://booking.shape-and-flow.example/office/passwort/reset#tok_sample
+
+Der Link gilt bis Samstag, 01.08.2026, 12:00 Uhr und kann einmal verwendet werden.
+
+Falls Sie das nicht angefordert haben, ignorieren Sie diese Nachricht — Ihr Passwort bleibt unverändert.
+
+—
+Shape and Flow · Beispielstraße 1, 10115 Berlin · +49 30 1234567
+Diese Nachricht wurde automatisch versendet. Antworten erreichen uns unter hallo@shape-and-flow.example.",
+}
+`;
+
+exports[`snapshots > OFFICE_PASSWORD_RESET matches the stored render > OFFICE_PASSWORD_RESET-en 1`] = `
+{
+  "html": "<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f5f0e6;margin:0;padding:24px 0;"><tr><td align="center"><table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:600px;max-width:100%;background:#ffffff;border-radius:8px;"><tr><td style="padding:24px 32px;border-bottom:3px solid #d2691e;"><span style="font-size:20px;font-weight:700;color:#1c1c1c;letter-spacing:0.02em;">Shape and Flow</span></td></tr><tr><td style="padding:32px;"><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Hello Mara Vogt,</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Use this link to set a new password: https://booking.shape-and-flow.example/office/passwort/reset#tok_sample</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">The link is valid until Saturday, 01/08/2026, 12:00 and can be used once.</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">If you did not request this, ignore this message — your password stays as it is.</p></td></tr><tr><td style="padding:16px 32px 24px;border-top:1px solid #e0d8c8;"><span style="font-size:12px;line-height:1.5;color:#6b6b6b;">Shape and Flow · Beispielstraße 1, 10115 Berlin · +49 30 1234567<br />This message was sent automatically. Replies reach us at hallo@shape-and-flow.example.</span></td></tr></table></td></tr></table>",
+  "subject": "Reset your password",
+  "text": "Hello Mara Vogt,
+
+Use this link to set a new password: https://booking.shape-and-flow.example/office/passwort/reset#tok_sample
+
+The link is valid until Saturday, 01/08/2026, 12:00 and can be used once.
+
+If you did not request this, ignore this message — your password stays as it is.
+
+—
+Shape and Flow · Beispielstraße 1, 10115 Berlin · +49 30 1234567
+This message was sent automatically. Replies reach us at hallo@shape-and-flow.example.",
+}
+`;
+
+exports[`snapshots > REFUND_ISSUED matches the stored render > REFUND_ISSUED-de 1`] = `
+{
+  "html": "<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f5f0e6;margin:0;padding:24px 0;"><tr><td align="center"><table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:600px;max-width:100%;background:#ffffff;border-radius:8px;"><tr><td style="padding:24px 32px;border-bottom:3px solid #d2691e;"><span style="font-size:20px;font-weight:700;color:#1c1c1c;letter-spacing:0.02em;">Shape and Flow</span></td></tr><tr><td style="padding:32px;"><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Guten Tag Anna,</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">wir haben 45,00 € für die Buchung SF-7K3QD2 erstattet.</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Die Rückbuchung erfolgt auf das ursprüngliche Zahlungsmittel und erscheint je nach Bank innerhalb von fünf bis zehn Werktagen.</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Bei Fragen erreichen Sie uns unter +49 30 1234567.</p></td></tr><tr><td style="padding:16px 32px 24px;border-top:1px solid #e0d8c8;"><span style="font-size:12px;line-height:1.5;color:#6b6b6b;">Shape and Flow · Beispielstraße 1, 10115 Berlin · +49 30 1234567<br />Diese Nachricht wurde automatisch versendet. Antworten erreichen uns unter hallo@shape-and-flow.example.</span></td></tr></table></td></tr></table>",
+  "subject": "Erstattung veranlasst (SF-7K3QD2)",
+  "text": "Guten Tag Anna,
+
+wir haben 45,00 € für die Buchung SF-7K3QD2 erstattet.
+
+Die Rückbuchung erfolgt auf das ursprüngliche Zahlungsmittel und erscheint je nach Bank innerhalb von fünf bis zehn Werktagen.
+
+Bei Fragen erreichen Sie uns unter +49 30 1234567.
+
+—
+Shape and Flow · Beispielstraße 1, 10115 Berlin · +49 30 1234567
+Diese Nachricht wurde automatisch versendet. Antworten erreichen uns unter hallo@shape-and-flow.example.",
+}
+`;
+
+exports[`snapshots > REFUND_ISSUED matches the stored render > REFUND_ISSUED-en 1`] = `
+{
+  "html": "<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f5f0e6;margin:0;padding:24px 0;"><tr><td align="center"><table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:600px;max-width:100%;background:#ffffff;border-radius:8px;"><tr><td style="padding:24px 32px;border-bottom:3px solid #d2691e;"><span style="font-size:20px;font-weight:700;color:#1c1c1c;letter-spacing:0.02em;">Shape and Flow</span></td></tr><tr><td style="padding:32px;"><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Hello Anna,</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">We have refunded €45.00 for booking SF-7K3QD2.</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">It goes back to the original payment method and, depending on your bank, will appear within five to ten working days.</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">If you have any questions, call us on +49 30 1234567.</p></td></tr><tr><td style="padding:16px 32px 24px;border-top:1px solid #e0d8c8;"><span style="font-size:12px;line-height:1.5;color:#6b6b6b;">Shape and Flow · Beispielstraße 1, 10115 Berlin · +49 30 1234567<br />This message was sent automatically. Replies reach us at hallo@shape-and-flow.example.</span></td></tr></table></td></tr></table>",
+  "subject": "Refund issued (SF-7K3QD2)",
+  "text": "Hello Anna,
+
+We have refunded €45.00 for booking SF-7K3QD2.
+
+It goes back to the original payment method and, depending on your bank, will appear within five to ten working days.
+
+If you have any questions, call us on +49 30 1234567.
+
+—
+Shape and Flow · Beispielstraße 1, 10115 Berlin · +49 30 1234567
+This message was sent automatically. Replies reach us at hallo@shape-and-flow.example.",
+}
+`;
+
+exports[`snapshots > REMINDER_24H matches the stored render > REMINDER_24H-de 1`] = `
+{
+  "html": "<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f5f0e6;margin:0;padding:24px 0;"><tr><td align="center"><table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:600px;max-width:100%;background:#ffffff;border-radius:8px;"><tr><td style="padding:24px 32px;border-bottom:3px solid #d2691e;"><span style="font-size:20px;font-weight:700;color:#1c1c1c;letter-spacing:0.02em;">Shape and Flow</span></td></tr><tr><td style="padding:32px;"><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Guten Tag Anna,</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">wir möchten Sie an Ihren Termin erinnern.</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Rückenmassage 30 Minuten<br />Freitag, 14.08.2026, 09:00–09:30 Uhr<br />bei Mara Vogt</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Sie finden uns in der Beispielstraße 1, 10115 Berlin.</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Falls Sie nicht kommen können, sagen Sie bitte rechtzeitig ab: https://booking.shape-and-flow.example/manage#tok_sample</p></td></tr><tr><td style="padding:16px 32px 24px;border-top:1px solid #e0d8c8;"><span style="font-size:12px;line-height:1.5;color:#6b6b6b;">Shape and Flow · Beispielstraße 1, 10115 Berlin · +49 30 1234567<br />Diese Nachricht wurde automatisch versendet. Antworten erreichen uns unter hallo@shape-and-flow.example.</span></td></tr></table></td></tr></table>",
+  "subject": "Erinnerung: Ihr Termin am 14.08.2026 um 09:00 Uhr",
+  "text": "Guten Tag Anna,
+
+wir möchten Sie an Ihren Termin erinnern.
+
+Rückenmassage 30 Minuten
+Freitag, 14.08.2026, 09:00–09:30 Uhr
+bei Mara Vogt
+
+Sie finden uns in der Beispielstraße 1, 10115 Berlin.
+
+Falls Sie nicht kommen können, sagen Sie bitte rechtzeitig ab: https://booking.shape-and-flow.example/manage#tok_sample
+
+—
+Shape and Flow · Beispielstraße 1, 10115 Berlin · +49 30 1234567
+Diese Nachricht wurde automatisch versendet. Antworten erreichen uns unter hallo@shape-and-flow.example.",
+}
+`;
+
+exports[`snapshots > REMINDER_24H matches the stored render > REMINDER_24H-en 1`] = `
+{
+  "html": "<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f5f0e6;margin:0;padding:24px 0;"><tr><td align="center"><table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:600px;max-width:100%;background:#ffffff;border-radius:8px;"><tr><td style="padding:24px 32px;border-bottom:3px solid #d2691e;"><span style="font-size:20px;font-weight:700;color:#1c1c1c;letter-spacing:0.02em;">Shape and Flow</span></td></tr><tr><td style="padding:32px;"><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Hello Anna,</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">A reminder about your appointment.</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Rückenmassage 30 Minuten<br />Friday, 14/08/2026, 09:00–09:30<br />with Mara Vogt</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">You will find us at Beispielstraße 1, 10115 Berlin.</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">If you cannot make it, please let us know in good time: https://booking.shape-and-flow.example/manage#tok_sample</p></td></tr><tr><td style="padding:16px 32px 24px;border-top:1px solid #e0d8c8;"><span style="font-size:12px;line-height:1.5;color:#6b6b6b;">Shape and Flow · Beispielstraße 1, 10115 Berlin · +49 30 1234567<br />This message was sent automatically. Replies reach us at hallo@shape-and-flow.example.</span></td></tr></table></td></tr></table>",
+  "subject": "Reminder: your appointment on 14/08/2026 at 09:00",
+  "text": "Hello Anna,
+
+A reminder about your appointment.
+
+Rückenmassage 30 Minuten
+Friday, 14/08/2026, 09:00–09:30
+with Mara Vogt
+
+You will find us at Beispielstraße 1, 10115 Berlin.
+
+If you cannot make it, please let us know in good time: https://booking.shape-and-flow.example/manage#tok_sample
+
+—
+Shape and Flow · Beispielstraße 1, 10115 Berlin · +49 30 1234567
+This message was sent automatically. Replies reach us at hallo@shape-and-flow.example.",
+}
+`;
+
+exports[`snapshots > REMINDER_24H sms matches the stored render > REMINDER_24H-de-sms 1`] = `"Shape and Flow: Erinnerung an Ihren Termin Freitag, 14.08.2026, 09:00–09:30 Uhr, Rückenmassage 30 Minuten bei Mara Vogt. Absagen: https://booking.shape-and-flow.example/manage#tok_sample"`;
+
+exports[`snapshots > REMINDER_24H sms matches the stored render > REMINDER_24H-en-sms 1`] = `"Shape and Flow: reminder of your appointment Friday, 14/08/2026, 09:00–09:30, Rückenmassage 30 Minuten with Mara Vogt. Cancel: https://booking.shape-and-flow.example/manage#tok_sample"`;
+
+exports[`snapshots > RESCHEDULE_REQUEST_DECIDED matches the stored render > RESCHEDULE_REQUEST_DECIDED-de 1`] = `
+{
+  "html": "<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f5f0e6;margin:0;padding:24px 0;"><tr><td align="center"><table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:600px;max-width:100%;background:#ffffff;border-radius:8px;"><tr><td style="padding:24px 32px;border-bottom:3px solid #d2691e;"><span style="font-size:20px;font-weight:700;color:#1c1c1c;letter-spacing:0.02em;">Shape and Flow</span></td></tr><tr><td style="padding:32px;"><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Guten Tag Anna,</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Ihr Termin wurde verschoben. Neu: Freitag, 14.08.2026, 09:00–09:30 Uhr bei Mara Vogt.</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Bei Fragen: +49 30 1234567</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Termin verwalten: https://booking.shape-and-flow.example/manage#tok_sample</p></td></tr><tr><td style="padding:16px 32px 24px;border-top:1px solid #e0d8c8;"><span style="font-size:12px;line-height:1.5;color:#6b6b6b;">Shape and Flow · Beispielstraße 1, 10115 Berlin · +49 30 1234567<br />Diese Nachricht wurde automatisch versendet. Antworten erreichen uns unter hallo@shape-and-flow.example.</span></td></tr></table></td></tr></table>",
+  "subject": "Termin verschoben (SF-7K3QD2)",
+  "text": "Guten Tag Anna,
+
+Ihr Termin wurde verschoben. Neu: Freitag, 14.08.2026, 09:00–09:30 Uhr bei Mara Vogt.
+
+Bei Fragen: +49 30 1234567
+
+Termin verwalten: https://booking.shape-and-flow.example/manage#tok_sample
+
+—
+Shape and Flow · Beispielstraße 1, 10115 Berlin · +49 30 1234567
+Diese Nachricht wurde automatisch versendet. Antworten erreichen uns unter hallo@shape-and-flow.example.",
+}
+`;
+
+exports[`snapshots > RESCHEDULE_REQUEST_DECIDED matches the stored render > RESCHEDULE_REQUEST_DECIDED-en 1`] = `
+{
+  "html": "<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f5f0e6;margin:0;padding:24px 0;"><tr><td align="center"><table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:600px;max-width:100%;background:#ffffff;border-radius:8px;"><tr><td style="padding:24px 32px;border-bottom:3px solid #d2691e;"><span style="font-size:20px;font-weight:700;color:#1c1c1c;letter-spacing:0.02em;">Shape and Flow</span></td></tr><tr><td style="padding:32px;"><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Hello Anna,</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Your appointment has been moved. New time: Friday, 14/08/2026, 09:00–09:30 with Mara Vogt.</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Any questions: +49 30 1234567</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Manage your booking: https://booking.shape-and-flow.example/manage#tok_sample</p></td></tr><tr><td style="padding:16px 32px 24px;border-top:1px solid #e0d8c8;"><span style="font-size:12px;line-height:1.5;color:#6b6b6b;">Shape and Flow · Beispielstraße 1, 10115 Berlin · +49 30 1234567<br />This message was sent automatically. Replies reach us at hallo@shape-and-flow.example.</span></td></tr></table></td></tr></table>",
+  "subject": "Appointment moved (SF-7K3QD2)",
+  "text": "Hello Anna,
+
+Your appointment has been moved. New time: Friday, 14/08/2026, 09:00–09:30 with Mara Vogt.
+
+Any questions: +49 30 1234567
+
+Manage your booking: https://booking.shape-and-flow.example/manage#tok_sample
+
+—
+Shape and Flow · Beispielstraße 1, 10115 Berlin · +49 30 1234567
+This message was sent automatically. Replies reach us at hallo@shape-and-flow.example.",
+}
+`;
+
+exports[`snapshots > RESCHEDULE_REQUEST_RECEIVED matches the stored render > RESCHEDULE_REQUEST_RECEIVED-de 1`] = `
+{
+  "html": "<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f5f0e6;margin:0;padding:24px 0;"><tr><td align="center"><table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:600px;max-width:100%;background:#ffffff;border-radius:8px;"><tr><td style="padding:24px 32px;border-bottom:3px solid #d2691e;"><span style="font-size:20px;font-weight:700;color:#1c1c1c;letter-spacing:0.02em;">Shape and Flow</span></td></tr><tr><td style="padding:32px;"><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Guten Tag Anna,</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">wir haben Ihre Anfrage erhalten, den Termin vom Freitag, 14.08.2026, 09:00–09:30 Uhr zu verschieben.</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Gewünschter neuer Termin: Freitag, 21.08.2026, 09:00 Uhr.</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Wir prüfen das und melden uns. Bis dahin gilt Ihr bisheriger Termin.</p></td></tr><tr><td style="padding:16px 32px 24px;border-top:1px solid #e0d8c8;"><span style="font-size:12px;line-height:1.5;color:#6b6b6b;">Shape and Flow · Beispielstraße 1, 10115 Berlin · +49 30 1234567<br />Diese Nachricht wurde automatisch versendet. Antworten erreichen uns unter hallo@shape-and-flow.example.</span></td></tr></table></td></tr></table>",
+  "subject": "Verschiebungsanfrage erhalten (SF-7K3QD2)",
+  "text": "Guten Tag Anna,
+
+wir haben Ihre Anfrage erhalten, den Termin vom Freitag, 14.08.2026, 09:00–09:30 Uhr zu verschieben.
+
+Gewünschter neuer Termin: Freitag, 21.08.2026, 09:00 Uhr.
+
+Wir prüfen das und melden uns. Bis dahin gilt Ihr bisheriger Termin.
+
+—
+Shape and Flow · Beispielstraße 1, 10115 Berlin · +49 30 1234567
+Diese Nachricht wurde automatisch versendet. Antworten erreichen uns unter hallo@shape-and-flow.example.",
+}
+`;
+
+exports[`snapshots > RESCHEDULE_REQUEST_RECEIVED matches the stored render > RESCHEDULE_REQUEST_RECEIVED-en 1`] = `
+{
+  "html": "<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f5f0e6;margin:0;padding:24px 0;"><tr><td align="center"><table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:600px;max-width:100%;background:#ffffff;border-radius:8px;"><tr><td style="padding:24px 32px;border-bottom:3px solid #d2691e;"><span style="font-size:20px;font-weight:700;color:#1c1c1c;letter-spacing:0.02em;">Shape and Flow</span></td></tr><tr><td style="padding:32px;"><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Hello Anna,</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">We have received your request to move the appointment of Friday, 14/08/2026, 09:00–09:30.</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">Requested new time: Friday, 21/08/2026, 09:00.</p><p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#1c1c1c;">We will look into it and get back to you. Until then your existing appointment stands.</p></td></tr><tr><td style="padding:16px 32px 24px;border-top:1px solid #e0d8c8;"><span style="font-size:12px;line-height:1.5;color:#6b6b6b;">Shape and Flow · Beispielstraße 1, 10115 Berlin · +49 30 1234567<br />This message was sent automatically. Replies reach us at hallo@shape-and-flow.example.</span></td></tr></table></td></tr></table>",
+  "subject": "Reschedule request received (SF-7K3QD2)",
+  "text": "Hello Anna,
+
+We have received your request to move the appointment of Friday, 14/08/2026, 09:00–09:30.
+
+Requested new time: Friday, 21/08/2026, 09:00.
+
+We will look into it and get back to you. Until then your existing appointment stands.
+
+—
+Shape and Flow · Beispielstraße 1, 10115 Berlin · +49 30 1234567
+This message was sent automatically. Replies reach us at hallo@shape-and-flow.example.",
+}
+`;

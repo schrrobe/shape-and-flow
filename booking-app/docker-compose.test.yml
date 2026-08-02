@@ -1,0 +1,53 @@
+# Integration-test infrastructure, fully isolated from the development stack.
+#
+# Distinct project name, container names and ports, so a test run can never
+# reach the development database. Postgres data lives in tmpfs and durability
+# is switched off: a test database that survives a reboot is a liability, and
+# fsync costs real wall-clock time on a suite that truncates between tests.
+name: shape-and-flow-booking-test
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: shape-and-flow-booking-test-postgres
+    environment:
+      POSTGRES_USER: booking
+      POSTGRES_PASSWORD: booking
+      POSTGRES_DB: booking_test
+      PGDATA: /var/lib/postgresql/data/pgdata
+    command:
+      - postgres
+      - -c
+      - fsync=off
+      - -c
+      - full_page_writes=off
+      - -c
+      - synchronous_commit=off
+      # Integration tests clone a template database per Vitest worker, and each
+      # worker holds its own pool, so the default 100 is not enough headroom.
+      - -c
+      - max_connections=200
+    ports:
+      - '5434:5432'
+    tmpfs:
+      - /var/lib/postgresql/data:mode=1777
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U booking -d booking_test']
+      interval: 2s
+      timeout: 3s
+      retries: 15
+      start_period: 5s
+
+  redis:
+    image: redis:7-alpine
+    container_name: shape-and-flow-booking-test-redis
+    # No persistence: every test run starts from an empty Redis.
+    command: ['redis-server', '--save', '', '--appendonly', 'no']
+    ports:
+      - '6381:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 2s
+      timeout: 3s
+      retries: 15
+      start_period: 2s

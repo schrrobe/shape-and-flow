@@ -2,3 +2,38 @@
 .tokensave/
 .claude/settings.local.json
 
+# dependencies
+node_modules/
+
+# generated code — recreated by `prisma generate` on install.
+# The leading **/ matters: a pattern containing a middle separator is anchored
+# to this file's directory, so a bare `src/generated/` would only ever match at
+# the repository root.
+**/src/generated/
+
+# build output
+dist/
+build/
+.vite/
+.turbo/
+
+# test and coverage output
+coverage/
+playwright-report/
+test-results/
+
+# secrets
+#
+# Every .env is ignored and the examples are exempted, rather than listing the
+# ones that exist today: `.env.production` was not covered when it was added, and
+# the failure mode of that omission is a live Stripe key in a commit.
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# logs
+*.log
+
+# database dumps written by infrastructure/scripts/backup.sh
+backups/

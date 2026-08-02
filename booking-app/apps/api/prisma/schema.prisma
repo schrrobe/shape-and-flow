@@ -1,0 +1,1077 @@
+// Prisma schema for the Shape and Flow booking app.
+//
+// The generator is `prisma-client` (Prisma 7), not the legacy
+// `prisma-client-js`. It emits real ESM and derives __dirname from
+// import.meta.url, which is what allows this package to be `"type": "module"`
+// without any CommonJS interop shim. Everything imports the client through
+// src/prisma/client.ts so the output path is named in exactly one place.
+//
+// `importFileExtension = "js"` is required, not cosmetic. The generator's
+// default emits `./enums.ts` specifiers, which tsc copies verbatim into dist
+// and Node then cannot resolve at runtime. Emitting `.js` is what NodeNext
+// expects: TypeScript resolves `./enums.js` to `enums.ts` while compiling, and
+// the built output points at the real emitted file.
+
+generator client {
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  moduleFormat        = "esm"
+  importFileExtension = "js"
+}
+
+// Prisma 7 no longer accepts a connection URL here. Migrate reads it from
+// prisma.config.ts, and the runtime client receives a driver adapter built
+// from the validated configuration (see src/prisma/prisma.service.ts).
+datasource db {
+  provider = "postgresql"
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Enums
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum OfficeUserRole {
+  OWNER
+  ADMIN
+  EMPLOYEE
+}
+
+enum Weekday {
+  MONDAY
+  TUESDAY
+  WEDNESDAY
+  THURSDAY
+  FRIDAY
+  SATURDAY
+  SUNDAY
+}
+
+enum AvailabilityExceptionKind {
+  EXTRA_HOURS
+  CLOSED
+}
+
+enum TimeOffStatus {
+  REQUESTED
+  APPROVED
+  REJECTED
+}
+
+enum BookingOrigin {
+  ONLINE
+  OFFICE
+}
+
+/// Blocking statuses (PENDING_PAYMENT, EXPIRING, CONFIRMED) occupy an employee
+/// and are listed in the bookings_no_overlap exclusion constraint predicate.
+/// EXPIRING is persisted, not transient: it is what keeps a slot reserved while
+/// Stripe is asked to expire the checkout session.
+enum BookingStatus {
+  PENDING_PAYMENT
+  EXPIRING
+  EXPIRED
+  CONFIRMED
+  PAYMENT_FAILED
+  CANCELED_BY_CUSTOMER
+  CANCELED_BY_BUSINESS
+  COMPLETED
+  NO_SHOW
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  REFUNDED
+  PARTIALLY_REFUNDED
+}
+
+enum ManualPaymentMethod {
+  CASH
+  CARD
+  BANK_TRANSFER
+  OTHER
+}
+
+enum RefundStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  CANCELED
+}
+
+enum RefundReason {
+  CUSTOMER_CANCELLATION
+  BUSINESS_CANCELLATION
+  GOODWILL
+  DUPLICATE_PAYMENT
+}
+
+enum CancellationFeePolicy {
+  NONE
+  FIXED_AMOUNT
+  PERCENTAGE
+}
+
+enum RequestDecision {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum NotificationChannel {
+  EMAIL
+  SMS
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  DELIVERED
+  FAILED
+}
+
+enum NotificationKind {
+  BOOKING_CONFIRMATION
+  BOOKING_CANCELED_BY_CUSTOMER
+  BOOKING_CANCELED_BY_BUSINESS
+  BOOKING_RESCHEDULED
+  REMINDER_24H
+  CANCELLATION_REQUEST_RECEIVED
+  CANCELLATION_REQUEST_DECIDED
+  RESCHEDULE_REQUEST_RECEIVED
+  RESCHEDULE_REQUEST_DECIDED
+  REFUND_ISSUED
+  OFFICE_NEW_BOOKING
+  OFFICE_CANCELLATION_REQUEST
+  OFFICE_PASSWORD_RESET
+}
+
+/// Lowercase deliberately: the value is written into URLs, Accept-Language
+/// negotiation and template directory names, and a case conversion at three
+/// boundaries is three chances to get it wrong.
+enum Locale {
+  de
+  en
+}
+
+enum WebhookProvider {
+  RESEND
+  TWILIO
+}
+
+enum AuditAction {
+  BOOKING_CREATED_MANUALLY
+  BOOKING_CANCELED
+  BOOKING_RESCHEDULED
+  BOOKING_MARKED_NO_SHOW
+  BOOKING_MARKED_COMPLETED
+  CANCELLATION_REQUEST_DECIDED
+  RESCHEDULE_REQUEST_DECIDED
+  MANUAL_PAYMENT_RECORDED
+  REFUND_ISSUED
+  SETTINGS_UPDATED
+  EMPLOYEE_CREATED
+  EMPLOYEE_UPDATED
+  EMPLOYEE_ARCHIVED
+  SERVICE_CREATED
+  SERVICE_UPDATED
+  SERVICE_ARCHIVED
+  OFFICE_USER_CREATED
+  OFFICE_USER_UPDATED
+  OFFICE_USER_ARCHIVED
+  // The availability and catalog surface. Added in Task 8.4 rather than at the start
+  // because it is only now reachable: "who shortened Friday" and "who closed the 24th"
+  // are exactly the questions an office asks after a customer complains, and a
+  // configuration change with no trace answers none of them.
+  WORKING_HOURS_REPLACED
+  EMPLOYEE_SERVICES_REPLACED
+  AVAILABILITY_EXCEPTION_CREATED
+  AVAILABILITY_EXCEPTION_DELETED
+  TIME_OFF_CREATED
+  TIME_OFF_UPDATED
+  BLOCKED_TIME_CREATED
+  BLOCKED_TIME_DELETED
+  CLOSED_DAY_CREATED
+  CLOSED_DAY_DELETED
+  SERVICE_CATEGORY_CREATED
+  SERVICE_CATEGORY_UPDATED
+  SERVICE_CATEGORY_ARCHIVED
+  // Erasure especially: the row recording that somebody was pseudonymised is the only
+  // thing that survives the data, and is what answers a later request to prove it
+  // happened.
+  CUSTOMER_UPDATED
+  CUSTOMER_ERASED
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Organization and configuration
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Organization {
+  id              String   @id @default(cuid())
+  slug            String   @unique
+  name            String
+  legalName       String   @map("legal_name")
+  contactEmail    String   @map("contact_email")
+  contactPhone    String   @map("contact_phone")
+  whatsappNumber  String?  @map("whatsapp_number")
+  addressLine1    String   @map("address_line1")
+  addressLine2    String?  @map("address_line2")
+  postalCode      String   @map("postal_code")
+  city            String
+  country         String   @default("DE")
+  timezone        String   @default("Europe/Berlin")
+  currency        String   @default("EUR")
+  defaultLocale   Locale   @default(de) @map("default_locale")
+  /// Always null in Phase 1. Present so the Stripe Connect migration is a
+  /// backfill rather than a schema change.
+  stripeAccountId String?  @map("stripe_account_id")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  settings               OrganizationSettings?
+  closedDays             ClosedDay[]
+  officeUsers            OfficeUser[]
+  passwordResetTokens    PasswordResetToken[]
+  employees              Employee[]
+  workingHours           WorkingHours[]
+  breaks                 Break[]
+  availabilityExceptions AvailabilityException[]
+  timeOff                TimeOff[]
+  blockedTimes           BlockedTime[]
+  serviceCategories      ServiceCategory[]
+  services               Service[]
+  employeeServices       EmployeeService[]
+  customers              Customer[]
+  bookings               Booking[]
+  bookingStatusHistory   BookingStatusHistory[]
+  managementTokens       ManagementToken[]
+  payments               Payment[]
+  manualPayments         ManualPayment[]
+  refunds                Refund[]
+  cancellationRequests   CancellationRequest[]
+  rescheduleRequests     RescheduleRequest[]
+  notifications          Notification[]
+  outboxEvents           OutboxEvent[]
+  auditLogs              AuditLog[]
+
+  @@map("organizations")
+}
+
+model OrganizationSettings {
+  id                         String                @id @default(cuid())
+  organizationId             String                @unique @map("organization_id")
+  schedulingIntervalMinutes  Int                   @default(15) @map("scheduling_interval_minutes")
+  bookingHorizonDays         Int                   @default(180) @map("booking_horizon_days")
+  minimumNoticeHours         Int                   @default(24) @map("minimum_notice_hours")
+  reservationTtlMinutes      Int                   @default(5) @map("reservation_ttl_minutes")
+  freeCancellationHours      Int                   @default(72) @map("free_cancellation_hours")
+  cancellationFeePolicy      CancellationFeePolicy @default(NONE) @map("cancellation_fee_policy")
+  cancellationFeeAmountCents Int                   @default(0) @map("cancellation_fee_amount_cents")
+  cancellationFeePercent     Int                   @default(0) @map("cancellation_fee_percent")
+  reminderOffsetsMinutes     Int[]                 @default([1440]) @map("reminder_offsets_minutes")
+  smsRemindersEnabled        Boolean               @default(false) @map("sms_reminders_enabled")
+  customerNoteEnabled        Boolean               @default(true) @map("customer_note_enabled")
+  dataRetentionDays          Int                   @default(1095) @map("data_retention_days")
+  officeNotificationEmail    String                @map("office_notification_email")
+  createdAt                  DateTime              @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt                  DateTime              @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@map("organization_settings")
+}
+
+model ClosedDay {
+  id             String   @id @default(cuid())
+  organizationId String   @map("organization_id")
+  date           DateTime @db.Date
+  reason         String?
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, date])
+  @@index([organizationId, date])
+  @@map("closed_days")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Authentication
+// ─────────────────────────────────────────────────────────────────────────────
+
+model OfficeUser {
+  id                  String         @id @default(cuid())
+  organizationId      String         @map("organization_id")
+  email               String
+  passwordHash        String         @map("password_hash")
+  firstName           String         @map("first_name")
+  lastName            String         @map("last_name")
+  role                OfficeUserRole
+  /// An independent capability rather than a fourth role, because "an admin who
+  /// may not move money" is a real requirement. OWNER has it implicitly.
+  canIssueRefunds     Boolean        @default(false) @map("can_issue_refunds")
+  employeeId          String?        @unique @map("employee_id")
+  lastLoginAt         DateTime?      @map("last_login_at") @db.Timestamptz(3)
+  failedLoginAttempts Int            @default(0) @map("failed_login_attempts")
+  lockedUntil         DateTime?      @map("locked_until") @db.Timestamptz(3)
+  archivedAt          DateTime?      @map("archived_at") @db.Timestamptz(3)
+  createdAt           DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt           DateTime       @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  organization           Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  employee               Employee?              @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+  passwordResetTokens    PasswordResetToken[]
+  refundsIssued          Refund[]
+  manualPaymentsRecorded ManualPayment[]
+  cancellationDecisions  CancellationRequest[]
+  rescheduleDecisions    RescheduleRequest[]
+  timeOffDecisions       TimeOff[]
+  blockedTimesCreated    BlockedTime[]
+  auditLogs              AuditLog[]
+  bookingStatusHistory   BookingStatusHistory[]
+  notifications          Notification[]
+
+  @@unique([organizationId, email])
+  @@index([organizationId, role])
+  @@index([organizationId, archivedAt])
+  @@map("office_users")
+}
+
+model PasswordResetToken {
+  id             String    @id @default(cuid())
+  organizationId String    @map("organization_id")
+  officeUserId   String    @map("office_user_id")
+  /// Only the SHA-256 hash is stored, so a database dump cannot be used to
+  /// reset passwords.
+  tokenHash      String    @unique @map("token_hash")
+  expiresAt      DateTime  @map("expires_at") @db.Timestamptz(3)
+  usedAt         DateTime? @map("used_at") @db.Timestamptz(3)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  officeUser   OfficeUser   @relation(fields: [officeUserId], references: [id], onDelete: Cascade)
+
+  @@index([officeUserId, usedAt])
+  @@index([expiresAt])
+  @@map("password_reset_tokens")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Staff and availability
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Employee {
+  id               String    @id @default(cuid())
+  organizationId   String    @map("organization_id")
+  firstName        String    @map("first_name")
+  lastName         String    @map("last_name")
+  displayName      String    @map("display_name")
+  email            String?
+  phone            String?
+  bio              String?
+  photoUrl         String?   @map("photo_url")
+  /// Second tie-breaker in the "any available employee" strategy, so this is
+  /// not merely cosmetic.
+  displayOrder     Int       @default(0) @map("display_order")
+  isBookableOnline Boolean   @default(true) @map("is_bookable_online")
+  archivedAt       DateTime? @map("archived_at") @db.Timestamptz(3)
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  organization           Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  officeUser             OfficeUser?
+  workingHours           WorkingHours[]
+  availabilityExceptions AvailabilityException[]
+  timeOff                TimeOff[]
+  blockedTimes           BlockedTime[]
+  employeeServices       EmployeeService[]
+  bookings               Booking[]
+
+  @@index([organizationId, archivedAt, displayOrder])
+  @@index([organizationId, isBookableOnline])
+  @@map("employees")
+}
+
+model WorkingHours {
+  id             String   @id @default(cuid())
+  organizationId String   @map("organization_id")
+  employeeId     String   @map("employee_id")
+  weekday        Weekday
+  /// Minutes from local midnight. 1440 is the only honest way to express
+  /// "until midnight", and every consumer is arithmetic on a local wall clock.
+  startMinute    Int      @map("start_minute")
+  endMinute      Int      @map("end_minute")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  employee     Employee     @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  breaks       Break[]
+
+  @@index([organizationId, employeeId, weekday])
+  @@map("working_hours")
+}
+
+model Break {
+  id             String   @id @default(cuid())
+  organizationId String   @map("organization_id")
+  workingHoursId String   @map("working_hours_id")
+  startMinute    Int      @map("start_minute")
+  endMinute      Int      @map("end_minute")
+  label          String?
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  /// Attached to the segment rather than to the employee, so a break cannot
+  /// outlive the shift that contains it.
+  workingHours WorkingHours @relation(fields: [workingHoursId], references: [id], onDelete: Cascade)
+
+  @@index([workingHoursId])
+  @@map("breaks")
+}
+
+model AvailabilityException {
+  id             String                    @id @default(cuid())
+  organizationId String                    @map("organization_id")
+  employeeId     String                    @map("employee_id")
+  date           DateTime                  @db.Date
+  kind           AvailabilityExceptionKind
+  /// EXTRA_HOURS replaces the day's recurring hours rather than adding to them:
+  /// an office setting special Saturday hours means "these hours", not "these
+  /// plus the usual". CLOSED requires both minute columns to be null.
+  startMinute    Int?                      @map("start_minute")
+  endMinute      Int?                      @map("end_minute")
+  reason         String?
+  createdAt      DateTime                  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime                  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  employee     Employee     @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, employeeId, date])
+  @@map("availability_exceptions")
+}
+
+model TimeOff {
+  id                    String        @id @default(cuid())
+  organizationId        String        @map("organization_id")
+  employeeId            String        @map("employee_id")
+  /// Inclusive local date range: endDate is a day the employee is away.
+  startDate             DateTime      @map("start_date") @db.Date
+  endDate               DateTime      @map("end_date") @db.Date
+  status                TimeOffStatus @default(APPROVED)
+  reason                String?
+  decidedByOfficeUserId String?       @map("decided_by_office_user_id")
+  decidedAt             DateTime?     @map("decided_at") @db.Timestamptz(3)
+  createdAt             DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt             DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  employee     Employee     @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  decidedBy    OfficeUser?  @relation(fields: [decidedByOfficeUserId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, employeeId, startDate, endDate])
+  @@index([organizationId, status])
+  @@map("time_off")
+}
+
+model BlockedTime {
+  id                    String   @id @default(cuid())
+  organizationId        String   @map("organization_id")
+  employeeId            String   @map("employee_id")
+  /// All four of organizationId, employeeId, startsAt and endsAt are NOT NULL
+  /// because a NULL bound produces an unbounded range that would block the
+  /// employee's entire calendar.
+  startsAt              DateTime @map("starts_at") @db.Timestamptz(3)
+  endsAt                DateTime @map("ends_at") @db.Timestamptz(3)
+  reason                String?
+  createdByOfficeUserId String   @map("created_by_office_user_id")
+  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt             DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  employee     Employee     @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  createdBy    OfficeUser   @relation(fields: [createdByOfficeUserId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, employeeId, startsAt])
+  @@map("blocked_times")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Catalog
+// ─────────────────────────────────────────────────────────────────────────────
+
+model ServiceCategory {
+  id             String    @id @default(cuid())
+  organizationId String    @map("organization_id")
+  name           String
+  description    String?
+  displayOrder   Int       @default(0) @map("display_order")
+  archivedAt     DateTime? @map("archived_at") @db.Timestamptz(3)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  services     Service[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId, archivedAt, displayOrder])
+  @@map("service_categories")
+}
+
+model Service {
+  id                   String    @id @default(cuid())
+  organizationId       String    @map("organization_id")
+  serviceCategoryId    String?   @map("service_category_id")
+  name                 String
+  description          String?
+  durationMinutes      Int       @map("duration_minutes")
+  /// Buffers are the employee's time but not the customer's: they extend
+  /// blockStartsAt/blockEndsAt while startsAt/endsAt stay what the customer is
+  /// told.
+  prepBufferMinutes    Int       @default(0) @map("prep_buffer_minutes")
+  cleanupBufferMinutes Int       @default(0) @map("cleanup_buffer_minutes")
+  priceCents           Int       @map("price_cents")
+  currency             String    @default("EUR")
+  isBookableOnline     Boolean   @default(true) @map("is_bookable_online")
+  displayOrder         Int       @default(0) @map("display_order")
+  archivedAt           DateTime? @map("archived_at") @db.Timestamptz(3)
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt            DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  organization     Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  serviceCategory  ServiceCategory?  @relation(fields: [serviceCategoryId], references: [id], onDelete: SetNull)
+  employeeServices EmployeeService[]
+  bookings         Booking[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId, archivedAt, displayOrder])
+  @@index([organizationId, isBookableOnline])
+  @@map("services")
+}
+
+model EmployeeService {
+  id                 String   @id @default(cuid())
+  organizationId     String   @map("organization_id")
+  employeeId         String   @map("employee_id")
+  serviceId          String   @map("service_id")
+  /// The join is explicit rather than an implicit many-to-many precisely so
+  /// this override has somewhere to live.
+  priceOverrideCents Int?     @map("price_override_cents")
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt          DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  employee     Employee     @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  service      Service      @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeId, serviceId])
+  @@index([organizationId, serviceId])
+  @@map("employee_services")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Customers
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Customer {
+  id                 String    @id @default(cuid())
+  organizationId     String    @map("organization_id")
+  /// `email` preserves what the customer typed for display;
+  /// `emailNormalized` is lowercased and trimmed and is the uniqueness key.
+  email              String
+  emailNormalized    String    @map("email_normalized")
+  firstName          String    @map("first_name")
+  lastName           String    @map("last_name")
+  phone              String?
+  locale             Locale    @default(de)
+  marketingConsentAt DateTime? @map("marketing_consent_at") @db.Timestamptz(3)
+  /// Office-authored and never shown to the customer. The customer-authored
+  /// note lives on Booking because it is per-appointment.
+  internalNote       String?   @map("internal_note")
+  archivedAt         DateTime? @map("archived_at") @db.Timestamptz(3)
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  organization  Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  bookings      Booking[]
+  notifications Notification[]
+
+  @@unique([organizationId, emailNormalized])
+  @@index([organizationId, lastName, firstName])
+  @@index([organizationId, phone])
+  @@map("customers")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Bookings
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// The centre of the system, and simultaneously the reservation. A row in
+/// PENDING_PAYMENT or EXPIRING is an unpaid hold; a row in CONFIRMED is a real
+/// appointment. One row means one exclusion constraint and no
+/// reservation-to-booking synchronisation gap.
+model Booking {
+  id                           String        @id @default(cuid())
+  organizationId               String        @map("organization_id")
+  /// Human-quotable, for the phone. Not an authentication factor: /manage
+  /// requires the ManagementToken.
+  reference                    String
+  origin                       BookingOrigin
+  customerId                   String        @map("customer_id")
+  employeeId                   String        @map("employee_id")
+  serviceId                    String        @map("service_id")
+  /// Customer-visible time.
+  startsAt                     DateTime      @map("starts_at") @db.Timestamptz(3)
+  endsAt                       DateTime      @map("ends_at") @db.Timestamptz(3)
+  /// Resource-blocking time, buffers included. Stored rather than computed so
+  /// the exclusion constraint and every index can use them directly.
+  blockStartsAt                DateTime      @map("block_starts_at") @db.Timestamptz(3)
+  blockEndsAt                  DateTime      @map("block_ends_at") @db.Timestamptz(3)
+  /// Snapshots, so editing a service never rewrites history.
+  serviceNameSnapshot          String        @map("service_name_snapshot")
+  durationMinutesSnapshot      Int           @map("duration_minutes_snapshot")
+  prepBufferMinutesSnapshot    Int           @map("prep_buffer_minutes_snapshot")
+  cleanupBufferMinutesSnapshot Int           @map("cleanup_buffer_minutes_snapshot")
+  priceCentsSnapshot           Int           @map("price_cents_snapshot")
+  currency                     String
+  status                       BookingStatus
+  /// Non-null exactly while status is PENDING_PAYMENT or EXPIRING.
+  expiresAt                    DateTime?     @map("expires_at") @db.Timestamptz(3)
+  confirmedAt                  DateTime?     @map("confirmed_at") @db.Timestamptz(3)
+  canceledAt                   DateTime?     @map("canceled_at") @db.Timestamptz(3)
+  completedAt                  DateTime?     @map("completed_at") @db.Timestamptz(3)
+  stripeCheckoutSessionId      String?       @unique @map("stripe_checkout_session_id")
+  idempotencyKeyId             String?       @unique @map("idempotency_key_id")
+  customerNote                 String?       @map("customer_note")
+  locale                       Locale
+  rescheduledFromBookingId     String?       @unique @map("rescheduled_from_booking_id")
+  /// The booking the money is on. Null means this one is it.
+  ///
+  /// A reschedule replaces the booking row and leaves the payment where it was
+  /// paid, so after two moves the charge is two hops away. Every financial read
+  /// needs the same answer to "which booking was paid", and walking
+  /// `rescheduledFrom` gives a different number of hops per booking. This is that
+  /// answer as one column: constant-time from any link in the chain.
+  financialRootBookingId       String?       @map("financial_root_booking_id")
+  /// Audit stamps. Deliberately plain columns rather than foreign keys: they
+  /// must never make archiving an office user harder, and the decision trail
+  /// that matters lives in BookingStatusHistory and AuditLog.
+  createdByOfficeUserId        String?       @map("created_by_office_user_id")
+  canceledByOfficeUserId       String?       @map("canceled_by_office_user_id")
+  cancellationReason           String?       @map("cancellation_reason")
+  createdAt                    DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt                    DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  organization               Organization           @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  customer                   Customer               @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  employee                   Employee               @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  service                    Service                @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+  rescheduledFrom            Booking?               @relation("BookingReschedule", fields: [rescheduledFromBookingId], references: [id], onDelete: SetNull)
+  rescheduledTo              Booking?               @relation("BookingReschedule")
+  financialRoot              Booking?               @relation("BookingFinancialRoot", fields: [financialRootBookingId], references: [id], onDelete: Restrict)
+  financialDescendants       Booking[]              @relation("BookingFinancialRoot")
+  statusHistory              BookingStatusHistory[]
+  managementTokens           ManagementToken[]
+  payments                   Payment[]
+  manualPayments             ManualPayment[]
+  refunds                    Refund[]
+  cancellationRequests       CancellationRequest[]
+  rescheduleRequests         RescheduleRequest[]    @relation("RescheduleRequestBooking")
+  resultingRescheduleRequest RescheduleRequest?     @relation("RescheduleRequestResult")
+  notifications              Notification[]
+
+  @@unique([organizationId, reference])
+  @@index([organizationId, employeeId, blockStartsAt])
+  @@index([organizationId, status, startsAt])
+  @@index([organizationId, customerId, startsAt])
+  @@index([organizationId, status, blockStartsAt, blockEndsAt])
+  @@index([status, expiresAt])
+  @@index([financialRootBookingId])
+  @@map("bookings")
+}
+
+/// Append-only transition log. Every status change writes one row in the same
+/// transaction as the change.
+model BookingStatusHistory {
+  id                String         @id @default(cuid())
+  organizationId    String         @map("organization_id")
+  bookingId         String         @map("booking_id")
+  fromStatus        BookingStatus? @map("from_status")
+  toStatus          BookingStatus  @map("to_status")
+  /// CUSTOMER | OFFICE_USER | SYSTEM | WEBHOOK
+  actorType         String         @map("actor_type")
+  actorOfficeUserId String?        @map("actor_office_user_id")
+  reason            String?
+  /// Carries the Stripe event id, job id or sweeper run id that caused the
+  /// change, which is what makes a production incident reconstructable.
+  metadata          Json?
+  createdAt         DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  booking      Booking      @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  actor        OfficeUser?  @relation(fields: [actorOfficeUserId], references: [id], onDelete: SetNull)
+
+  @@index([bookingId, createdAt])
+  @@index([organizationId, createdAt])
+  @@map("booking_status_history")
+}
+
+/// Grants a customer access to /manage for one booking without an account.
+/// 256 bits, delivered only in a URL fragment, and only the SHA-256 hash is
+/// stored.
+model ManagementToken {
+  id             String    @id @default(cuid())
+  organizationId String    @map("organization_id")
+  bookingId      String    @map("booking_id")
+  tokenHash      String    @unique @map("token_hash")
+  expiresAt      DateTime  @map("expires_at") @db.Timestamptz(3)
+  revokedAt      DateTime? @map("revoked_at") @db.Timestamptz(3)
+  lastUsedAt     DateTime? @map("last_used_at") @db.Timestamptz(3)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  booking      Booking      @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@index([bookingId, revokedAt])
+  @@index([expiresAt])
+  @@map("management_tokens")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Money
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// No card data is stored: no PAN, expiry, CVC or cardholder name.
+/// paymentMethodType is Stripe's coarse label and is display-only.
+model Payment {
+  id                      String        @id @default(cuid())
+  organizationId          String        @map("organization_id")
+  bookingId               String        @map("booking_id")
+  stripePaymentIntentId   String?       @unique @map("stripe_payment_intent_id")
+  stripeCheckoutSessionId String?       @unique @map("stripe_checkout_session_id")
+  stripeChargeId          String?       @unique @map("stripe_charge_id")
+  amountCents             Int           @map("amount_cents")
+  currency                String
+  status                  PaymentStatus
+  paymentMethodType       String?       @map("payment_method_type")
+  /// Denormalised from the Refund rows so a partially refunded payment is one
+  /// read. Only ever written in the same transaction as a Refund, and an
+  /// integration test asserts it equals the sum of SUCCEEDED refunds.
+  refundedAmountCents     Int           @default(0) @map("refunded_amount_cents")
+  failureCode             String?       @map("failure_code")
+  failureMessage          String?       @map("failure_message")
+  paidAt                  DateTime?     @map("paid_at") @db.Timestamptz(3)
+  createdAt               DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt               DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  booking      Booking      @relation(fields: [bookingId], references: [id], onDelete: Restrict)
+  refunds      Refund[]
+
+  @@index([organizationId, status])
+  @@index([bookingId])
+  @@index([organizationId, paidAt])
+  @@map("payments")
+}
+
+/// Money taken outside Stripe. Never a synthetic Stripe object. A mistake is
+/// corrected by a compensating row with a negative amount and a mandatory note,
+/// which keeps the ledger append-only.
+model ManualPayment {
+  id                     String              @id @default(cuid())
+  organizationId         String              @map("organization_id")
+  bookingId              String              @map("booking_id")
+  amountCents            Int                 @map("amount_cents")
+  currency               String
+  method                 ManualPaymentMethod
+  paidAt                 DateTime            @map("paid_at") @db.Timestamptz(3)
+  recordedByOfficeUserId String              @map("recorded_by_office_user_id")
+  note                   String?
+  createdAt              DateTime            @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt              DateTime            @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  booking      Booking      @relation(fields: [bookingId], references: [id], onDelete: Restrict)
+  recordedBy   OfficeUser   @relation(fields: [recordedByOfficeUserId], references: [id], onDelete: Restrict)
+
+  @@index([bookingId])
+  @@index([organizationId, paidAt])
+  @@map("manual_payments")
+}
+
+/// The row is created PENDING before the Stripe API call, and idempotencyKey is
+/// passed to Stripe as its idempotency key. Because the column is unique, a
+/// retry of the same refund job cannot create a second refund even if the first
+/// attempt's response was lost.
+model Refund {
+  id                   String       @id @default(cuid())
+  organizationId       String       @map("organization_id")
+  bookingId            String       @map("booking_id")
+  paymentId            String       @map("payment_id")
+  stripeRefundId       String?      @unique @map("stripe_refund_id")
+  amountCents          Int          @map("amount_cents")
+  currency             String
+  status               RefundStatus
+  reason               RefundReason
+  idempotencyKey       String       @unique @map("idempotency_key")
+  /// Null only for automatic refunds on a free cancellation.
+  issuedByOfficeUserId String?      @map("issued_by_office_user_id")
+  failureReason        String?      @map("failure_reason")
+  requestedAt          DateTime     @default(now()) @map("requested_at") @db.Timestamptz(3)
+  settledAt            DateTime?    @map("settled_at") @db.Timestamptz(3)
+  createdAt            DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt            DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  organization        Organization         @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  booking             Booking              @relation(fields: [bookingId], references: [id], onDelete: Restrict)
+  payment             Payment              @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  issuedBy            OfficeUser?          @relation(fields: [issuedByOfficeUserId], references: [id], onDelete: SetNull)
+  cancellationRequest CancellationRequest?
+
+  @@index([organizationId, status])
+  @@index([paymentId])
+  @@map("refunds")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Workflow requests
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// The row that makes CANCELLATION_REQUESTED a derived display status rather
+/// than a persisted booking status: the booking stays CONFIRMED so its slot
+/// keeps blocking while the office decides.
+model CancellationRequest {
+  id                           String          @id @default(cuid())
+  organizationId               String          @map("organization_id")
+  bookingId                    String          @map("booking_id")
+  reason                       String?
+  requestedAt                  DateTime        @default(now()) @map("requested_at") @db.Timestamptz(3)
+  decision                     RequestDecision @default(PENDING)
+  decidedByOfficeUserId        String?         @map("decided_by_office_user_id")
+  decidedAt                    DateTime?       @map("decided_at") @db.Timestamptz(3)
+  decisionNote                 String?         @map("decision_note")
+  /// Computed from settings at request time and frozen, so a later policy
+  /// change cannot silently alter what the office was shown. It is a
+  /// suggestion: the decider may enter any retained amount, and both numbers
+  /// are kept so the deviation is auditable.
+  suggestedRetainedAmountCents Int             @map("suggested_retained_amount_cents")
+  retainedAmountCents          Int?            @map("retained_amount_cents")
+  refundId                     String?         @unique @map("refund_id")
+  createdAt                    DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt                    DateTime        @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  booking      Booking      @relation(fields: [bookingId], references: [id], onDelete: Restrict)
+  decidedBy    OfficeUser?  @relation(fields: [decidedByOfficeUserId], references: [id], onDelete: SetNull)
+  refund       Refund?      @relation(fields: [refundId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, decision, requestedAt])
+  @@map("cancellation_requests")
+}
+
+/// Approval creates a new Booking rather than moving this one: that keeps the
+/// exclusion constraint honest during the swap, preserves the original as
+/// history, and lets the payment stay attached to the original.
+model RescheduleRequest {
+  id                    String          @id @default(cuid())
+  organizationId        String          @map("organization_id")
+  bookingId             String          @map("booking_id")
+  requestedStartsAt     DateTime        @map("requested_starts_at") @db.Timestamptz(3)
+  /// Null when the customer is happy to keep the same employee.
+  requestedEmployeeId   String?         @map("requested_employee_id")
+  reason                String?
+  requestedAt           DateTime        @default(now()) @map("requested_at") @db.Timestamptz(3)
+  decision              RequestDecision @default(PENDING)
+  decidedByOfficeUserId String?         @map("decided_by_office_user_id")
+  decidedAt             DateTime?       @map("decided_at") @db.Timestamptz(3)
+  decisionNote          String?         @map("decision_note")
+  resultingBookingId    String?         @unique @map("resulting_booking_id")
+  createdAt             DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt             DateTime        @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  organization     Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  booking          Booking      @relation("RescheduleRequestBooking", fields: [bookingId], references: [id], onDelete: Restrict)
+  resultingBooking Booking?     @relation("RescheduleRequestResult", fields: [resultingBookingId], references: [id], onDelete: SetNull)
+  decidedBy        OfficeUser?  @relation(fields: [decidedByOfficeUserId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, decision, requestedAt])
+  @@map("reschedule_requests")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Notifications
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Notification {
+  id                String              @id @default(cuid())
+  organizationId    String              @map("organization_id")
+  bookingId         String?             @map("booking_id")
+  customerId        String?             @map("customer_id")
+  officeUserId      String?             @map("office_user_id")
+  kind              NotificationKind
+  channel           NotificationChannel
+  locale            Locale
+  recipient         String
+  subject           String?
+  status            NotificationStatus  @default(PENDING)
+  providerMessageId String?             @unique @map("provider_message_id")
+  attempts          Int                 @default(0)
+  lastError         String?             @map("last_error")
+  sentAt            DateTime?           @map("sent_at") @db.Timestamptz(3)
+  deliveredAt       DateTime?           @map("delivered_at") @db.Timestamptz(3)
+  failedAt          DateTime?           @map("failed_at") @db.Timestamptz(3)
+  /// Deterministic: <kind>:<channel>:<bookingId>:<discriminator>. A unique
+  /// violation on insert means "already queued" and is swallowed, which turns
+  /// at-least-once outbox delivery into effectively-once customer contact.
+  dedupeKey         String              @unique @map("dedupe_key")
+  /// The template's own data, frozen at queue time.
+  ///
+  /// Not in the plan's field list, and required by the plan's own design: the
+  /// confirmation email must contain the plaintext management token, which exists only
+  /// once — in the outbox payload — and cannot be re-derived from the hash the database
+  /// stores. Freezing the data also means a notification says what was true when it was
+  /// queued, which is what a customer reading it later expects.
+  payload           Json?
+  scheduledFor      DateTime?           @map("scheduled_for") @db.Timestamptz(3)
+  createdAt         DateTime            @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime            @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  booking      Booking?     @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  customer     Customer?    @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  officeUser   OfficeUser?  @relation(fields: [officeUserId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, status, createdAt])
+  @@index([bookingId])
+  @@index([status, scheduledFor])
+  @@map("notifications")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Durable messaging infrastructure
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// The transactional outbox. Written in the same transaction as the state
+/// change it describes; drained by the worker with FOR UPDATE SKIP LOCKED.
+model OutboxEvent {
+  id             String    @id @default(cuid())
+  organizationId String    @map("organization_id")
+  aggregateType  String    @map("aggregate_type")
+  aggregateId    String    @map("aggregate_id")
+  eventType      String    @map("event_type")
+  payload        Json
+  /// Supports delayed events without a second mechanism.
+  availableAt    DateTime  @default(now()) @map("available_at") @db.Timestamptz(3)
+  dispatchedAt   DateTime? @map("dispatched_at") @db.Timestamptz(3)
+  attempts       Int       @default(0)
+  lastError      String?   @map("last_error")
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([dispatchedAt, availableAt])
+  @@index([aggregateType, aggregateId])
+  @@map("outbox_events")
+}
+
+/// Client-supplied key that makes a booking attempt or a money movement safely
+/// retryable. organizationId is nullable because the row is inserted before the
+/// request body has been fully resolved, and is backfilled on completion.
+model IdempotencyKey {
+  id               String   @id @default(cuid())
+  key              String   @unique
+  organizationId   String?  @map("organization_id")
+  /// booking.create | refund.create | manual-payment.create — prevents a key
+  /// minted for one operation from replaying another.
+  scope            String
+  requestHash      String   @map("request_hash")
+  responseSnapshot Json?    @map("response_snapshot")
+  statusCode       Int?     @map("status_code")
+  bookingId        String?  @map("booking_id")
+  /// IN_PROGRESS | COMPLETED
+  state            String   @default("IN_PROGRESS")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  expiresAt        DateTime @map("expires_at") @db.Timestamptz(3)
+
+  @@index([expiresAt])
+  @@index([bookingId])
+  @@map("idempotency_keys")
+}
+
+/// The inbox for Stripe. Inserted before any processing, which is what makes
+/// duplicate deliveries free and a crash recoverable. organizationId is
+/// backfilled once the event is correlated to a locally stored id — provider
+/// metadata is never trusted as the tenant source.
+model StripeWebhookEvent {
+  id             String    @id @default(cuid())
+  stripeEventId  String    @unique @map("stripe_event_id")
+  organizationId String?   @map("organization_id")
+  type           String
+  apiVersion     String?   @map("api_version")
+  payload        Json
+  receivedAt     DateTime  @default(now()) @map("received_at") @db.Timestamptz(3)
+  processedAt    DateTime? @map("processed_at") @db.Timestamptz(3)
+  attempts       Int       @default(0)
+  lastError      String?   @map("last_error")
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([processedAt, receivedAt])
+  @@index([type, receivedAt])
+  @@map("stripe_webhook_events")
+}
+
+/// The same inbox pattern for Resend and Twilio delivery-status callbacks. The
+/// unique key is composite because two providers can legitimately mint the same
+/// id string.
+model MessagingWebhookEvent {
+  id              String          @id @default(cuid())
+  provider        WebhookProvider
+  providerEventId String          @map("provider_event_id")
+  organizationId  String?         @map("organization_id")
+  type            String
+  payload         Json
+  receivedAt      DateTime        @default(now()) @map("received_at") @db.Timestamptz(3)
+  processedAt     DateTime?       @map("processed_at") @db.Timestamptz(3)
+  attempts        Int             @default(0)
+  lastError       String?         @map("last_error")
+  createdAt       DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime        @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([provider, providerEventId])
+  @@index([processedAt, receivedAt])
+  @@map("messaging_webhook_events")
+}
+
+/// Append-only record of consequential office actions not already captured by
+/// BookingStatusHistory. `before`/`after` store only changed fields and pass
+/// through the same redaction list as the logger, so an audit row cannot become
+/// a side channel for personal data.
+model AuditLog {
+  id             String      @id @default(cuid())
+  organizationId String      @map("organization_id")
+  officeUserId   String?     @map("office_user_id")
+  action         AuditAction
+  entityType     String      @map("entity_type")
+  entityId       String      @map("entity_id")
+  summary        String
+  before         Json?
+  after          Json?
+  correlationId  String?     @map("correlation_id")
+  ipAddress      String?     @map("ip_address")
+  createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  officeUser   OfficeUser?  @relation(fields: [officeUserId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, createdAt])
+  @@index([entityType, entityId])
+  @@index([organizationId, officeUserId, createdAt])
+  @@map("audit_logs")
+}

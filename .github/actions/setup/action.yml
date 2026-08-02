@@ -1,0 +1,22 @@
+name: Setup toolchain
+description: >
+  Check out nothing, install pnpm from the repository's packageManager field,
+  install Node from .tool-versions, and install dependencies from the lockfile.
+
+runs:
+  using: composite
+  steps:
+    # Reads the pinned version from package.json#packageManager, so the pnpm
+    # version lives in exactly one place.
+    - uses: pnpm/action-setup@v4
+
+    # Reads the pinned version from .tool-versions, so the Node version also
+    # lives in exactly one place and matches local asdf.
+    - uses: actions/setup-node@v4
+      with:
+        node-version-file: .tool-versions
+        cache: pnpm
+
+    - name: Install dependencies
+      shell: bash
+      run: pnpm install --frozen-lockfile
