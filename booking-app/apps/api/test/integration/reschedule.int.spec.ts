@@ -104,6 +104,39 @@ beforeEach(async () => {
   return testApp.close;
 });
 
+describe('the financial root', () => {
+  it('stays the original booking across two reschedules', async () => {
+    // The money never moves off the booking that was paid. Without a stable root, the
+    // second replacement is two hops from it and every financial read has to walk the
+    // chain — or, as they all did, give up and report nothing.
+    const first = await service.decide({
+      requestId: await openRequest(),
+      officeUserId: ctx.owner.id,
+      decision: 'APPROVED',
+    });
+    if (first.newBookingId === null) throw new Error('expected a replacement booking');
+
+    const { requestId } = await service.requestByCustomer({
+      bookingId: first.newBookingId,
+      requestedStartsAt: new Date(NEW_SLOT.getTime() + 2 * 60 * 60_000),
+    });
+    const second = await service.decide({
+      requestId,
+      officeUserId: ctx.owner.id,
+      decision: 'APPROVED',
+    });
+    if (second.newBookingId === null) throw new Error('expected a second replacement');
+
+    const [firstReplacement, secondReplacement] = await Promise.all([
+      prisma.booking.findUniqueOrThrow({ where: { id: first.newBookingId } }),
+      prisma.booking.findUniqueOrThrow({ where: { id: second.newBookingId } }),
+    ]);
+
+    expect(firstReplacement.financialRootBookingId).toBe(bookingId);
+    expect(secondReplacement.financialRootBookingId).toBe(bookingId);
+  });
+});
+
 describe('the notifications a request produces', () => {
   it('queues a notification row for every send event it records', async () => {
     await openRequest();
@@ -121,7 +154,9 @@ describe('the notifications a request produces', () => {
     }
 
     expect(
-      await prisma.notification.count({ where: { bookingId, kind: 'RESCHEDULE_REQUEST_RECEIVED' } }),
+      await prisma.notification.count({
+        where: { bookingId, kind: 'RESCHEDULE_REQUEST_RECEIVED' },
+      }),
     ).toBe(1);
   });
 

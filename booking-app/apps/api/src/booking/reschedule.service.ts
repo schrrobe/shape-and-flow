@@ -58,6 +58,7 @@ const RESCHEDULABLE = {
   customerNote: true,
   locale: true,
   origin: true,
+  financialRootBookingId: true,
 } as const;
 
 /**
@@ -290,6 +291,11 @@ export class RescheduleService {
         // The lineage link, which is how the payment on the original booking stays
         // reachable from the replacement.
         rescheduledFromBookingId: booking.id,
+        // Copied, not chained. After two moves the charge would otherwise be two hops
+        // away and every financial read a different length of walk; this keeps the
+        // whole chain one lookup from the booking that was actually paid. The payment,
+        // manual payment and refund rows are deliberately left where they are.
+        financialRootBookingId: booking.financialRootBookingId ?? booking.id,
       },
       select: { id: true, endsAt: true },
     });

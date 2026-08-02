@@ -163,11 +163,7 @@ export class IdempotencyService {
    * failed after reserving — routine. An unbound one means the process holding it
    * died without abandoning it, which is worth a warning.
    */
-  private async takeOverExpiredLease(
-    key: string,
-    now: Date,
-    bound: boolean,
-  ): Promise<BeginResult> {
+  private async takeOverExpiredLease(key: string, now: Date, bound: boolean): Promise<BeginResult> {
     const { count } = await this.prisma.idempotencyKey.updateMany({
       where: {
         key,
