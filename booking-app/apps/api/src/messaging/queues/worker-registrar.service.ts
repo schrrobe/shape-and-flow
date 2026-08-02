@@ -16,6 +16,7 @@ import { MessagingEventProcessor } from '../../notification/processors/messaging
 import { NotificationSendProcessor } from '../../notification/processors/notification-send.processor.js';
 import { ReminderProcessor } from '../../notification/processors/reminder.processor.js';
 import { ReminderReconciler } from '../../notification/reminder.reconciler.js';
+import { OrganizationContextService } from '../../organization/organization-context.service.js';
 import { RefundProcessor } from '../../payment/processors/refund.processor.js';
 import { IdempotencyService } from '../idempotency/idempotency.service.js';
 import { InboxReconciler } from '../inbox/inbox.reconciler.js';
@@ -64,6 +65,7 @@ export class WorkerRegistrarService {
 
   constructor(
     @Inject(ENV) private readonly config: AppConfig,
+    private readonly organizations: OrganizationContextService,
     expiry: ExpiryProcessor,
     sweeper: ExpirySweeper,
     stripe: StripeEventProcessor,
@@ -193,17 +195,27 @@ export class WorkerRegistrarService {
   }
 
   /**
-   * Open the correlation scope a job runs in.
+   * Open the correlation scope a job runs in, on current settings.
    *
    * The id comes from the job when the enqueueing request carried one, so a log line from a
    * worker three hops later still ties back to the customer's click. A job with no id gets a
    * fresh one rather than none, so every line is attributable to *something*.
+   *
+   * The refresh is the other half. The organization and its settings are cached at
+   * bootstrap, and the API refreshes its own copy when the office saves — but the worker
+   * is a different process and nothing told it. A studio that switched SMS reminders off
+   * kept being billed for them until somebody restarted it. One read per job is cheap
+   * beside the work a job does, and it needs no second channel: no refresh queue, no
+   * Redis subscriber, nothing else to go wrong quietly.
    */
   async runWithJobScope<T>(
     payload: { correlationId?: string | undefined },
     fn: () => Promise<T>,
   ): Promise<T> {
-    return await runWithCorrelation(payload.correlationId ?? newCorrelationId(), fn);
+    return await runWithCorrelation(payload.correlationId ?? newCorrelationId(), async () => {
+      await this.organizations.refresh();
+      return await fn();
+    });
   }
 
   /** Route a validated payload to its handler. */

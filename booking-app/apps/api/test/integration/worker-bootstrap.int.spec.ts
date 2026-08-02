@@ -10,6 +10,7 @@ import { EnqueueService } from '../../src/messaging/queues/enqueue.service.js';
 import { JOB, QUEUE, QUEUES } from '../../src/messaging/queues/job-contracts.js';
 import { SCHEDULE, SchedulerService } from '../../src/messaging/queues/scheduler.service.js';
 import { WorkerRegistrarService } from '../../src/messaging/queues/worker-registrar.service.js';
+import { OrganizationContextService } from '../../src/organization/organization-context.service.js';
 import { WorkerModule } from '../../src/worker.module.js';
 import { prisma, resetDatabase } from '../database.harness.js';
 import { seedOrganization } from '../factories/index.js';
@@ -81,6 +82,27 @@ describe('the correlation scope', () => {
     // Every line is attributable to something, even when the job came from a sweep rather
     // than a request.
     expect(seen).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  });
+
+  it('refreshes settings before the next job scope', async () => {
+    // The worker caches the organization at bootstrap and nothing in it observes the
+    // settings changing. A studio that switches SMS reminders off through the office
+    // screens keeps being billed for them until somebody restarts the worker — the API
+    // refreshes on its own write, and the worker is a different process.
+    const organizations = context.get(OrganizationContextService);
+    // Flipped against what the container cached at bootstrap rather than set to a
+    // literal: the seeded default is `false`, so asserting `false` would pass against a
+    // worker that never refreshed anything.
+    const cached = organizations.getSettings().smsRemindersEnabled;
+    await prisma.organizationSettings.updateMany({ data: { smsRemindersEnabled: !cached } });
+
+    const enabled = await registrar.runWithJobScope({}, () =>
+      Promise.resolve(organizations.getSettings().smsRemindersEnabled),
+    );
+
+    expect(enabled).toBe(!cached);
+
+    await prisma.organizationSettings.updateMany({ data: { smsRemindersEnabled: cached } });
   });
 
   it('does not leak the scope outside the job', async () => {
