@@ -103,6 +103,68 @@ describe('dependent choices', () => {
   });
 });
 
+describe('an explicit "any employee" choice', () => {
+  it('survives a reload', () => {
+    // Reconstructed from `employeeId !== null`, "anyone" comes back as unchosen — so a
+    // customer who reloads on the slot step is bounced back to pick again, and the one
+    // choice that cannot be told from its own absence is the common one.
+    const first = useBookingDraft();
+    first.setService('s1');
+    first.setEmployee(null);
+
+    setActivePinia(createPinia());
+    const reloaded = useBookingDraft();
+
+    expect(reloaded.employeeId).toBeNull();
+    expect(reloaded.employeeChosen).toBe(true);
+    expect(reloaded.canReach('slot')).toBe(true);
+  });
+
+  it('reads an older stored draft the way it was written', () => {
+    // No `employeeChosen` in storage: a named employee was chosen, a null one was not.
+    sessionStorage.setItem(
+      DRAFT_STORAGE_KEY,
+      JSON.stringify({ serviceId: 's1', employeeId: 'e1' }),
+    );
+
+    expect(useBookingDraft().employeeChosen).toBe(true);
+
+    sessionStorage.setItem(
+      DRAFT_STORAGE_KEY,
+      JSON.stringify({ serviceId: 's1', employeeId: null }),
+    );
+    setActivePinia(createPinia());
+
+    expect(useBookingDraft().employeeChosen).toBe(false);
+  });
+});
+
+describe('a reservation that lapsed', () => {
+  it('rotates the key and keeps every earlier choice', () => {
+    // The old key is bound to the expired reservation. Re-submitting a new slot under it
+    // is a different body for a spent key, which the API refuses as
+    // IDEMPOTENCY_KEY_REUSED — so the customer is stuck at the very moment they were
+    // told to pick again.
+    const store = useBookingDraft();
+    store.begin();
+    store.setService('s1', { name: 'Massage', priceCents: 4500 });
+    store.setEmployee('e1', 'Mara Vogt');
+    store.setSlot(new Date('2026-08-14T07:00:00.000Z'));
+    store.firstName = 'Anna';
+    const oldKey = store.idempotencyKey;
+
+    store.expireReservation();
+
+    expect(store.idempotencyKey).not.toBe(oldKey);
+    expect(store.idempotencyKey).not.toBeNull();
+    expect(store.slot).toBeNull();
+    expect(store.reservation).toBeNull();
+    expect(store.firstName).toBe('Anna');
+    expect(store.serviceId).toBe('s1');
+    expect(storedDraft().idempotencyKey).toBe(store.idempotencyKey);
+  });
+});
+
 describe('step reachability', () => {
   it('opens one step at a time', () => {
     const store = useBookingDraft();
