@@ -57,6 +57,18 @@ export async function resetStack(request: APIRequestContext): Promise<void> {
   expect(response.ok(), `reset failed: ${await response.text()}`).toBe(true);
 }
 
+/**
+ * Make the next Checkout call fail, once.
+ *
+ * The one provider failure a browser cannot provoke, and the one the retry path exists
+ * for: the reservation commits and the provider call does not, so the customer is asked
+ * to try again while their own hold is still on the slot.
+ */
+export async function failNextCheckout(request: APIRequestContext): Promise<void> {
+  const response = await request.post('/api/test-support/checkout/fail-next');
+  expect(response.ok(), `arming the failure failed: ${await response.text()}`).toBe(true);
+}
+
 /** Mark the Checkout session paid, as completing Stripe's form would. */
 export async function markSessionPaid(
   request: APIRequestContext,

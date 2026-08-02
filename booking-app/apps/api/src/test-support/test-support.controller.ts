@@ -52,6 +52,13 @@ export class TestSupportController {
     return await this.support.payCheckoutSession(sessionId);
   }
 
+  /** Arm a one-shot Checkout failure, so a browser can exercise the retry path. */
+  @Post('checkout/fail-next')
+  @HttpCode(200)
+  failNextCheckout(): { armed: true } {
+    return this.support.failNextCheckout();
+  }
+
   /** The bytes and the signature for a synthetic Stripe event, to be POSTed on. */
   @Post('stripe-event')
   @HttpCode(200)

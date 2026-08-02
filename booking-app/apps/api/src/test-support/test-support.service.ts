@@ -116,6 +116,19 @@ export class TestSupportService {
     return { chargeId: await this.payments.chargeIdFor(sessionId) };
   }
 
+  /**
+   * Make the next Checkout call fail, once.
+   *
+   * The one provider failure a browser cannot provoke. It is the failure the retry path
+   * exists for — the reservation commits, the provider call does not, and the customer
+   * is asked to try again — and armed in *this* process because that is where the API
+   * calls the provider from.
+   */
+  failNextCheckout(): { armed: true } {
+    this.payments.failNextWith(new Error('ECONNRESET reaching the payment provider'));
+    return { armed: true };
+  }
+
   // ── 3. Stripe's webhook signature ─────────────────────────────────────────
 
   /**
