@@ -74,6 +74,20 @@ const formatted = computed(() => {
 
 const expired = computed(() => remainingMs.value <= 0);
 const warning = computed(() => !expired.value && remainingMs.value < WARN_BELOW_MS);
+
+/**
+ * Three states, three surfaces.
+ *
+ * The status tokens are pale backgrounds carrying the page's own text colour, so only the
+ * neutral state names a text colour — see `tokens.css`. Amber for the last minute and red
+ * for a lapsed reservation, because "hurry" and "too late" are different messages and
+ * showing both in red makes the countdown say nothing when it changes.
+ */
+const tone = computed(() => {
+  if (expired.value) return 'bg-danger font-medium';
+  if (warning.value) return 'bg-warning font-medium';
+  return 'bg-surface-muted text-text-secondary';
+});
 </script>
 
 <template>
@@ -81,13 +95,7 @@ const warning = computed(() => !expired.value && remainingMs.value < WARN_BELOW_
     data-test="countdown"
     aria-live="polite"
     class="inline-flex items-center gap-2 rounded-sf px-3 py-1.5 text-sm"
-    :class="
-      expired
-        ? 'bg-danger font-medium'
-        : warning
-          ? 'bg-danger font-medium'
-          : 'bg-surface-muted text-text-secondary'
-    "
+    :class="tone"
   >
     <template v-if="expired">{{ t('booking.countdownExpired') }}</template>
     <template v-else>

@@ -78,4 +78,18 @@ describe('redactForAudit', () => {
     expect(redactForAudit(null)).toBeNull();
     expect(redactForAudit([1, 'two'])).toEqual([1, 'two']);
   });
+
+  it('leaves a Date whole, so the caller can still stringify it', () => {
+    // Every Prisma timestamp arrives as a `Date`. Rebuilt from its own enumerable
+    // properties it becomes `{}`, and an audit row that says `startsAt: {}` cannot answer
+    // the one question it is kept for years to answer.
+    const startsAt = new Date('2026-08-14T07:00:00.000Z');
+
+    const stored = JSON.parse(
+      JSON.stringify(redactForAudit({ booking: { startsAt, email: 'anna@example.com' } })),
+    ) as { booking: { startsAt: string; email: string } };
+
+    expect(stored.booking.startsAt).toBe('2026-08-14T07:00:00.000Z');
+    expect(stored.booking.email).toBe(REDACT_CENSOR);
+  });
 });

@@ -35,16 +35,26 @@ describe('ReservationCountdown', () => {
     expect(wrapper.text()).toContain('03:30');
   });
 
-  it('styles the last minute as urgent', async () => {
+  it('styles the last minute as urgent, and a lapsed reservation differently again', async () => {
     const wrapper = mountAt(new Date('2026-08-14T06:05:00.000Z'));
-    expect(wrapper.classes().join(' ')).not.toMatch(/danger/);
+    const classes = () => wrapper.classes().join(' ');
+
+    expect(classes()).not.toMatch(/warning|danger/);
 
     vi.advanceTimersByTime(4 * 60_000 + 30_000);
     await nextTick();
 
     // Under a minute is when somebody has to hurry, so that is when the styling changes.
     expect(wrapper.text()).toContain('00:30');
-    expect(wrapper.classes().join(' ')).toMatch(/danger/);
+    expect(classes()).toMatch(/warning/);
+
+    vi.advanceTimersByTime(31_000);
+    await nextTick();
+
+    // "Hurry" and "too late" are different messages. Styled the same, the change of state is
+    // the one thing the countdown fails to communicate.
+    expect(classes()).toMatch(/danger/);
+    expect(classes()).not.toMatch(/warning/);
   });
 
   it('emits expired exactly once and stops ticking', async () => {

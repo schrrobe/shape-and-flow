@@ -542,6 +542,49 @@ describe('GET /api/office/dashboard', () => {
     expect(body.today[0]?.employeeId).toBe(ctx.employee1.id);
   });
 
+  it('scopes the money tiles to an EMPLOYEE as well, not just the appointment list', async () => {
+    const price = ctx.service30.priceCents;
+
+    const mine = await bookingAt(berlin(TODAY, '10:00'), { employeeId: ctx.employee1.id });
+    const theirs = await bookingAt(berlin(TODAY, '11:00'), { employeeId: ctx.employee2.id });
+
+    // Mine is settled; the colleague's is short, so the two sessions must disagree about
+    // both tiles rather than happening to agree on a number.
+    await recordManualPayment(mine.id, price, berlin(TODAY, '11:00'));
+    await recordManualPayment(theirs.id, 2000, berlin(TODAY, '12:00'));
+
+    const figures = async (cookie: string) =>
+      (await get(cookie, '/api/office/dashboard').expect(200)).body as {
+        todayRevenue: { amountCents: number };
+        unpaidConfirmedBookings: number;
+      };
+
+    const owner = await figures(await signedInAs('OWNER'));
+    expect(owner.todayRevenue.amountCents).toBe(price + 2000);
+    expect(owner.unpaidConfirmedBookings).toBe(1);
+
+    // Revenue across the whole business is the figure an employee is least entitled to.
+    const employee = await figures(await signedInAs('EMPLOYEE', ctx.employee1.id));
+    expect(employee.todayRevenue.amountCents).toBe(price);
+    expect(employee.unpaidConfirmedBookings).toBe(0);
+  });
+
+  it('leaves an unpaid booking older than the lookback out of the count', async () => {
+    const cookie = await signedInAs('OWNER');
+
+    // Ninety days is where "still chasing this" turns into a write-off, and an unbounded
+    // scan of every confirmed booking a business ever took is what the bound exists to stop.
+    await bookingAt(new Date(NOW.getTime() - 120 * 86_400_000));
+    expect((await get(cookie, '/api/office/dashboard').expect(200)).body).toMatchObject({
+      unpaidConfirmedBookings: 0,
+    });
+
+    await bookingAt(new Date(NOW.getTime() - 10 * 86_400_000));
+    expect((await get(cookie, '/api/office/dashboard').expect(200)).body).toMatchObject({
+      unpaidConfirmedBookings: 1,
+    });
+  });
+
   it('counts open requests', async () => {
     const cookie = await signedInAs('OWNER');
     const booking = await bookingAt(berlin(TODAY, '10:00'));

@@ -64,7 +64,27 @@ onMounted(() => {
   void run();
 });
 
-watch(from, run);
+watch(from, () => {
+  // A slot belongs to the week it was offered in. Left standing across a range change it is a
+  // highlighted choice the customer can no longer see, with the submit button still enabled —
+  // and on a page that moves a real appointment, submitting an invisible time is a silent
+  // wrong action rather than a cosmetic slip.
+  selected.value = null;
+  void run();
+});
+
+/**
+ * A week back, but never before today.
+ *
+ * `canGoBack` only asks whether `from` is past today, and `jumpTo` can leave `from` on any day
+ * inside the loaded range — so from `today + 3` a full week back lands in the past and the
+ * picker offers slots that have already happened. Clamping here rather than tightening the
+ * button also covers the page that stays open across midnight, where `today` is stale.
+ */
+function previousWeek(): void {
+  const candidate = addDays(from.value, -WINDOW_DAYS);
+  from.value = candidate < today ? today : candidate;
+}
 
 async function submit(): Promise<void> {
   const startsAt = selected.value;
@@ -121,7 +141,7 @@ async function submit(): Promise<void> {
           :selected="selected"
           :can-go-back="from > today"
           @select="selected = $event"
-          @previous-week="from = addDays(from, -WINDOW_DAYS)"
+          @previous-week="previousWeek"
           @next-week="from = addDays(from, WINDOW_DAYS)"
           @jump-to="from = $event"
           @retry="run"

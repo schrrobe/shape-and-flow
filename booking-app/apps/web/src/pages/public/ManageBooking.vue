@@ -84,6 +84,21 @@ const consequence = computed(() => {
   });
 });
 
+/**
+ * What was refunded — or that the amount is not settled yet.
+ *
+ * `refundExpected` is nullable, and a null means the server did not state an amount. It does
+ * not mean zero, and substituting one would have the page promise `0,00 €` to somebody who is
+ * owed money. The currency comes from the server's own figure for the same reason: there is
+ * no reason for this page to hold an opinion about it.
+ */
+const canceledBody = computed(() => {
+  const refund = outcome.value?.refundExpected ?? null;
+  if (refund === null) return t('manage.canceledBodyRefundPending');
+
+  return t('manage.canceledBody', { amount: money(refund) });
+});
+
 async function cancel(): Promise<void> {
   if (cancelling.value) return;
 
@@ -164,11 +179,7 @@ async function cancel(): Promise<void> {
         data-test="cancel-outcome"
         :title="t('manage.canceledTitle')"
       >
-        {{
-          t('manage.canceledBody', {
-            amount: money(outcome.refundExpected ?? { amountCents: 0, currency: 'EUR' }),
-          })
-        }}
+        {{ canceledBody }}
       </SfAlert>
 
       <SfAlert

@@ -94,6 +94,7 @@
     "cancelReason": "Reason (optional)",
     "canceledTitle": "Appointment canceled",
     "canceledBody": "You will get {amount} back. Depending on your bank the refund takes a few days.",
+    "canceledBodyRefundPending": "Your appointment is canceled. We will email you as soon as the refund amount is settled.",
     "requestedTitle": "Request received",
     "requestedBody": "We are reviewing your request and will reply by email.",
     "rescheduleTitle": "Move appointment",

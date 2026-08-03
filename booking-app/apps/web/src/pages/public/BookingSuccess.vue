@@ -92,6 +92,10 @@ async function poll(): Promise<void> {
 }
 
 onMounted(() => {
+  // No session id means there is nothing to resolve — and nothing to clear either: somebody
+  // who opened this page by mistake must not lose a booking they are part-way through.
+  if (sessionId.value === null) return;
+
   void loadOrganization();
   void poll();
 
