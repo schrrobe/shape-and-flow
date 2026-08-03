@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, useId } from 'vue';
 
+import { useFieldTestId } from './field-test-id.js';
+
 /**
  * A labelled text field that describes itself correctly.
  *
@@ -13,13 +15,24 @@ const props = withDefaults(
   defineProps<{
     modelValue: string;
     label: string;
-    type?: 'text' | 'email' | 'tel' | 'password';
+    /**
+     * `date` and `number` are here for the office forms, which edit dates and minute
+     * counts. Native rather than a custom picker: the browser's is keyboard-complete, is
+     * localised by the operating system, and works on a phone — three things a
+     * hand-rolled one would each have to earn.
+     */
+    type?: 'text' | 'email' | 'tel' | 'password' | 'date' | 'number' | 'time';
     description?: string | null;
     error?: string | null;
     required?: boolean;
     autocomplete?: string;
     maxlength?: number;
     placeholder?: string;
+    /** For `number` and `date`, which have bounds a text field does not. */
+    min?: string | number;
+    max?: string | number;
+    step?: string | number;
+    inputmode?: 'text' | 'decimal' | 'numeric';
   }>(),
   // `autocomplete`, `maxlength` and `placeholder` get no default: an optional prop is already
   // undefined, and `exactOptionalPropertyTypes` rejects saying so twice.
@@ -40,10 +53,14 @@ const describedBy = computed(() => {
 
   return ids.length === 0 ? undefined : ids.join(' ');
 });
+
+// The test id belongs on the control, not on the block around it.
+defineOptions({ inheritAttrs: false });
+const { testId, wrapperAttrs } = useFieldTestId();
 </script>
 
 <template>
-  <div class="flex flex-col gap-1.5">
+  <div class="flex flex-col gap-1.5" v-bind="wrapperAttrs">
     <label :for="id" class="text-sm font-medium text-text-primary">
       {{ label }}
       <span v-if="required" aria-hidden="true" class="text-primary">*</span>
@@ -51,12 +68,17 @@ const describedBy = computed(() => {
 
     <input
       :id="id"
+      :data-test="testId"
       :type="type"
       :value="modelValue"
       :required="required"
       :autocomplete="autocomplete"
       :maxlength="maxlength"
       :placeholder="placeholder"
+      :min="min"
+      :max="max"
+      :step="step"
+      :inputmode="inputmode"
       :aria-describedby="describedBy"
       :aria-invalid="error === null ? undefined : 'true'"
       class="rounded-sf border border-border bg-surface px-3 py-2.5 text-base text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring focus-visible:ring-offset-1"

@@ -12,7 +12,9 @@
     "format": "prettier --check .",
     "typecheck": "vue-tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui"
   },
   "dependencies": {
     "@shape-and-flow/booking-contracts": "workspace:*",
@@ -24,6 +26,8 @@
     "zod": "4.4.3"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.12.1",
+    "@playwright/test": "1.62.1",
     "@shape-and-flow/booking-config": "workspace:*",
     "@tailwindcss/vite": "4.3.3",
     "@types/node": "26.1.2",

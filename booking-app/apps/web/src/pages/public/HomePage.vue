@@ -2,12 +2,14 @@
 import { SfButton, SfCard, SfIcon } from '@shape-and-flow/booking-ui';
 import { onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { useRouter } from 'vue-router';
 
 import { api } from '../../api/client.js';
 
 import type { OrganizationCurrentResponse } from '@shape-and-flow/booking-contracts';
 
 const { t } = useI18n();
+const router = useRouter();
 
 const organization = ref<OrganizationCurrentResponse | null>(null);
 
@@ -42,15 +44,15 @@ onMounted(async () => {
       <li v-if="organization !== null" class="flex items-center gap-2">
         <SfIcon name="clock" />
         <span>
-          {{
-            t('home.featureCancellation', { hours: organization.settings.freeCancellationHours })
-          }}
+          {{ t('home.featureCancellation', { hours: organization.freeCancellationHours }) }}
         </span>
       </li>
     </ul>
 
     <div class="mt-6">
-      <SfButton disabled>{{ t('home.start') }}</SfButton>
+      <SfButton data-test="start-booking" @click="router.push({ name: 'booking-service' })">
+        {{ t('home.start') }}
+      </SfButton>
     </div>
   </SfCard>
 </template>

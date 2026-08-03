@@ -25,11 +25,13 @@ import { SMS_PROVIDER } from '../src/providers/sms/sms-provider.js';
 import { PublicModule } from '../src/public/public.module.js';
 
 import { prisma } from './database.harness.js';
+import { countingPrisma, loadOrganization } from './public-app.harness.js';
 
 import type { AppConfig } from '../src/config/env.schema.js';
 import type { QueueRegistry } from '../src/messaging/queues/enqueue.service.js';
 import type { OrganizationWithSettings } from '../src/organization/organization-context.service.js';
 import type { INestApplication } from '@nestjs/common';
+import type { RequestHandler } from 'express';
 import type { Redis } from 'ioredis';
 import type { Server } from 'node:http';
 
@@ -63,6 +65,17 @@ function organizationStub(): Partial<OrganizationContextService> {
     getOrganizationId: () => read().id,
     getSettings: () => read().settings,
     getTimezone: () => read().timezone,
+    /**
+     * The one method the stub implements for real.
+     *
+     * `PATCH /office/settings` calls it, and the reason it exists in production — the
+     * cached policy must not survive the row that produced it — is exactly what the
+     * settings test asserts. A stub that answered `undefined` here would make that
+     * assertion pass against a service that never refreshed anything.
+     */
+    refresh: async () => {
+      currentOrganization = await loadOrganization(read().id);
+    },
   };
 }
 
@@ -91,7 +104,7 @@ const testConfig = {
 @Global()
 @Module({
   providers: [
-    { provide: PrismaService, useValue: prisma },
+    { provide: PrismaService, useFactory: () => (countingEnabled ? countingPrisma : prisma) },
     { provide: CLOCK, useFactory: () => currentClock ?? new FixedClock(new Date()) },
     { provide: OrganizationContextService, useFactory: organizationStub },
     { provide: ENV, useValue: testConfig },
@@ -154,6 +167,9 @@ let currentQueues: QueueRegistry | undefined;
 /** Set per app, by `createBookingTestApp({ redis })`. */
 let currentRedis: Redis | undefined;
 
+/** Set per app, by `createBookingTestApp({ countQueries })`. */
+let countingEnabled = false;
+
 /** Every job the harness's queues were asked to add, in order. */
 export const enqueued: { name: string; data: unknown; options: unknown }[] = [];
 
@@ -202,11 +218,28 @@ export async function createBookingTestApp(options: {
    * cookie, and every authenticated assertion would pass or fail for the wrong reason.
    */
   globalPrefix?: string;
+  /**
+   * Express handlers to mount before the application initialises.
+   *
+   * The correlation middleware is registered with `app.use()` in production rather than
+   * as Nest middleware, so a suite that asserts on correlation ids has to mount it the
+   * same way or it would be proving something about a different wiring.
+   */
+  middleware?: RequestHandler[];
+  /**
+   * Count Prisma operations, so a suite can assert an N+1 has not appeared.
+   *
+   * Off by default: the counting client is a `$extends` proxy, and every suite paying
+   * for it to observe something only one suite asserts is the wrong trade. Read the
+   * total through `queryCounter` from `public-app.harness.ts`.
+   */
+  countQueries?: boolean;
 }): Promise<BookingTestApp> {
   currentOrganization = options.organization;
   currentClock = options.clock;
   currentQueues = options.queues;
   currentRedis = options.redis;
+  countingEnabled = options.countQueries ?? false;
   enqueued.length = 0;
 
   const moduleRef = await Test.createTestingModule({
@@ -221,6 +254,7 @@ export async function createBookingTestApp(options: {
   // `rawBody: true` for the same reason production sets it: the webhook verifies a
   // signature over the bytes as sent.
   const app = moduleRef.createNestApplication({ rawBody: true });
+  for (const handler of options.middleware ?? []) app.use(handler);
   if (options.globalPrefix !== undefined) app.setGlobalPrefix(options.globalPrefix);
   await app.init();
 

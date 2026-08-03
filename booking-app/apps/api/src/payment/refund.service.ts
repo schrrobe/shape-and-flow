@@ -14,6 +14,8 @@ import { PrismaService } from '../prisma/prisma.service.js';
 import { PAYMENT_PROVIDER } from '../providers/payment/payment-provider.js';
 import { isRetryableStripeError } from '../providers/payment/stripe.errors.js';
 
+import { BookingFinancialsService } from './booking-financials.service.js';
+
 import type { Clock } from '../domain/time/clock.js';
 import type { RefundReason } from '../prisma/client.js';
 import type { PaymentProvider, RefundStatusValue } from '../providers/payment/payment-provider.js';
@@ -23,6 +25,42 @@ export interface RequestRefundInput {
   amountCents: number;
   reason: RefundReason;
   officeUserId?: string | undefined;
+}
+
+/**
+ * What "refund this" means, which is not the same question in the two places it is asked.
+ *
+ * `ADDITIONAL` is an instruction: send this much now, on top of whatever has already gone
+ * back. That is what an office user typing an amount means.
+ *
+ * `CUMULATIVE_TARGET` is an outcome: the customer should end up having received this much
+ * in total. That is what a cancellation means — "refund what was paid minus what we
+ * keep" — and stating it as an instruction is how a booking with an earlier partial
+ * refund gets refunded twice over.
+ */
+export type RefundAmount =
+  | { kind: 'ADDITIONAL'; amountCents: number }
+  | { kind: 'CUMULATIVE_TARGET'; targetAmountCents: number };
+
+export interface ReserveRefundInput {
+  bookingId: string;
+  amount: RefundAmount;
+  reason: RefundReason;
+  officeUserId?: string | undefined;
+  /**
+   * Treat "nothing to refund" as a normal outcome rather than an error.
+   *
+   * A cancellation of an unpaid booking is an ordinary cancellation; a refund route
+   * asked to refund a booking with no settled payment is a mistake worth reporting.
+   */
+  lenient?: boolean;
+}
+
+export interface RefundReservationResult {
+  /** Null when nothing needed to move: the target was already met, or there is no payment. */
+  refundId: string | null;
+  additionalAmountCents: number;
+  refundableAmountCents: number;
 }
 
 export interface ProviderUpdate {
@@ -71,6 +109,7 @@ export class RefundService {
     private readonly prisma: PrismaService,
     private readonly organizations: OrganizationContextService,
     private readonly outbox: OutboxRecorder,
+    private readonly financials: BookingFinancialsService,
     @Inject(PAYMENT_PROVIDER) private readonly payments: PaymentProvider,
     @Inject(CLOCK) private readonly clock: Clock,
   ) {}
@@ -85,52 +124,144 @@ export class RefundService {
     return await withSerializationRetry(
       () =>
         this.prisma.$transaction(async (tx) => {
-          const payment = await this.lockPayment(tx, input.bookingId);
+          const reserved = await this.reserveInTransaction(tx, {
+            bookingId: input.bookingId,
+            amount: { kind: 'ADDITIONAL', amountCents: input.amountCents },
+            reason: input.reason,
+            ...(input.officeUserId === undefined ? {} : { officeUserId: input.officeUserId }),
+          });
 
-          // Through Money rather than by subtracting the columns: the cent-arithmetic
-          // ban exists for exactly this, and it caught this line.
-          const refundable = Money.fromCents(payment.amountCents, payment.currency).minus(
-            Money.fromCents(payment.refundedAmountCents, payment.currency),
-          );
-
-          if (input.amountCents <= 0 || input.amountCents > refundable.amountCents) {
+          // `lenient` is off, so the only way here is with a refund actually created.
+          if (reserved.refundId === null) {
             throw new AppError('PAYMENT_NOT_REFUNDABLE', {
-              message: `Only ${String(refundable.amountCents)} cents remain refundable on this booking.`,
-              details: { refundableAmountCents: refundable.amountCents },
+              message: 'There is nothing left to refund on this booking.',
             });
           }
 
-          const refund = await tx.refund.create({
-            data: {
-              organizationId: payment.organizationId,
-              bookingId: input.bookingId,
-              paymentId: payment.id,
-              amountCents: input.amountCents,
-              currency: payment.currency,
-              status: RefundStatus.PENDING,
-              reason: input.reason,
-              // Stored before any call, which is what makes a retry idempotent at the
-              // provider rather than only here.
-              idempotencyKey: randomUUID(),
-              ...(input.officeUserId === undefined
-                ? {}
-                : { issuedByOfficeUserId: input.officeUserId }),
-            },
-            select: { id: true },
-          });
-
-          await this.outbox.record(tx, {
-            organizationId: payment.organizationId,
-            aggregateType: 'Refund',
-            aggregateId: refund.id,
-            eventType: JOB.REFUND_REQUESTED,
-            payload: { organizationId: payment.organizationId, refundId: refund.id },
-          });
-
-          return { refundId: refund.id };
+          return { refundId: reserved.refundId };
         }),
       'request-refund',
     );
+  }
+
+  /**
+   * Reserve part of a payment's remaining balance, inside the caller's transaction.
+   *
+   * The one place a refund row is created, and the reason it is one place is the
+   * arithmetic. The balance is `amount - refunded - pending`: a refund that has been
+   * decided but not yet settled is money already committed, and counting only
+   * `refundedAmountCents` meant two requests in the window before Stripe answers could
+   * each pass and together exceed the charge. The second one then failed at the
+   * provider, after the office had been told it was done.
+   *
+   * The row lock is what makes that reservation hold under concurrency: the payment is
+   * locked `FOR UPDATE` before the sum is read, so two callers serialise rather than
+   * both reading the same remainder.
+   *
+   * Refunds are reserved against the **financial root**, so a refund issued from a
+   * rescheduled booking comes out of the charge that actually exists.
+   */
+  async reserveInTransaction(
+    tx: Prisma.TransactionClient,
+    input: ReserveRefundInput,
+  ): Promise<RefundReservationResult> {
+    const rootBookingId = await this.financials.rootBookingId(input.bookingId, tx);
+    const payment = await this.lockPayment(tx, rootBookingId, input.lenient === true);
+
+    if (payment === null)
+      return { refundId: null, additionalAmountCents: 0, refundableAmountCents: 0 };
+
+    const pending = await tx.refund.aggregate({
+      where: { paymentId: payment.id, status: RefundStatus.PENDING },
+      _sum: { amountCents: true },
+    });
+
+    // Through Money rather than by adding and subtracting the columns: the
+    // cent-arithmetic ban exists for exactly this, and it caught these lines already.
+    const reserved = Money.fromCents(payment.refundedAmountCents, payment.currency).plus(
+      Money.fromCents(pending._sum.amountCents ?? 0, payment.currency),
+    );
+    const refundable = Money.fromCents(payment.amountCents, payment.currency).minus(reserved);
+
+    const additional = this.additionalFor(input.amount, reserved, refundable);
+    const additionalCents = additional.amountCents;
+
+    if (additionalCents <= 0) {
+      if (input.amount.kind === 'ADDITIONAL' && input.lenient !== true) {
+        throw new AppError('PAYMENT_NOT_REFUNDABLE', {
+          message: `Only ${String(refundable.amountCents)} cents remain refundable on this booking.`,
+          details: { refundableAmountCents: refundable.amountCents },
+        });
+      }
+
+      // A cumulative target already met, or a cancellation with nothing to give back.
+      return {
+        refundId: null,
+        additionalAmountCents: 0,
+        refundableAmountCents: refundable.amountCents,
+      };
+    }
+
+    if (additionalCents > refundable.amountCents) {
+      throw new AppError('PAYMENT_NOT_REFUNDABLE', {
+        message: `Only ${String(refundable.amountCents)} cents remain refundable on this booking.`,
+        details: { refundableAmountCents: refundable.amountCents },
+      });
+    }
+
+    const refund = await tx.refund.create({
+      data: {
+        organizationId: payment.organizationId,
+        // The booking the office acted on, so the trail says where the decision was
+        // made. The money comes out of the root's payment either way.
+        bookingId: input.bookingId,
+        paymentId: payment.id,
+        amountCents: additionalCents,
+        currency: payment.currency,
+        status: RefundStatus.PENDING,
+        reason: input.reason,
+        // Stored before any call, which is what makes a retry idempotent at the
+        // provider rather than only here.
+        idempotencyKey: randomUUID(),
+        ...(input.officeUserId === undefined ? {} : { issuedByOfficeUserId: input.officeUserId }),
+      },
+      select: { id: true },
+    });
+
+    await this.outbox.record(tx, {
+      organizationId: payment.organizationId,
+      aggregateType: 'Refund',
+      aggregateId: refund.id,
+      eventType: JOB.REFUND_REQUESTED,
+      payload: { organizationId: payment.organizationId, refundId: refund.id },
+    });
+
+    return {
+      refundId: refund.id,
+      additionalAmountCents: additionalCents,
+      refundableAmountCents: refundable.amountCents,
+    };
+  }
+
+  /**
+   * How much this reservation actually moves.
+   *
+   * A cumulative target is capped at what is left: a target derived from a paid total
+   * that includes cash can exceed the card charge, and Stripe cannot give back money it
+   * never took.
+   */
+  private additionalFor(amount: RefundAmount, reserved: Money, refundable: Money): Money {
+    if (amount.kind === 'ADDITIONAL') {
+      return Money.fromCents(amount.amountCents, refundable.currency);
+    }
+
+    const outstanding = Money.fromCents(amount.targetAmountCents, reserved.currency).minus(
+      reserved,
+    );
+
+    if (outstanding.amountCents <= 0) return Money.zero(refundable.currency);
+
+    return outstanding.lessThan(refundable) ? outstanding : refundable;
   }
 
   /**
@@ -352,13 +483,14 @@ export class RefundService {
   private async lockPayment(
     tx: Prisma.TransactionClient,
     bookingId: string,
+    lenient: boolean,
   ): Promise<{
     id: string;
     organizationId: string;
     currency: string;
     amountCents: number;
     refundedAmountCents: number;
-  }> {
+  } | null> {
     const rows = await tx.$queryRaw<{ id: string }[]>(
       Prisma.sql`
         SELECT id FROM payments
@@ -374,7 +506,10 @@ export class RefundService {
 
     if (id === undefined) {
       // No settled payment: there is nothing to give back. Includes the unpaid manual
-      // booking and the booking whose payment failed.
+      // booking and the booking whose payment failed. Cancelling one of those is
+      // ordinary; being asked to refund one is a mistake worth reporting.
+      if (lenient) return null;
+
       throw new AppError('PAYMENT_NOT_REFUNDABLE', {
         message: 'This booking has no settled payment to refund.',
       });

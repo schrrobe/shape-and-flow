@@ -21,6 +21,7 @@ function labelFor(value: Locale): string {
       v-for="value in LOCALES"
       :key="value"
       type="button"
+      :data-test="`locale-${value}`"
       :lang="value"
       :aria-current="locale.current === value ? 'true' : undefined"
       class="rounded-sf px-2 py-1 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"

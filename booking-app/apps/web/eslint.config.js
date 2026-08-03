@@ -1,6 +1,6 @@
-import { createConfig } from '@shape-and-flow/booking-config/eslint';
+import { createEslintConfig } from '@shape-and-flow/booking-config/eslint';
 
-export default createConfig({
+export default createEslintConfig({
   tsconfigRootDir: import.meta.dirname,
   vue: true,
   ignores: ['dist/**'],

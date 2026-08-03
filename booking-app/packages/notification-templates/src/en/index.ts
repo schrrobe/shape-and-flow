@@ -84,7 +84,10 @@ export const enTemplates: LocaleTemplates = {
   }),
 
   REMINDER_24H: (data) => ({
-    subject: `Reminder: your appointment tomorrow at ${formatTime(data.startsAt, LOCALE)}`,
+    // The date, not "tomorrow". One template serves every configured offset, so a
+    // business running a 2-hour reminder as well sent "tomorrow" about an appointment
+    // later the same day — and somebody eventually turns up a day late because of it.
+    subject: `Reminder: your appointment on ${formatDate(data.startsAt, LOCALE)} at ${formatTime(data.startsAt, LOCALE)}`,
     blocks: [
       `Hello ${data.customerFirstName},`,
       `A reminder about your appointment.`,
@@ -145,7 +148,7 @@ export const enTemplates: LocaleTemplates = {
         ? `Your appointment has been moved. New time: ${when(data)} with ${data.employeeName}.`
         : `We are not able to move your appointment. It stays at ${when(data)}.`,
       data.note === null ? `Any questions: ${data.businessPhone}` : `Note: ${data.note}`,
-      `Manage your booking: ${data.manageUrl}`,
+      ...(data.manageUrl === null ? [] : [`Manage your booking: ${data.manageUrl}`]),
     ],
   }),
 

@@ -31,6 +31,9 @@ export const errorCodeSchema = z.enum([
   'BOOKING_NOT_RESCHEDULABLE',
   'REQUEST_ALREADY_DECIDED',
   'EMPLOYEE_HAS_FUTURE_BOOKINGS',
+  'SERVICE_HAS_FUTURE_BOOKINGS',
+  'CATEGORY_NOT_EMPTY',
+  'CANNOT_MODIFY_SELF',
   'PAYMENT_NOT_REFUNDABLE',
   'NO_EMPLOYEE_AVAILABLE',
   // 422
@@ -66,7 +69,14 @@ export const ERROR_STATUS: Record<ErrorCode, number> = {
   BOOKING_NOT_CANCELLABLE: 409,
   BOOKING_NOT_RESCHEDULABLE: 409,
   REQUEST_ALREADY_DECIDED: 409,
+  // Three refusals to archive or edit something that is still in use. Separate codes
+  // rather than one generic conflict because the office UI has to say a different
+  // sentence for each — how many appointments are in the way, which services still sit
+  // in the category, or that you cannot lock yourself out.
   EMPLOYEE_HAS_FUTURE_BOOKINGS: 409,
+  SERVICE_HAS_FUTURE_BOOKINGS: 409,
+  CATEGORY_NOT_EMPTY: 409,
+  CANNOT_MODIFY_SELF: 409,
   PAYMENT_NOT_REFUNDABLE: 409,
   NO_EMPLOYEE_AVAILABLE: 409,
 

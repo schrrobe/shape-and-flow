@@ -54,9 +54,11 @@ function tokenValue(name: string): string {
 /** `#rrggbb` (or `#rgb`) to its three channels. */
 function channels(hex: string): [number, number, number] {
   const clean = hex.replace('#', '');
+  // A shorthand `#abc` expands to `#aabbcc`. Splitting by code point is safe because a hex
+  // colour is ASCII by construction — the rule's emoji concern cannot apply.
   const full =
     clean.length === 3
-      ? [...clean].map((character) => character.repeat(2)).join('')
+      ? clean.replaceAll(/[0-9a-fA-F]/g, (character) => character.repeat(2))
       : clean.slice(0, 6);
 
   return [

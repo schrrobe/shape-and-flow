@@ -4,6 +4,7 @@ import importX from 'eslint-plugin-import-x';
 import pluginVue from 'eslint-plugin-vue';
 import globals from 'globals';
 import tseslint from 'typescript-eslint';
+import vueParser from 'vue-eslint-parser';
 
 /** Paths no package should ever lint. */
 export const DEFAULT_IGNORES = [
@@ -27,7 +28,10 @@ const PROCESS_ENV_ALLOWED = [
   '**/*.config.ts',
   '**/*.config.js',
   '**/*.config.mjs',
-  '**/prisma/seed.ts',
+  // The seed's entrypoint. It lives under `src` so `nest build` compiles it —
+  // the e2e stack and a first deployment both run `node dist/seed.main.js` — and
+  // it reads DATABASE_URL before any container exists to read it from.
+  '**/src/seed.main.ts',
   '**/test/**',
   '**/e2e/**',
 ];
@@ -59,6 +63,21 @@ export function createEslintConfig(options = {}) {
     js.configs.recommended,
 
     ...(vue ? pluginVue.configs['flat/recommended'] : []),
+
+    ...(vue
+      ? [
+          {
+            files: ['**/*.vue'],
+            rules: {
+              // Conflicts with `exactOptionalPropertyTypes`. The rule wants every optional prop
+              // to carry a default, but declaring `undefined` as the default of an
+              // already-optional prop is exactly what that compiler option rejects — and in a
+              // TypeScript component the type is the contract, not a runtime prop validator.
+              'vue/require-default-prop': 'off',
+            },
+          },
+        ]
+      : []),
 
     {
       files: typedFiles,
@@ -179,10 +198,34 @@ export function createEslintConfig(options = {}) {
         '**/test/**',
         '**/e2e/**',
         '**/*.config.{ts,js,mjs}',
-        '**/prisma/seed.ts',
+        '**/src/seed.main.ts',
       ],
       rules: { 'no-restricted-syntax': 'off' },
     },
+
+    // Re-assert the Vue parser for SFCs.
+    //
+    // `strictTypeChecked` sets `parser: tseslint.parser` for every file it matches, which for a
+    // `.vue` file means the TypeScript parser sees `<template>` and fails at the first tag. A
+    // single-file component has to be parsed by `vue-eslint-parser`, which then hands the
+    // `<script>` block to the TypeScript parser through `parserOptions.parser`. This block has
+    // to come after the typed configs, or they overwrite it again.
+    ...(vue
+      ? [
+          {
+            files: ['**/*.vue'],
+            languageOptions: {
+              parser: vueParser,
+              parserOptions: {
+                parser: tseslint.parser,
+                projectService: true,
+                tsconfigRootDir,
+                extraFileExtensions: ['.vue'],
+              },
+            },
+          },
+        ]
+      : []),
 
     // Must stay last so formatting-related rules are switched off.
     eslintConfigPrettier,
