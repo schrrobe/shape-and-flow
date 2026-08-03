@@ -1262,6 +1262,48 @@ describe('CSV export', () => {
     expect(august.text).toContain('REFUND');
   });
 
+  it('pages pending refunds by request date even when settledAt is present', async () => {
+    const owner = await signedInAs('OWNER');
+    const booking = await bookingAt(berlin(NEXT_MONDAY, '10:00'));
+    await paidWithCard(booking.id, 4500);
+
+    const payment = await prisma.payment.findFirstOrThrow({ where: { bookingId: booking.id } });
+    await prisma.refund.createMany({
+      data: Array.from({ length: 501 }, (_, index) => {
+        const sequence = String(index).padStart(4, '0');
+        return {
+          id: `pending-refund-${sequence}`,
+          organizationId: ctx.organization.id,
+          bookingId: booking.id,
+          paymentId: payment.id,
+          amountCents: 1,
+          currency: 'EUR',
+          status: 'PENDING' as const,
+          reason: 'GOODWILL' as const,
+          idempotencyKey: `pending-refund-${sequence}`,
+          requestedAt: new Date(Date.UTC(2026, 7, 1, 0, 0, index)),
+          // The schema permits this state. It must not move a PENDING row away
+          // from the requestedAt ordering used by this export stream.
+          settledAt: index === 499 ? new Date('2026-08-31T20:00:00.000Z') : null,
+        };
+      }),
+    });
+
+    const response = await owner
+      .get('/api/office/exports/payments.csv')
+      .query({ from: '2026-08-01', to: '2026-08-31' })
+      .expect(200);
+
+    const pendingIds = response.text
+      .split('\r\n')
+      .filter((line) => line.startsWith('REFUND;pending-refund-'))
+      .map((line) => line.split(';')[1]);
+
+    expect(pendingIds).toHaveLength(501);
+    expect(pendingIds.at(-2)).toBe('pending-refund-0499');
+    expect(pendingIds.at(-1)).toBe('pending-refund-0500');
+  });
+
   it('is closed to an EMPLOYEE', async () => {
     const employee = await signedInAs('EMPLOYEE', { employeeId: ctx.employee1.id });
 

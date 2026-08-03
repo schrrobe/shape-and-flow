@@ -1,0 +1,34 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+
+  // Exports tagged `@knipignore` stay out of the report. Reserved for things
+  // that are deliberately unreferenced and say so in a comment above the tag,
+  // not as a quick way to silence a finding.
+  "tags": ["-knipignore"],
+
+  "workspaces": {
+    "booking-app/apps/api": {
+      // Resolved by name at runtime: the logger names it as a pino transport
+      // target, so there is no import for knip to follow.
+      "ignoreDependencies": ["pino-pretty"]
+    },
+    "booking-app/apps/web": {
+      // Reaches ESLint through the factory in @shape-and-flow/booking-config
+      // rather than through this package's own flat config.
+      "ignoreDependencies": ["eslint-plugin-vue"]
+    },
+    "booking-app/packages/ui": {
+      // fontawesome-free is read as files, not imported: the icon generator
+      // walks node_modules/@fortawesome/fontawesome-free/svgs with readFileSync
+      // so that the app ships ten glyphs instead of a 400 KB webfont.
+      "ignoreDependencies": ["@fortawesome/fontawesome-free", "eslint-plugin-vue"]
+    },
+    "booking-app/packages/config": {
+      // This package ships configuration it does not itself run. vitest and its
+      // coverage provider are what the shipped vitest.base.js configures, and
+      // `vue` appears only as the jsxImportSource of the tsconfig handed to the
+      // two packages that do depend on Vue.
+      "ignoreDependencies": ["vitest", "@vitest/coverage-v8", "vue"]
+    }
+  }
+}

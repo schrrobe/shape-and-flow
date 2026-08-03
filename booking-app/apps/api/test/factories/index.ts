@@ -221,12 +221,8 @@ export function makeBooking(
   const blockEndsAt = overrides.blockEndsAt ?? new Date(endsAt.getTime() + 5 * 60_000);
 
   const needsExpiry = status === BookingStatus.PENDING_PAYMENT || status === BookingStatus.EXPIRING;
-  const expiresAt =
-    overrides.expiresAt !== undefined
-      ? overrides.expiresAt
-      : needsExpiry
-        ? new Date(startsAt.getTime() - 60 * 60_000)
-        : null;
+  const defaultExpiry = needsExpiry ? new Date(startsAt.getTime() - 60 * 60_000) : null;
+  const expiresAt = overrides.expiresAt !== undefined ? overrides.expiresAt : defaultExpiry;
 
   return {
     organizationId: ctx.organization.id,

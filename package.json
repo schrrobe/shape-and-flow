@@ -17,7 +17,8 @@
     "db:seed": "pnpm api prisma:seed",
     "test:infra:up": "docker compose -f booking-app/docker-compose.test.yml up -d --wait",
     "test:infra:down": "docker compose -f booking-app/docker-compose.test.yml down -v",
-    "lint": "pnpm -r lint",
+    "lint": "pnpm -r --workspace-concurrency=2 lint",
+    "knip": "knip",
     "format": "pnpm -r format",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
@@ -25,5 +26,8 @@
     "test:e2e": "pnpm build && pnpm web test:e2e",
     "build": "pnpm -r --if-present build",
     "dev": "pnpm --parallel --filter @shape-and-flow/booking-api --filter @shape-and-flow/booking-web dev"
+  },
+  "devDependencies": {
+    "knip": "6.31.0"
   }
 }

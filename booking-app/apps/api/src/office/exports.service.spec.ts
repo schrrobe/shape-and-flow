@@ -72,17 +72,23 @@ describe('ExportsService.payments', () => {
         booking: { reference: 'M', serviceNameSnapshot: 'Cut' },
       },
     ]);
-    const refundFindMany = vi.fn().mockResolvedValue([
-      {
-        id: 'refund',
-        amountCents: 1000,
-        currency: 'EUR',
-        status: 'SUCCEEDED',
-        reason: 'GOODWILL',
-        settledAt: new Date('2026-08-01T10:00:00.000Z'),
-        booking: { reference: 'R', serviceNameSnapshot: 'Cut' },
-      },
-    ]);
+    const refundFindMany = vi
+      .fn()
+      .mockImplementation(({ where }: { where: { status?: string } }) => {
+        if (where.status === 'PENDING') return Promise.resolve([]);
+        return Promise.resolve([
+          {
+            id: 'refund',
+            amountCents: 1000,
+            currency: 'EUR',
+            status: 'SUCCEEDED',
+            reason: 'GOODWILL',
+            requestedAt: new Date('2026-07-31T10:00:00.000Z'),
+            settledAt: new Date('2026-08-01T10:00:00.000Z'),
+            booking: { reference: 'R', serviceNameSnapshot: 'Cut' },
+          },
+        ]);
+      });
     const service = makeService(paymentFindMany, manualFindMany, refundFindMany);
 
     const csv = await textOf(service.payments('organization-1', query));

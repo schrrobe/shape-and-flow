@@ -15,7 +15,7 @@ import type { BeforeApplicationShutdown } from '@nestjs/common';
  * Docker and Kubernetes both — so the process finishes its own work rather than
  * being killed halfway through somebody's payment.
  */
-export const SHUTDOWN_DRAIN_TIMEOUT_MS = 25_000;
+const SHUTDOWN_DRAIN_TIMEOUT_MS = 25_000;
 
 /** How often the drain checks whether the last request has finished. */
 const DRAIN_POLL_MS = 100;

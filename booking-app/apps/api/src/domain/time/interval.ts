@@ -12,10 +12,6 @@ export interface Interval {
   readonly end: Date;
 }
 
-export function makeInterval(start: Date, end: Date): Interval {
-  return { start, end };
-}
-
 export function durationMinutes(interval: Interval): number {
   return (interval.end.getTime() - interval.start.getTime()) / 60_000;
 }

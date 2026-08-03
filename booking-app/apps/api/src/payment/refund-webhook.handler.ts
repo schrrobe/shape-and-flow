@@ -16,7 +16,7 @@ import type { RefundStatusValue } from '../providers/payment/payment-provider.js
  * event would mean receiving a charge with no refund inside it — which the previous code
  * did: it read `refunds.data`, found nothing, and settled nothing while looking handled.
  */
-export const REFUND_EVENT_TYPES = {
+const REFUND_EVENT_TYPES = {
   REFUND_CREATED: 'refund.created',
   REFUND_UPDATED: 'refund.updated',
   REFUND_FAILED: 'refund.failed',

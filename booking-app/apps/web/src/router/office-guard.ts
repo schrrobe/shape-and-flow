@@ -11,9 +11,7 @@ import type { NavigationGuardReturn, RouteLocationNormalized, Router } from 'vue
  * component, which fires its own requests and paints real chrome, and only then gets
  * replaced by the login page. Operators read that flash as the interface breaking.
  */
-export async function officeSessionGuard(
-  to: RouteLocationNormalized,
-): Promise<NavigationGuardReturn> {
+async function officeSessionGuard(to: RouteLocationNormalized): Promise<NavigationGuardReturn> {
   // Before the store, not after. This guard is global, so it also runs for every customer
   // navigation — and reaching for a Pinia store there would make the booking flow depend on
   // one existing, which is exactly what it did until a public-route test said so.

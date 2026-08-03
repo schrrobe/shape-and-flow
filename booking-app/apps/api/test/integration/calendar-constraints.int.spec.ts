@@ -187,12 +187,11 @@ describe('tenant-consistent booking relations', () => {
     'rejects a booking whose %s belongs to another organization',
     async (field) => {
       const foreign = await seedOrganization(prisma, { slug: `foreign-${field}` });
-      const foreignId =
-        field === 'customerId'
-          ? foreign.customer.id
-          : field === 'employeeId'
-            ? foreign.employee1.id
-            : foreign.service30.id;
+      const foreignId = {
+        customerId: foreign.customer.id,
+        employeeId: foreign.employee1.id,
+        serviceId: foreign.service30.id,
+      }[field];
 
       await expect(
         prisma.booking.create({ data: makeBooking(ctx, { [field]: foreignId }) }),

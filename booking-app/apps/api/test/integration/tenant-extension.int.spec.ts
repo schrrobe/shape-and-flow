@@ -42,14 +42,13 @@ describe('guarded reads', () => {
   it.each(['count', 'aggregate', 'groupBy'] as const)(
     'throws when %s omits organizationId',
     async (operation) => {
-      const call =
-        operation === 'groupBy'
-          ? guarded.booking.groupBy({ by: ['status'] })
-          : operation === 'aggregate'
-            ? guarded.booking.aggregate({ _count: true })
-            : guarded.booking.count();
+      const call = (): Promise<unknown> => {
+        if (operation === 'groupBy') return guarded.booking.groupBy({ by: ['status'] });
+        if (operation === 'aggregate') return guarded.booking.aggregate({ _count: true });
+        return guarded.booking.count();
+      };
 
-      await expect(call).rejects.toThrow(/requires organizationId/);
+      await expect(call()).rejects.toThrow(/requires organizationId/);
     },
   );
 

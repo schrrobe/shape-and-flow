@@ -53,5 +53,3 @@ export const baseVitestConfig = {
     },
   },
 };
-
-export default baseVitestConfig;

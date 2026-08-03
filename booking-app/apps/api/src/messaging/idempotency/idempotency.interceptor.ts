@@ -19,7 +19,7 @@ import type { Observable } from 'rxjs';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** Set on a replayed response, so a client or an operator can see it was not re-run. */
-export const REPLAY_HEADER = 'idempotent-replay';
+const REPLAY_HEADER = 'idempotent-replay';
 
 function readKey(request: Request): string {
   const raw = request.headers['idempotency-key'];

@@ -111,6 +111,11 @@ function onKeydown(event: KeyboardEvent): void {
 </script>
 
 <template>
+  <!-- The rule asks for an interactive role before an interactive handler.
+       `group` is the honest role for a day of appointments, and the reachability
+       the rule is protecting is already there: tabindex puts the grid in the tab
+       order and the label says what the arrow keys do. -->
+  <!-- eslint-disable-next-line vuejs-accessibility/no-static-element-interactions -->
   <div
     data-test="grid"
     tabindex="0"

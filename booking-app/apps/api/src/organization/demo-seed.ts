@@ -1,7 +1,7 @@
 import { hash } from '@node-rs/argon2';
 
 import { ARGON2_OPTIONS } from '../auth/password.options.js';
-import { Locale, OfficeUserRole, Prisma, PrismaClient, Weekday } from '../prisma/client.js';
+import { Locale, OfficeUserRole, Weekday } from '../prisma/client.js';
 
 import type { PrismaClient } from '../prisma/client.js';
 
@@ -32,11 +32,11 @@ import type { PrismaClient } from '../prisma/client.js';
  * It is also a small honesty improvement for development, where a dropped volume used
  * to invalidate every id anybody had written down.
  */
-export const DEMO_ORGANIZATION_ID = 'cm000000000000000demoorg';
+const DEMO_ORGANIZATION_ID = 'cm000000000000000demoorg';
 
-export const DEMO_SLUG = 'shape-and-flow';
-export const DEMO_OWNER_EMAIL = 'owner@shape-and-flow.example';
-export const DEMO_STAFF_EMAIL = 'mara@shape-and-flow.example';
+const DEMO_SLUG = 'shape-and-flow';
+const DEMO_OWNER_EMAIL = 'owner@shape-and-flow.example';
+const DEMO_STAFF_EMAIL = 'mara@shape-and-flow.example';
 
 const WEEKDAYS = [
   Weekday.MONDAY,
@@ -330,5 +330,4 @@ async function ensureUser(
   });
 
   return true;
-}
 }

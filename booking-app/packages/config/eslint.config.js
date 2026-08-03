@@ -1,7 +1,10 @@
 import js from '@eslint/js';
 import eslintConfigPrettier from 'eslint-config-prettier';
+import { createTypeScriptImportResolver } from 'eslint-import-resolver-typescript';
 import importX from 'eslint-plugin-import-x';
+import sonarjs from 'eslint-plugin-sonarjs';
 import pluginVue from 'eslint-plugin-vue';
+import pluginVueA11y from 'eslint-plugin-vuejs-accessibility';
 import globals from 'globals';
 import tseslint from 'typescript-eslint';
 import vueParser from 'vue-eslint-parser';
@@ -17,6 +20,10 @@ export const DEFAULT_IGNORES = [
   '**/test-results/**',
   '**/*.d.ts',
 ];
+
+/** Extensions import-x may append when following an import to a file. */
+const TS_EXTENSIONS = ['.ts', '.tsx', '.cts', '.mts', '.js', '.jsx', '.cjs', '.mjs'];
+const TS_EXTENSIONS_WITH_VUE = [...TS_EXTENSIONS, '.vue'];
 
 /**
  * Files that legitimately read `process.env`: the one validated config module,
@@ -64,6 +71,29 @@ export function createEslintConfig(options = {}) {
 
     ...(vue ? pluginVue.configs['flat/recommended'] : []),
 
+    ...(vue ? pluginVueA11y.configs['flat/recommended'] : []),
+
+    ...(vue
+      ? [
+          {
+            files: ['**/*.vue'],
+            rules: {
+              // `some` rather than the default `every`. The default demands that
+              // a label both wrap its control and carry a `for`, which is
+              // stricter than the accessibility it stands for: a `for` pointing
+              // at the control's id is a complete association on its own, and so
+              // is wrapping a checkbox in its own label. Left at the default,
+              // the rule reports correct markup in the field components and in
+              // the exports form, and a rule that cries wolf gets switched off.
+              'vuejs-accessibility/label-has-for': [
+                'error',
+                { required: { some: ['nesting', 'id'] } },
+              ],
+            },
+          },
+        ]
+      : []),
+
     ...(vue
       ? [
           {
@@ -94,7 +124,35 @@ export function createEslintConfig(options = {}) {
           ...(vue ? { parser: tseslint.parser, extraFileExtensions: ['.vue'] } : {}),
         },
       },
-      plugins: { 'import-x': importX },
+      plugins: { 'import-x': importX, sonarjs },
+      settings: {
+        // no-cycle has to follow imports to real files to mean anything, and it
+        // fails silently in both directions if either half of that is missing.
+        //
+        // Resolution: this codebase writes ESM specifiers (`./interval.js`)
+        // that point at TypeScript sources, which the plain Node resolver
+        // cannot follow.
+        //
+        // Parsing: once a dependency is resolved it still has to be read, and
+        // import-x parses dependencies with espree unless told otherwise. A
+        // return type annotation is enough to make that throw, and an
+        // unparseable dependency contributes no edges to the graph.
+        //
+        // Get either wrong and no-cycle reports nothing, which is
+        // indistinguishable from a codebase that has no cycles.
+        'import-x/resolver-next': [
+          createTypeScriptImportResolver({
+            project: `${tsconfigRootDir}/tsconfig.json`,
+            alwaysTryTypes: true,
+            ...(vue ? { extensions: TS_EXTENSIONS_WITH_VUE } : {}),
+          }),
+        ],
+        'import-x/extensions': vue ? TS_EXTENSIONS_WITH_VUE : TS_EXTENSIONS,
+        'import-x/parsers': {
+          '@typescript-eslint/parser': ['.ts', '.tsx', '.cts', '.mts'],
+          ...(vue ? { 'vue-eslint-parser': ['.vue'] } : {}),
+        },
+      },
       rules: {
         // Promise correctness. A dropped promise in a booking or payment path
         // is a silently lost side effect, so both of these are errors.
@@ -112,9 +170,18 @@ export function createEslintConfig(options = {}) {
           { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' },
         ],
 
-        // TypeScript is the source of truth for module resolution, so the
-        // plugin is here only for deterministic import ordering.
+        // TypeScript already reports unresolved imports, and it does it with
+        // full knowledge of the project graph, so the plugin's own check would
+        // only add a second opinion on the same question.
         'import-x/no-unresolved': 'off',
+
+        // A cycle makes module initialisation order significant, which turns
+        // an unrelated import reshuffle into an undefined at load time. Ten
+        // levels is deep enough to catch the indirect ones that are hard to
+        // see by reading; external packages are skipped because their cycles
+        // are not ours to fix.
+        'import-x/no-cycle': ['error', { maxDepth: 10, ignoreExternal: true }],
+        'import-x/no-self-import': 'error',
         'import-x/order': [
           'error',
           {
@@ -123,6 +190,22 @@ export function createEslintConfig(options = {}) {
             alphabetize: { order: 'asc', caseInsensitive: true },
           },
         ],
+
+        // A subset, not the recommended set: most of the rest overlaps with
+        // what strictTypeChecked already reports, and a second opinion on the
+        // same line is noise rather than coverage.
+        //
+        // `sonarjs/cognitive-complexity` is deliberately absent. Six functions
+        // are over a threshold of 12 — the availability engine at 30, the web
+        // API client at 35, the demo seed at 18, an authorization integration
+        // test at 24, and two more at 15 and 14 — so it cannot be switched on
+        // as an error without either refactoring them first or picking a
+        // ceiling so high the rule never fires. Both of those are their own
+        // piece of work, and neither belongs in the commit that installs the
+        // plugin.
+        'sonarjs/no-identical-functions': 'error',
+        'sonarjs/no-duplicated-branches': 'error',
+        'sonarjs/no-nested-conditional': 'error',
 
         'no-restricted-syntax': [
           'error',
@@ -201,6 +284,32 @@ export function createEslintConfig(options = {}) {
         '**/src/seed.main.ts',
       ],
       rules: { 'no-restricted-syntax': 'off' },
+    },
+
+    // The one restriction that has to survive the exemption above. A committed
+    // `it.only` shrinks the suite to a single case and CI still reports green,
+    // so the failure mode is a silent loss of coverage rather than a red build.
+    // It is restated here instead of joining the main list because that list is
+    // switched off for exactly the files this needs to cover.
+    {
+      files: ['**/*.spec.{ts,tsx}', '**/*.int.spec.ts', '**/test/**', '**/e2e/**'],
+      rules: {
+        'no-restricted-syntax': [
+          'error',
+          {
+            // `it.only`, `test.only`, `describe.only`, `suite.only`, `bench.only`.
+            selector:
+              "MemberExpression[object.name=/^(it|test|describe|suite|bench)$/][property.name='only']",
+            message: 'Remove .only before committing: CI would run a green but nearly empty suite.',
+          },
+          {
+            // The chained forms: `it.concurrent.only`, `test.describe.only`.
+            selector:
+              "MemberExpression[object.object.name=/^(it|test|describe)$/][property.name='only']",
+            message: 'Remove .only before committing: CI would run a green but nearly empty suite.',
+          },
+        ],
+      },
     },
 
     // Re-assert the Vue parser for SFCs.

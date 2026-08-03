@@ -1,6 +1,12 @@
 import { formatDate, formatDateTime, formatMoneyCents, formatTime } from '../format.js';
 
-import type { AppointmentData, CancellationReasonCode, Locale, LocaleTemplates } from '../types.js';
+import type {
+  AppointmentData,
+  CancellationReasonCode,
+  Locale,
+  LocaleTemplates,
+  TemplateData,
+} from '../types.js';
 
 const LOCALE: Locale = 'en';
 
@@ -26,6 +32,22 @@ const REASONS: Record<CancellationReasonCode, string> = {
   SEE_MESSAGE: 'see the message below',
   PAYMENT_FAILED: 'the payment could not be completed',
 };
+
+/**
+ * What the customer is told about their money after a cancellation decision.
+ *
+ * Three outcomes, not a complicated rule, but written inline it was a ternary
+ * inside a ternary in the middle of a list of sentences.
+ */
+function refundOutcome(data: TemplateData['CANCELLATION_REQUEST_DECIDED']): string {
+  if (!data.approved) return `We look forward to seeing you.`;
+
+  if (data.retainedCents > 0) {
+    return `We are refunding ${money(data.refundedCents, data)}; a late-cancellation fee of ${money(data.retainedCents, data)} has been retained.`;
+  }
+
+  return `We are refunding the full amount of ${money(data.refundedCents, data)}.`;
+}
 
 /**
  * The English templates.
@@ -130,11 +152,7 @@ export const enTemplates: LocaleTemplates = {
       data.approved
         ? `Your cancellation for ${when(data)} is confirmed.`
         : `We are not able to accept your cancellation for ${when(data)}. Your appointment stands.`,
-      data.approved
-        ? data.retainedCents > 0
-          ? `We are refunding ${money(data.refundedCents, data)}; a late-cancellation fee of ${money(data.retainedCents, data)} has been retained.`
-          : `We are refunding the full amount of ${money(data.refundedCents, data)}.`
-        : `We look forward to seeing you.`,
+      refundOutcome(data),
       data.note === null ? `Any questions: ${data.businessPhone}` : `Note: ${data.note}`,
     ],
   }),

@@ -20,7 +20,7 @@ import type { Clock } from '../domain/time/clock.js';
  * of reminders every night would put thousands of delayed jobs back into Redis to prove the
  * same thing.
  */
-export const REMINDER_HORIZON_MS = 48 * 3_600_000;
+const REMINDER_HORIZON_MS = 48 * 3_600_000;
 
 /** Bounded, so a sweep after a long Redis outage cannot flood the queue. */
 const BATCH = 500;

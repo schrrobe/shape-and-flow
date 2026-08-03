@@ -15,8 +15,6 @@ import type { ResolvedToken } from './management-token.service.js';
 import type { CanActivate, ExecutionContext } from '@nestjs/common';
 import type { Request } from 'express';
 
-export { MANAGEMENT_TOKEN_ROUTE };
-
 /**
  * Marks a route as reachable with a management token, and binds the guard that checks one.
  *
@@ -28,7 +26,7 @@ export const ManagementToken = (): MethodDecorator & ClassDecorator =>
   applyDecorators(SetMetadata(MANAGEMENT_TOKEN_ROUTE, true), UseGuards(ManagementTokenGuard));
 
 /** Where the guard leaves what it resolved. */
-export const MANAGED_BOOKING = 'managedBooking';
+const MANAGED_BOOKING = 'managedBooking';
 
 interface WithManagedBooking {
   [MANAGED_BOOKING]?: ResolvedToken;

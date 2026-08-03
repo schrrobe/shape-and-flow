@@ -17,7 +17,7 @@ import type { Response } from 'express';
  * Long enough to survive a slow query queue, short enough that a probe answers
  * before the next one arrives.
  */
-export const DATABASE_PING_TIMEOUT_MS = 2_000;
+const DATABASE_PING_TIMEOUT_MS = 2_000;
 
 /**
  * Liveness and readiness.

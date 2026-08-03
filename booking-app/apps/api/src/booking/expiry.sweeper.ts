@@ -11,7 +11,7 @@ import { ExpiryService } from './expiry.service.js';
 import type { Clock } from '../domain/time/clock.js';
 
 /** Bounded so one tick cannot try to expire the whole table. */
-export const EXPIRY_SWEEP_BATCH = 200;
+const EXPIRY_SWEEP_BATCH = 200;
 
 /**
  * How long an EXPIRING booking may sit before it is assumed stuck.

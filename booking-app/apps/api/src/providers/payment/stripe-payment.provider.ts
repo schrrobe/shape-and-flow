@@ -47,7 +47,7 @@ export const STRIPE_API_VERSION = Stripe.API_VERSION;
 export const STRIPE_MIN_SESSION_TTL_MINUTES = 30;
 
 /** Stripe rejects `expires_at` further out than this. Documented, not guessed. */
-export const STRIPE_MAX_SESSION_TTL_MINUTES = 24 * 60;
+const STRIPE_MAX_SESSION_TTL_MINUTES = 24 * 60;
 
 export interface StripePaymentProviderOptions {
   webhookSecret: string;
@@ -75,7 +75,7 @@ export function toPaymentStatus(value: string): PaymentStatusValue {
 }
 
 /** Narrow an open Stripe status union without letting an unknown state escape. */
-export function toSessionStatus(value: string | null): CheckoutSessionStatus {
+function toSessionStatus(value: string | null): CheckoutSessionStatus {
   if (value === 'complete') return 'complete';
   if (value === 'expired') return 'expired';
   return 'open';
@@ -191,11 +191,12 @@ export class StripePaymentProvider implements PaymentProvider {
 
     const paymentIntent =
       typeof session.payment_intent === 'string' ? null : session.payment_intent;
-    const latestCharge = paymentIntent
-      ? typeof paymentIntent.latest_charge === 'string'
+    // Falsy rather than `=== null`: an unexpanded session has no
+    // `payment_intent` key at all, so this is undefined as often as it is null.
+    const latestCharge =
+      !paymentIntent || typeof paymentIntent.latest_charge === 'string'
         ? null
-        : paymentIntent.latest_charge
-      : null;
+        : paymentIntent.latest_charge;
 
     return {
       sessionId: session.id,

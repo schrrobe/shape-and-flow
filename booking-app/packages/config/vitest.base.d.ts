@@ -44,6 +44,3 @@ export declare const COVERAGE_EXCLUDE: string[];
 
 /** Vitest defaults shared by every package. Compose with `mergeConfig`. */
 export declare const baseVitestConfig: BaseVitestConfig;
-
-declare const _default: BaseVitestConfig;
-export default _default;

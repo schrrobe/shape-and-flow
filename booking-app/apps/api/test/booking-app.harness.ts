@@ -1,4 +1,4 @@
-import { Global, Module } from '@nestjs/common';
+import { Global, Module, Scope } from '@nestjs/common';
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
 
@@ -23,6 +23,7 @@ import { PAYMENT_PROVIDER } from '../src/providers/payment/payment-provider.js';
 import { FakeSmsProvider } from '../src/providers/sms/fake-sms.provider.js';
 import { SMS_PROVIDER } from '../src/providers/sms/sms-provider.js';
 import { PublicModule } from '../src/public/public.module.js';
+import { webhookBodyParser } from '../src/webhooks/raw-body.js';
 
 import { prisma } from './database.harness.js';
 import { countingPrisma, loadOrganization } from './public-app.harness.js';
@@ -165,6 +166,7 @@ const testConfig = {
     // which is the signal to pass `redis` from redis.harness.ts.
     {
       provide: REDIS,
+      scope: Scope.TRANSIENT,
       useFactory: () => {
         if (currentRedis === undefined) {
           throw new Error('Pass `redis` from redis.harness.ts when a suite injects REDIS.');
@@ -300,6 +302,10 @@ export async function createBookingTestApp(options: {
   const app = moduleRef.createNestApplication({ rawBody: true });
   for (const handler of options.middleware ?? []) app.use(handler);
   if (options.globalPrefix !== undefined) app.setGlobalPrefix(options.globalPrefix);
+  app.use(
+    `${options.globalPrefix === undefined ? '' : `/${options.globalPrefix}`}/webhooks`,
+    webhookBodyParser,
+  );
   await app.init();
 
   return {

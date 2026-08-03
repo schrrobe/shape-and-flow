@@ -12,7 +12,7 @@ import type { Prisma } from '../prisma/client.js';
 import type { AppointmentData, CommonData } from '@shape-and-flow/booking-notification-templates';
 
 /** Everything a notification about a booking needs, loaded once. */
-export const BOOKING_FOR_NOTIFICATION = {
+const BOOKING_FOR_NOTIFICATION = {
   id: true,
   organizationId: true,
   reference: true,

@@ -389,7 +389,7 @@ export interface PendingWork {
 }
 
 /** The path component of a Postgres URL, without its query string. */
-export function databaseNameOf(url: string): string | null {
+function databaseNameOf(url: string): string | null {
   try {
     const name = new URL(url).pathname.replace(/^\//, '');
     return name === '' ? null : name;

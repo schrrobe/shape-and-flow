@@ -26,7 +26,7 @@ const TOKEN_BYTES = 32;
  * inbox after lunch, and short enough that a link sitting in an old mailbox is not a
  * standing key to the account.
  */
-export const RESET_TOKEN_TTL_MINUTES = 60;
+const RESET_TOKEN_TTL_MINUTES = 60;
 
 /** The stored form. Exported so a test can assert the plaintext is nowhere in the row. */
 export function hashResetToken(token: string): string {

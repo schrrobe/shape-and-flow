@@ -18,7 +18,7 @@ export interface CustomerInput {
  * some providers treat as significant — collapsing those would merge two people who
  * believe they have separate accounts, and unmerging them afterwards is not possible.
  */
-export function normaliseEmail(email: string): string {
+function normaliseEmail(email: string): string {
   return email.trim().toLowerCase();
 }
 

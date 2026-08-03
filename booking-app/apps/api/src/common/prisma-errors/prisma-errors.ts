@@ -19,7 +19,7 @@ import { Prisma } from '../../prisma/client.js';
  */
 
 /** SQLSTATEs this module reasons about. */
-export const SQLSTATE = {
+const SQLSTATE = {
   UNIQUE_VIOLATION: '23505',
   FOREIGN_KEY_VIOLATION: '23503',
   CHECK_VIOLATION: '23514',

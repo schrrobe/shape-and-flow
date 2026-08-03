@@ -37,7 +37,7 @@ import type { Redis } from 'ioredis';
  * Long enough for a Stripe call or an email send to finish, short enough that a supervisor
  * does not decide the container is wedged and SIGKILL it mid-write.
  */
-export const WORKER_DRAIN_TIMEOUT_MS = 30_000;
+const WORKER_DRAIN_TIMEOUT_MS = 30_000;
 
 /** A handler for one job name, taking that job's validated payload. */
 type Handler<Name extends JobName> = (payload: JobPayload<Name>) => Promise<void>;

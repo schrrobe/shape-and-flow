@@ -15,10 +15,10 @@
  */
 
 /** Excel's list separator on a German machine. */
-export const CSV_DELIMITER = ';';
+const CSV_DELIMITER = ';';
 
 /** RFC 4180's line terminator. */
-export const CSV_NEWLINE = '\r\n';
+const CSV_NEWLINE = '\r\n';
 
 /**
  * The byte-order mark, as a string.

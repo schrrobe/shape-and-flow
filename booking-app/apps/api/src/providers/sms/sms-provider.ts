@@ -10,11 +10,8 @@ export const SMS_PROVIDER = 'SMS_PROVIDER';
  * so failing locally is cheaper than discovering it on an invoice. German copy is
  * the binding constraint — it is consistently longer than the English.
  */
-export const SMS_GSM7_MAX_SEPTETS = 459;
-export const SMS_UCS2_MAX_CODE_UNITS = 201;
-
-/** Legacy GSM-7 ceiling; encoding-aware validation uses {@link smsBodyMetrics}. */
-export const SMS_MAX_LENGTH = SMS_GSM7_MAX_SEPTETS;
+const SMS_GSM7_MAX_SEPTETS = 459;
+const SMS_UCS2_MAX_CODE_UNITS = 201;
 
 const GSM7_BASIC_CHARACTERS = new Set(
   Array.from(
@@ -61,12 +58,3 @@ export interface SmsSendResult {
 export interface SmsProvider {
   send(message: SmsMessage): Promise<SmsSendResult>;
 }
-
-/**
- * Whether a provider failure is worth retrying.
- *
- * The distinction matters: retrying an invalid phone number wastes attempts and
- * delays the notification's final FAILED state, while giving up on a 503 loses a
- * reminder that would have gone through a minute later.
- */
-export type DeliveryFailureClass = 'RETRYABLE' | 'PERMANENT';

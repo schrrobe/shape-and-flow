@@ -13,6 +13,7 @@ import { PrismaService } from '../prisma/prisma.service.js';
 import { CSV_BOM, csvAmount, csvInstant, csvLine } from './csv.js';
 import { receivedFrom } from './received.js';
 
+import type { Prisma } from '../prisma/client.js';
 import type { ExportQuery } from '@shape-and-flow/booking-contracts';
 
 /**
@@ -59,6 +60,7 @@ interface RefundLedgerRow {
   currency: string;
   status: string;
   reason: string;
+  requestedAt: Date;
   settledAt: Date | null;
   booking: { reference: string; serviceNameSnapshot: string };
 }
@@ -193,7 +195,8 @@ export class ExportsService {
     const entries = mergeLedgerEntries([
       this.cardEntries(organizationId, from, to, zone),
       this.manualEntries(organizationId, from, to, zone),
-      this.refundEntries(organizationId, from, to, zone),
+      this.refundEntries(organizationId, from, to, zone, 'SETTLED'),
+      this.refundEntries(organizationId, from, to, zone, 'PENDING'),
     ]);
 
     return Readable.from(
@@ -328,13 +331,16 @@ export class ExportsService {
     from: Date,
     to: Date,
     zone: string,
+    state: 'PENDING' | 'SETTLED',
   ): AsyncGenerator<LedgerEntry> {
     let cursor: LedgerCursor | null = null;
 
     for (;;) {
-      const rows: RefundLedgerRow[] = await this.prisma.refund.findMany({
-        where: {
-          organizationId,
+      let dateWhere: Prisma.RefundWhereInput;
+      let orderBy: Prisma.RefundOrderByWithRelationInput[];
+
+      if (state === 'SETTLED') {
+        dateWhere = {
           status: 'SUCCEEDED',
           settledAt: { gte: from, lt: to },
           ...(cursor === null
@@ -345,6 +351,28 @@ export class ExportsService {
                   { settledAt: cursor.at, id: { gt: cursor.id } },
                 ],
               }),
+        };
+        orderBy = [{ settledAt: 'asc' }, { id: 'asc' }];
+      } else {
+        dateWhere = {
+          status: 'PENDING',
+          requestedAt: { gte: from, lt: to },
+          ...(cursor === null
+            ? {}
+            : {
+                OR: [
+                  { requestedAt: { gt: cursor.at } },
+                  { requestedAt: cursor.at, id: { gt: cursor.id } },
+                ],
+              }),
+        };
+        orderBy = [{ requestedAt: 'asc' }, { id: 'asc' }];
+      }
+
+      const rows: RefundLedgerRow[] = await this.prisma.refund.findMany({
+        where: {
+          organizationId,
+          ...dateWhere,
         },
         select: {
           id: true,
@@ -352,25 +380,27 @@ export class ExportsService {
           currency: true,
           status: true,
           reason: true,
+          requestedAt: true,
           settledAt: true,
           booking: { select: { reference: true, serviceNameSnapshot: true } },
         },
-        orderBy: [{ settledAt: 'asc' }, { id: 'asc' }],
+        orderBy,
         take: PAGE_SIZE,
       });
 
       for (const refund of rows) {
-        if (refund.settledAt === null) continue;
+        const occurredAt =
+          state === 'SETTLED' ? (refund.settledAt ?? refund.requestedAt) : refund.requestedAt;
         yield {
           kind: 'REFUND',
           id: refund.id,
-          at: refund.settledAt,
+          at: occurredAt,
           cells: [
             'REFUND',
             refund.id,
             refund.booking.reference,
             refund.booking.serviceNameSnapshot,
-            csvInstant(refund.settledAt, zone),
+            csvInstant(occurredAt, zone),
             csvAmount(-refund.amountCents),
             refund.currency,
             refund.status,
@@ -382,8 +412,11 @@ export class ExportsService {
 
       if (rows.length < PAGE_SIZE) return;
       const last = rows.at(-1);
-      if (last?.settledAt === null || last === undefined) return;
-      cursor = { at: last.settledAt, id: last.id };
+      if (last === undefined) return;
+      cursor = {
+        at: state === 'SETTLED' ? (last.settledAt ?? last.requestedAt) : last.requestedAt,
+        id: last.id,
+      };
     }
   }
 
