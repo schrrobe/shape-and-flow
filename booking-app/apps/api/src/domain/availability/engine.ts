@@ -87,6 +87,12 @@ function segmentsFor(employee: EmployeeSnapshot, date: LocalDate, zone: string):
 
 /** Candidate start minutes on the grid, anchored at the segment start. */
 function gridMinutes(segment: Segment, intervalMinutes: number): MinuteOfDay[] {
+  if (!Number.isInteger(intervalMinutes) || intervalMinutes <= 0) {
+    throw new Error(
+      `Scheduling interval must be a positive integer, received ${String(intervalMinutes)}.`,
+    );
+  }
+
   const minutes: MinuteOfDay[] = [];
   for (let minute = segment.startMinute; minute <= segment.endMinute; minute += intervalMinutes) {
     minutes.push(minute);
@@ -146,11 +152,35 @@ function employeeSlotsFor(
     const segmentInterval: Interval = { start: segmentStart.instant, end: segmentEnd.instant };
 
     const breakIntervals: Interval[] = [];
+    let hasUnplaceableBreak = false;
     for (const rest of segment.breaks) {
       const from = wallClockToInstant(date, rest.startMinute, zone);
       const to = wallClockToInstant(date, rest.endMinute, zone);
-      if (from.ok && to.ok) breakIntervals.push({ start: from.instant, end: to.instant });
+      if (from.ok && to.ok) {
+        breakIntervals.push({ start: from.instant, end: to.instant });
+        continue;
+      }
+
+      hasUnplaceableBreak = true;
+      if (!from.ok) {
+        skipped.push({
+          employeeId: employee.employeeId,
+          date,
+          minute: rest.startMinute,
+          reason: from.reason,
+        });
+      }
+      if (!to.ok) {
+        skipped.push({
+          employeeId: employee.employeeId,
+          date,
+          minute: rest.endMinute,
+          reason: to.reason,
+        });
+      }
     }
+
+    if (hasUnplaceableBreak) continue;
 
     // Break-free stretches of the shift. A booking's block must fit inside one.
     const pieces = subtract(segmentInterval, breakIntervals);

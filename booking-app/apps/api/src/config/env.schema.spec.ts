@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { envSchema, parseConfig } from './env.schema.js';
+import { assertTestDatabaseUrl, envSchema, failFast, parseConfig } from './env.schema.js';
 
 /** A minimal environment that must validate. Anything omitted has a default. */
 const valid: Record<string, string> = {
@@ -35,6 +35,7 @@ describe('envSchema', () => {
   it('coerces numeric strings to numbers', () => {
     const parsed = envSchema.parse(valid);
     expect(parsed.PORT).toBe(3000);
+    expect(parsed.DATABASE_POOL_SIZE).toBe(10);
     expect(parsed.SESSION_IDLE_TTL_MINUTES).toBe(720);
     expect(typeof parsed.PORT).toBe('number');
   });
@@ -67,6 +68,56 @@ describe('envSchema', () => {
   it('rejects a malformed origin and a malformed sender address', () => {
     expect(parseConfig({ ...valid, PUBLIC_WEB_ORIGIN: 'not-a-url' }).success).toBe(false);
     expect(parseConfig({ ...valid, EMAIL_FROM_ADDRESS: 'nope' }).success).toBe(false);
+  });
+
+  it('accepts only bare HTTP(S) origins and normalises a trailing slash', () => {
+    expect(
+      envSchema.parse({ ...valid, PUBLIC_WEB_ORIGIN: 'https://example.com/' }).PUBLIC_WEB_ORIGIN,
+    ).toBe('https://example.com');
+
+    for (const origin of [
+      'javascript:alert(1)',
+      'file:///etc/passwd',
+      'https://example.com/booking',
+      'https://example.com?next=booking',
+      'https://user:password@example.com',
+    ]) {
+      expect(parseConfig({ ...valid, PUBLIC_WEB_ORIGIN: origin }).success, origin).toBe(false);
+    }
+  });
+
+  it('requires the absolute session lifetime to cover the idle lifetime', () => {
+    const result = parseConfig({
+      ...valid,
+      SESSION_IDLE_TTL_MINUTES: '120',
+      SESSION_ABSOLUTE_TTL_MINUTES: '60',
+    });
+
+    expect(result.success).toBe(false);
+    expect(paths(result)).toContain('SESSION_ABSOLUTE_TTL_MINUTES');
+  });
+
+  it('bounds the database pool size', () => {
+    expect(parseConfig({ ...valid, DATABASE_POOL_SIZE: '0' }).success).toBe(false);
+    expect(parseConfig({ ...valid, DATABASE_POOL_SIZE: '101' }).success).toBe(false);
+    expect(envSchema.parse({ ...valid, DATABASE_POOL_SIZE: '4' }).DATABASE_POOL_SIZE).toBe(4);
+  });
+
+  it('accepts only the exact disposable integration database name', () => {
+    expect(assertTestDatabaseUrl).toBeTypeOf('function');
+    expect(
+      assertTestDatabaseUrl(
+        'postgresql://booking:secret@localhost:5434/booking_test?schema=public',
+      ),
+    ).toContain('/booking_test?');
+    expect(() =>
+      assertTestDatabaseUrl(
+        'postgresql://booking:secret@localhost:5434/production_booking_test?schema=public',
+      ),
+    ).toThrow(/production_booking_test/);
+    expect(() =>
+      assertTestDatabaseUrl('postgresql://booking:secret@localhost:5434/booking?schema=public'),
+    ).toThrow(/booking/);
   });
 
   it('requires RESEND_API_KEY when EMAIL_PROVIDER is resend', () => {
@@ -114,9 +165,25 @@ describe('envSchema', () => {
 
   it('requires Stripe credentials when PAYMENT_PROVIDER is stripe', () => {
     const result = parseConfig({ ...valid, PAYMENT_PROVIDER: 'stripe' });
+    expect(result.success).toBe(false);
     expect(paths(result)).toEqual(
       expect.arrayContaining(['STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET']),
     );
+  });
+
+  it('writes fatal startup diagnostics synchronously before exiting', () => {
+    const calls: string[] = [];
+
+    expect(() =>
+      failFast('broken\n', {
+        write: (message) => calls.push(`write:${message}`),
+        exit: (code) => {
+          calls.push(`exit:${String(code)}`);
+          throw new Error('exited');
+        },
+      }),
+    ).toThrow('exited');
+    expect(calls).toEqual(['write:broken\n', 'exit:1']);
   });
 
   it('refuses fake providers in production', () => {

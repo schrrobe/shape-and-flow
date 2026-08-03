@@ -67,14 +67,16 @@ const SCOPED = new Set<string>(ORG_SCOPED_MODELS);
 /**
  * Operations that must carry organizationId in `where`.
  *
- * findUnique, findUniqueOrThrow and upsert are absent on purpose: they address a
- * row by a unique key, which cannot express a tenant filter. Their callers must
- * assert ownership on the result instead — see `assertOwned`.
+ * Unique reads use Prisma's extended unique filters: a unique selector (usually
+ * `id`) plus `organizationId`. Upsert is handled separately below and must use
+ * a tenant-bearing compound unique key.
  */
 const GUARDED_OPERATIONS = new Set([
   'findMany',
   'findFirst',
   'findFirstOrThrow',
+  'findUnique',
+  'findUniqueOrThrow',
   'update',
   'updateMany',
   'updateManyAndReturn',
@@ -88,19 +90,74 @@ const GUARDED_OPERATIONS = new Set([
 /** Operations that get organizationId injected when it is absent. */
 const INJECTED_OPERATIONS = new Set(['create', 'createMany', 'createManyAndReturn']);
 
+const NESTED_WRITE_OPERATIONS = new Set([
+  'create',
+  'createMany',
+  'update',
+  'updateMany',
+  'upsert',
+  'connectOrCreate',
+  'connect',
+  'disconnect',
+  'set',
+  'delete',
+  'deleteMany',
+]);
+
+// These are scalar JSON columns, not Prisma relation fields. Their user data may
+// legitimately contain keys such as `create` or `update`.
+const JSON_FIELDS = new Set(['metadata', 'payload', 'responseSnapshot', 'before', 'after']);
+
+type ScopeState = 'missing' | 'matching' | 'mismatching';
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === 'object' && !Array.isArray(value);
+
+function organizationIdState(value: unknown, organizationId: string): ScopeState {
+  if (typeof value === 'string') return value === organizationId ? 'matching' : 'mismatching';
+
+  if (!isRecord(value)) return 'mismatching';
+  const keys = Object.keys(value);
+  return keys.length === 1 && keys[0] === 'equals' && value.equals === organizationId
+    ? 'matching'
+    : 'mismatching';
+}
+
+function combineScopeStates(states: ScopeState[]): ScopeState {
+  if (states.includes('matching')) return 'matching';
+  if (states.includes('mismatching')) return 'mismatching';
+  return 'missing';
+}
+
 /**
- * True when a `where` clause constrains organizationId, including inside a
- * top-level AND — which is how a composed filter usually looks.
+ * Classifies a normal filter. Only a direct equality or an equality inside a
+ * top-level AND counts: accepting OR/NOT would make the tenant predicate
+ * optional and reopen cross-tenant reads.
  */
-function hasOrganizationScope(where: unknown): boolean {
-  if (where === null || typeof where !== 'object') return false;
+function filterScopeState(where: unknown, organizationId: string): ScopeState {
+  if (!isRecord(where)) return 'missing';
+  if ('organizationId' in where) {
+    return organizationIdState(where.organizationId, organizationId);
+  }
 
-  const clause = where as Record<string, unknown>;
-  if (clause.organizationId !== undefined) return true;
+  const and = where.AND;
+  if (Array.isArray(and)) {
+    return combineScopeStates(and.map((clause) => filterScopeState(clause, organizationId)));
+  }
+  return filterScopeState(and, organizationId);
+}
 
-  const and = clause.AND;
-  if (Array.isArray(and)) return and.some(hasOrganizationScope);
-  return hasOrganizationScope(and);
+/** Compound unique inputs wrap their fields in a generated key such as
+ * `organizationId_name`, so upsert/update must inspect those wrappers too. */
+function uniqueScopeState(where: unknown, organizationId: string): ScopeState {
+  const direct = filterScopeState(where, organizationId);
+  if (direct !== 'missing' || !isRecord(where)) return direct;
+
+  return combineScopeStates(
+    Object.entries(where)
+      .filter(([key]) => key !== 'OR' && key !== 'NOT')
+      .map(([, value]) => uniqueScopeState(value, organizationId)),
+  );
 }
 
 function throwUnscoped(model: string, operation: string): never {
@@ -111,6 +168,38 @@ function throwUnscoped(model: string, operation: string): never {
       'Scope the query, or use the raw PrismaService if this is deliberately global.',
     details: { model, operation },
   });
+}
+
+function throwTenantMismatch(model: string, operation: string): never {
+  throw new AppError('TENANT_MISMATCH', {
+    status: 500,
+    message: `${model}.${operation} must use the current organizationId.`,
+    details: { model, operation },
+  });
+}
+
+function rejectNestedWrites(row: Record<string, unknown>, model: string, operation: string): void {
+  for (const [field, value] of Object.entries(row)) {
+    if (field === 'organization' || JSON_FIELDS.has(field) || !isRecord(value)) continue;
+    if (Object.keys(value).some((key) => NESTED_WRITE_OPERATIONS.has(key))) {
+      throw new AppError('UNSCOPED_TENANT_QUERY', {
+        status: 500,
+        message:
+          `${model}.${operation} does not allow nested writes through the tenant client. ` +
+          'Write the related model explicitly so its tenant guard runs.',
+        details: { model, operation, field },
+      });
+    }
+  }
+}
+
+function requireScope(
+  model: string,
+  operation: string,
+  state: ScopeState,
+): asserts state is 'matching' {
+  if (state === 'missing') throwUnscoped(model, operation);
+  if (state === 'mismatching') throwTenantMismatch(model, operation);
 }
 
 /**
@@ -128,27 +217,62 @@ export function assertOwned<T extends { organizationId: string }>(
   return row;
 }
 
-/** Adds organizationId to create payloads that omit it, leaving explicit values alone. */
-function injectOrganizationId(args: unknown, organizationId: string): unknown {
-  if (args === null || typeof args !== 'object') return args;
+function validateOrganizationRelation(
+  row: Record<string, unknown>,
+  organizationId: string,
+  model: string,
+  operation: string,
+): boolean {
+  if (!('organization' in row)) return false;
+  const relation = row.organization;
+  const connectedId = isRecord(relation) && isRecord(relation.connect) ? relation.connect.id : null;
+  if (connectedId !== organizationId) throwTenantMismatch(model, operation);
+  return true;
+}
 
-  const typed = args as { data?: unknown };
-  const { data } = typed;
-
-  if (Array.isArray(data)) {
-    const rows: unknown[] = data.map((row: unknown) =>
-      row !== null && typeof row === 'object' && !('organizationId' in row)
-        ? { ...row, organizationId }
-        : row,
-    );
-    return { ...typed, data: rows };
+function tenantCreateRow(
+  row: unknown,
+  organizationId: string,
+  model: string,
+  operation: string,
+): unknown {
+  if (!isRecord(row)) return row;
+  rejectNestedWrites(row, model, operation);
+  if ('organizationId' in row) {
+    if (row.organizationId !== organizationId) throwTenantMismatch(model, operation);
+    return row;
   }
+  if (validateOrganizationRelation(row, organizationId, model, operation)) return row;
+  return { ...row, organizationId };
+}
 
-  if (data !== null && typeof data === 'object' && !('organizationId' in data)) {
-    return { ...typed, data: { ...data, organizationId } };
+function tenantCreateArgs(
+  args: unknown,
+  field: 'data' | 'create',
+  organizationId: string,
+  model: string,
+  operation: string,
+): unknown {
+  if (!isRecord(args)) return args;
+  const payload = args[field];
+  const scoped = Array.isArray(payload)
+    ? payload.map((row) => tenantCreateRow(row, organizationId, model, operation))
+    : tenantCreateRow(payload, organizationId, model, operation);
+  return { ...args, [field]: scoped };
+}
+
+function validateUpdatePayload(
+  args: unknown,
+  organizationId: string,
+  model: string,
+  operation: string,
+): void {
+  if (!isRecord(args) || !isRecord(args.data)) return;
+  rejectNestedWrites(args.data, model, operation);
+  if ('organization' in args.data) throwTenantMismatch(model, operation);
+  if ('organizationId' in args.data && args.data.organizationId !== organizationId) {
+    throwTenantMismatch(model, operation);
   }
-
-  return args;
 }
 
 function tenantGuardExtension(getOrganizationId: () => string) {
@@ -159,13 +283,41 @@ function tenantGuardExtension(getOrganizationId: () => string) {
         $allOperations({ model, operation, args, query }) {
           if (!SCOPED.has(model)) return query(args);
 
+          const organizationId = getOrganizationId();
+
+          if (operation === 'upsert') {
+            const { where } = args as { where?: unknown };
+            requireScope(model, operation, uniqueScopeState(where, organizationId));
+            validateUpdatePayload(
+              { data: (args as { update?: unknown }).update },
+              organizationId,
+              model,
+              operation,
+            );
+            return query(
+              tenantCreateArgs(args, 'create', organizationId, model, operation) as typeof args,
+            );
+          }
+
           if (INJECTED_OPERATIONS.has(operation)) {
-            return query(injectOrganizationId(args, getOrganizationId()) as typeof args);
+            return query(
+              tenantCreateArgs(args, 'data', organizationId, model, operation) as typeof args,
+            );
           }
 
           if (GUARDED_OPERATIONS.has(operation)) {
             const { where } = args as { where?: unknown };
-            if (!hasOrganizationScope(where)) throwUnscoped(model, operation);
+            const scopeState =
+              operation === 'update' ||
+              operation === 'delete' ||
+              operation === 'findUnique' ||
+              operation === 'findUniqueOrThrow'
+                ? uniqueScopeState(where, organizationId)
+                : filterScopeState(where, organizationId);
+            requireScope(model, operation, scopeState);
+            if (operation.startsWith('update')) {
+              validateUpdatePayload(args, organizationId, model, operation);
+            }
           }
 
           return query(args);

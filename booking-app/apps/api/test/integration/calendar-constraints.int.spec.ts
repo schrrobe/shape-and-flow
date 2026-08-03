@@ -4,6 +4,7 @@ import { BLOCKING_BOOKING_STATUSES, isBlocking } from '../../src/booking/booking
 import {
   isCheckViolation,
   isExclusionViolation,
+  isForeignKeyViolation,
   isUniqueViolation,
 } from '../../src/common/prisma-errors/prisma-errors.js';
 import { BookingStatus } from '../../src/prisma/client.js';
@@ -181,6 +182,25 @@ describe('bookings_no_overlap', () => {
   });
 });
 
+describe('tenant-consistent booking relations', () => {
+  it.each(['customerId', 'employeeId', 'serviceId'] as const)(
+    'rejects a booking whose %s belongs to another organization',
+    async (field) => {
+      const foreign = await seedOrganization(prisma, { slug: `foreign-${field}` });
+      const foreignId =
+        field === 'customerId'
+          ? foreign.customer.id
+          : field === 'employeeId'
+            ? foreign.employee1.id
+            : foreign.service30.id;
+
+      await expect(
+        prisma.booking.create({ data: makeBooking(ctx, { [field]: foreignId }) }),
+      ).rejects.toSatisfy(isForeignKeyViolation);
+    },
+  );
+});
+
 describe('range integrity', () => {
   it('rejects a zero-length range instead of silently allowing duplicates', async () => {
     // tstzrange(x, x) is empty and overlaps nothing, so without the CHECK an
@@ -211,21 +231,10 @@ describe('range integrity', () => {
     ).rejects.toSatisfy((error: unknown) => isCheckViolation(error, 'bookings_block_range_check'));
   });
 
-  it('requires expiresAt exactly while the booking is unpaid', async () => {
+  it('requires expiresAt while the booking is unpaid', async () => {
     await expect(
       prisma.booking.create({
         data: makeBooking(ctx, { status: BookingStatus.PENDING_PAYMENT, expiresAt: null }),
-      }),
-    ).rejects.toSatisfy((error: unknown) =>
-      isCheckViolation(error, 'bookings_expires_at_matches_status'),
-    );
-
-    await expect(
-      prisma.booking.create({
-        data: makeBooking(ctx, {
-          status: BookingStatus.CONFIRMED,
-          expiresAt: at('2026-08-14T06:00:00.000Z'),
-        }),
       }),
     ).rejects.toSatisfy((error: unknown) =>
       isCheckViolation(error, 'bookings_expires_at_matches_status'),
@@ -307,7 +316,7 @@ describe('constraint inventory', () => {
 
     // And nothing extra: a status added to the predicate but not to the constant
     // would silently block slots the application believes are free.
-    const quoted = [...(definition ?? '').matchAll(/'([A-Z_]+)'::"BookingStatus"/g)].map(
+    const quoted = [...(definition ?? '').matchAll(/'([A-Z_]+)'(?:::"BookingStatus")?/g)].map(
       (match) => match[1] ?? '',
     );
     expect([...new Set(quoted)].sort()).toEqual([...BLOCKING_BOOKING_STATUSES].sort());
@@ -356,4 +365,57 @@ describe('one open request per booking', () => {
 
     await expect(prisma.cancellationRequest.create({ data })).resolves.toBeDefined();
   });
+
+  it('rejects a second pending reschedule request and allows one after a decision', async () => {
+    const booking = await prisma.booking.create({ data: makeBooking(ctx) });
+    const data = {
+      organizationId: ctx.organization.id,
+      bookingId: booking.id,
+      requestedStartsAt: at('2026-08-15T07:00:00.000Z'),
+      requestedEmployeeId: ctx.employee2.id,
+    };
+
+    const first = await prisma.rescheduleRequest.create({ data });
+    await expect(prisma.rescheduleRequest.create({ data })).rejects.toSatisfy((error: unknown) =>
+      isUniqueViolation(error, 'reschedule_requests_one_open'),
+    );
+
+    await prisma.rescheduleRequest.update({
+      where: { id: first.id },
+      data: { decision: 'REJECTED', decidedAt: new Date() },
+    });
+    await expect(prisma.rescheduleRequest.create({ data })).resolves.toBeDefined();
+  });
+});
+
+describe('configuration value constraints', () => {
+  it('rejects a negative employee price override', async () => {
+    await expect(
+      prisma.employeeService.update({
+        where: {
+          employeeId_serviceId: {
+            employeeId: ctx.employee1.id,
+            serviceId: ctx.service30.id,
+          },
+        },
+        data: { priceOverrideCents: -1 },
+      }),
+    ).rejects.toSatisfy((error: unknown) =>
+      isCheckViolation(error, 'employee_services_price_override_check'),
+    );
+  });
+
+  it.each([BookingStatus.EXPIRED, BookingStatus.CONFIRMED])(
+    'allows a %s booking to retain its reservation deadline',
+    async (status) => {
+      await expect(
+        prisma.booking.create({
+          data: makeBooking(ctx, {
+            status,
+            expiresAt: at('2026-08-14T06:00:00.000Z'),
+          }),
+        }),
+      ).resolves.toBeDefined();
+    },
+  );
 });

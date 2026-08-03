@@ -2,9 +2,10 @@ import { createEslintConfig } from '@shape-and-flow/booking-config/eslint';
 
 export default [
   // Prisma's generator output is compiled but never hand-edited or reviewed.
-  { ignores: ['src/generated/**', 'dist/**'] },
-
-  ...createEslintConfig({ tsconfigRootDir: import.meta.dirname }),
+  ...createEslintConfig({
+    tsconfigRootDir: import.meta.dirname,
+    ignores: ['src/generated/**'],
+  }),
 
   {
     files: ['**/*.ts'],

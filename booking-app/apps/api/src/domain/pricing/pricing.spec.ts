@@ -56,6 +56,15 @@ describe('resolveEffectivePrice', () => {
   it('returns Money, so no caller can do cent arithmetic on it', () => {
     expect(resolveEffectivePrice(service, null)).toBeInstanceOf(Money);
   });
+
+  it('rejects a negative list price or employee override', () => {
+    expect(() => resolveEffectivePrice({ ...service, priceCents: -1 }, null)).toThrow(
+      /non-negative/i,
+    );
+    expect(() => resolveEffectivePrice(service, { priceOverrideCents: -1 })).toThrow(
+      /non-negative/i,
+    );
+  });
 });
 
 describe('computeSuggestedRetainedAmount — the window', () => {
@@ -135,6 +144,15 @@ describe('computeSuggestedRetainedAmount — the policies', () => {
     });
     expect(result.suggestedRetained.amountCents).toBe(1000);
     expect(result.suggestedRefund.amountCents).toBe(0);
+  });
+
+  it('treats a corrupt negative fixed-fee setting as zero', () => {
+    const result = compute(1000, 48, {
+      cancellationFeePolicy: 'FIXED_AMOUNT',
+      cancellationFeeAmountCents: -1,
+    });
+    expect(result.suggestedRetained.amountCents).toBe(0);
+    expect(result.suggestedRefund.amountCents).toBe(1000);
   });
 
   it('PERCENTAGE retains a share, truncated in the customer favour', () => {

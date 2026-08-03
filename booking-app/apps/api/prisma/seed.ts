@@ -5,14 +5,15 @@ import { PrismaPg } from '@prisma/adapter-pg';
 
 import { ARGON2_OPTIONS } from '../src/auth/password.options.js';
 import { loadEnvFile } from '../src/config/load-dotenv.js';
-import { Locale, OfficeUserRole, PrismaClient, Weekday } from '../src/prisma/client.js';
+import { Locale, OfficeUserRole, Prisma, PrismaClient, Weekday } from '../src/prisma/client.js';
 
 /**
  * Seeds one demonstrable business.
  *
- * Idempotent: every write is an upsert keyed on a natural unique, so running it
- * twice changes no row counts. That matters because it runs on every fresh
- * developer database and in the deployment checklist.
+ * Idempotent: writes use natural uniques or stable seed ids. A transaction-level
+ * advisory lock serializes concurrent seed runs, while compatibility lookups
+ * reuse employees and schedules created by the original seed version without
+ * imposing false business uniqueness on names.
  *
  * Run with `pnpm db:seed`, which invokes tsx directly rather than going through
  * `prisma db seed`. The CLI wrapper adds nothing here — the seed needs no
@@ -28,7 +29,7 @@ if (!connectionString) {
   throw new Error('DATABASE_URL is not set. Copy booking-app/.env.example to booking-app/.env.');
 }
 
-const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
+const client = new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
 
 const SLUG = 'shape-and-flow';
 const WEEKDAYS = [
@@ -42,7 +43,7 @@ const WEEKDAYS = [
 /** Local date, stored as a date-only column. */
 const localDate = (iso: string): Date => new Date(`${iso}T00:00:00.000Z`);
 
-async function main(): Promise<void> {
+async function seed(prisma: Prisma.TransactionClient): Promise<void> {
   const organization = await prisma.organization.upsert({
     where: { slug: SLUG },
     update: {},
@@ -98,19 +99,35 @@ async function main(): Promise<void> {
 
   // ── employees ─────────────────────────────────────────────────────────────
   const employeeSeeds = [
-    { firstName: 'Mara', lastName: 'Vogt', displayOrder: 0, worksSaturday: true },
-    { firstName: 'Jonas', lastName: 'Reit', displayOrder: 1, worksSaturday: false },
+    {
+      id: 'seed-employee-mara-vogt',
+      firstName: 'Mara',
+      lastName: 'Vogt',
+      displayOrder: 0,
+      worksSaturday: true,
+    },
+    {
+      id: 'seed-employee-jonas-reit',
+      firstName: 'Jonas',
+      lastName: 'Reit',
+      displayOrder: 1,
+      worksSaturday: false,
+    },
   ];
 
   const employees = [];
   for (const seed of employeeSeeds) {
     const displayName = `${seed.firstName} ${seed.lastName}`;
-    const existing = await prisma.employee.findFirst({ where: { organizationId, displayName } });
-
+    const legacyEmployee = await prisma.employee.findFirst({
+      where: { organizationId, displayName },
+    });
     const employee =
-      existing ??
-      (await prisma.employee.create({
-        data: {
+      legacyEmployee ??
+      (await prisma.employee.upsert({
+        where: { id: seed.id },
+        update: {},
+        create: {
+          id: seed.id,
           organizationId,
           firstName: seed.firstName,
           lastName: seed.lastName,
@@ -183,26 +200,42 @@ async function main(): Promise<void> {
     }
 
     for (const segment of segments) {
-      const existing = await prisma.workingHours.findFirst({
-        where: { organizationId, employeeId: employee.id, weekday: segment.weekday },
+      const segmentId = `seed-hours-${employee.id}-${segment.weekday.toLowerCase()}`;
+      const legacySegment = await prisma.workingHours.findFirst({
+        where: { organizationId, employeeId: employee.id, ...segment },
       });
-      if (existing) continue;
-
-      const created = await prisma.workingHours.create({
-        data: { organizationId, employeeId: employee.id, ...segment },
-      });
+      const created =
+        legacySegment ??
+        (await prisma.workingHours.upsert({
+          where: { id: segmentId },
+          update: {},
+          create: { id: segmentId, organizationId, employeeId: employee.id, ...segment },
+        }));
 
       // Saturday is a short shift with no lunch break.
       if (segment.weekday !== Weekday.SATURDAY) {
-        await prisma.break.create({
-          data: {
+        const legacyBreak = await prisma.break.findFirst({
+          where: {
             organizationId,
             workingHoursId: created.id,
             startMinute: 12 * 60,
             endMinute: 12 * 60 + 30,
-            label: 'Mittagspause',
           },
         });
+        if (!legacyBreak) {
+          await prisma.break.upsert({
+            where: { id: `${segmentId}-lunch` },
+            update: {},
+            create: {
+              id: `${segmentId}-lunch`,
+              organizationId,
+              workingHoursId: created.id,
+              startMinute: 12 * 60,
+              endMinute: 12 * 60 + 30,
+              label: 'Mittagspause',
+            },
+          });
+        }
       }
     }
   }
@@ -243,8 +276,23 @@ async function main(): Promise<void> {
   process.stdout.write(`${lines.join('\n')}\n`);
 }
 
+async function main(): Promise<void> {
+  await client.$transaction(
+    async (prisma) => {
+      // Select a supported scalar rather than PostgreSQL's void lock result,
+      // which the Prisma PG adapter cannot deserialize.
+      await prisma.$queryRaw`
+        SELECT 1::integer
+        FROM (SELECT pg_advisory_xact_lock(hashtext(${'shape-and-flow-seed'}))) AS seed_lock
+      `;
+      await seed(prisma);
+    },
+    { maxWait: 30_000, timeout: 30_000 },
+  );
+}
+
 try {
   await main();
 } finally {
-  await prisma.$disconnect();
+  await client.$disconnect();
 }

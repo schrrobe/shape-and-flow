@@ -28,7 +28,7 @@
     "lint": "eslint .",
     "format": "prettier --check .",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "echo \"@shape-and-flow/booking-config has no runtime code to test\" && exit 0"
+    "test": "echo \"@shape-and-flow/booking-config has no runtime code to test\""
   },
   "dependencies": {
     "@eslint/js": "10.0.1",
@@ -39,7 +39,7 @@
     "typescript-eslint": "8.65.0"
   },
   "devDependencies": {
-    "@types/node": "26.1.2",
+    "@types/node": "24.13.3",
     "@vitest/coverage-v8": "4.1.10",
     "eslint": "10.8.0",
     "prettier": "3.9.6",

@@ -8,10 +8,10 @@ features in Phase 1.
 
 | Property | Value |
 | --- | --- |
-| Repository root | `/Users/robert/www/shape-and-flow` |
-| Product area | `/Users/robert/www/shape-and-flow/booking-app` |
+| Repository root | `.` |
+| Product area | `booking-app` |
 | Runtime | Node 24.18.0, pnpm workspaces |
-| API | NestJS 11 + Prisma 6 + PostgreSQL 17 + Redis 7 (BullMQ) |
+| API | NestJS 11 + Prisma 7.9.1 + PostgreSQL 17 + Redis 7 (BullMQ) |
 | Web | Vue 3 + Vite + TypeScript + Tailwind CSS 4 + Pinia + vue-i18n |
 | Payments | Stripe Checkout (hosted), card and wallets only |
 | Timezone | `Europe/Berlin` (storage `timestamptz`, all reasoning in local wall clock) |
@@ -19,8 +19,8 @@ features in Phase 1.
 | Locales | `de` (default) and `en` for customer-facing surfaces; office copy is English-only |
 | Task count | 49 tasks across 12 stages |
 
-Every path in this document is absolute and rooted at
-`/Users/robert/www/shape-and-flow/`. Every step is a `- [ ]` checkbox. Tasks are
+Every path in this document is repository-relative. Every step is a `- [ ]`
+checkbox. Tasks are
 ordered so that each one compiles, tests green, and is independently
 committable.
 
@@ -32,11 +32,11 @@ Verified state of the repository at the moment this plan was written:
 
 - `git log --oneline` → a single commit, `457c211 chore: initialize repository`.
   Branch `main`, working tree clean.
-- Tracked files: `/Users/robert/www/shape-and-flow/README.md` (contents:
+- Tracked files: `README.md` (contents:
   `# Shape and Flow` / `Monorepo for Shape and Flow.`) and
-  `/Users/robert/www/shape-and-flow/.gitignore` (contents: `.DS_Store`,
+  `.gitignore` (contents: `.DS_Store`,
   `.tokensave/`, `.claude/settings.local.json`).
-- `/Users/robert/www/shape-and-flow/booking-app/docs/plans/` exists and is
+- `booking-app/docs/plans/` exists and is
   otherwise empty; it holds this document. No other directory under
   `booking-app/` exists yet.
 - **No** package manager manifest, **no** lockfile, **no** `.tool-versions`,
@@ -62,8 +62,8 @@ here so later tasks never have to re-decide:
 | Language | TypeScript 5.7, `strict: true`, `noUncheckedIndexedAccess: true` | Money and time bugs are the expensive class of bug in a booking system |
 | Test runner | Vitest 3 (unit + integration), Playwright (end-to-end) | One runner for API and web; Vitest workspace projects separate unit from integration |
 | Lint / format | ESLint 9 flat config + Prettier 3 | Flat config is the only supported form in ESLint 9 |
-| ORM | Prisma 6 with **hand-written** migrations for enum and constraint changes | Prisma's generated enum migrations drop dependent constraints (see §8) |
-| Validation | Zod 3 schemas in `@shape-and-flow/booking-contracts`, bridged into NestJS with `nestjs-zod` | One schema is request validation, response typing, and OpenAPI source |
+| ORM | Prisma 7.9.1 with the ESM-native `prisma-client` generator, pg driver adapter, and **hand-written** migrations for enum and constraint changes | Prisma's generated enum migrations can drop dependent constraints (see §8) |
+| Validation | Zod 4.4.3 schemas in `@shape-and-flow/booking-contracts`, bridged into NestJS with `nestjs-zod` 5.x | One schema is request validation, response typing, and OpenAPI source through Zod 4's native JSON Schema support |
 | Logging | pino with AsyncLocalStorage correlation ids and PII redaction | Structured logs, one correlation id per request and per job |
 
 ---
@@ -100,7 +100,7 @@ built from one NestJS codebase:
 ### 2.2 Decisions and why
 
 **The worker is a second entrypoint, not a second app.**
-`/Users/robert/www/shape-and-flow/booking-app/apps/api/src/worker.main.ts`
+`booking-app/apps/api/src/worker.main.ts`
 bootstraps `WorkerModule` with `NestFactory.createApplicationContext` — no HTTP
 listener. It hosts the BullMQ processors, the outbox dispatcher, and the
 reconcilers, and it reuses the same domain services and the same Prisma client as
@@ -114,9 +114,9 @@ queues.
 
 **Contracts live in one package and are the single source of truth.**
 `@shape-and-flow/booking-contracts` exports Zod schemas plus their inferred
-types. `nestjs-zod` turns each schema into a DTO class for the global
-`ZodValidationPipe`, `@anatine/zod-openapi` renders the same schema into the
-Swagger document, and the web app imports the inferred types through a thin typed
+types. `nestjs-zod` 5.x turns each Zod 4 schema into a DTO class for the global
+`ZodValidationPipe` and uses Zod 4's native `z.toJSONSchema` support for the
+Swagger document. The web app imports the inferred types through a thin typed
 `fetch` client. One change to a schema propagates to validation, documentation,
 and the front end in a single compile.
 
@@ -167,7 +167,7 @@ the mirror-image inbox. See §9.
 | SMS | Twilio | 5.x |
 | Dates | luxon | 3.x |
 | Passwords | `argon2` (argon2id) | 0.41.x |
-| Validation | zod + nestjs-zod | 3.x / 4.x |
+| Validation | zod + nestjs-zod | 4.4.3 / 5.x |
 | Web framework | Vue | 3.5.x |
 | Web build | Vite | 6.x |
 | Web state | Pinia | 2.x |
@@ -187,8 +187,8 @@ adapter so an SDK upgrade cannot silently change webhook payload shapes.
 
 ### 3.1 Why the workspace root is the repository root
 
-The `pnpm-workspace.yaml` lives at `/Users/robert/www/shape-and-flow/`, not at
-`/Users/robert/www/shape-and-flow/booking-app/`. The repository is named
+The `pnpm-workspace.yaml` lives at ``, not at
+`booking-app/`. The repository is named
 "Shape and Flow" and its README already calls it a monorepo, so `booking-app` is
 one product area inside it rather than the repository's purpose. Consequences,
 all deliberate:
@@ -214,7 +214,7 @@ diagram, which nested `pnpm-workspace.yaml` inside `booking-app/`. See §11.3.
 ### 3.2 Complete tree
 
 ```
-/Users/robert/www/shape-and-flow/
+
 ├── .github/
 │   └── workflows/
 │       └── ci.yml                      # install → lint → typecheck → unit → integration → e2e → build
@@ -578,8 +578,9 @@ domain reads one object.
 - **Validation** (enforced in the Zod schema *and* by a database `CHECK` added in
   Task 1.3): `schedulingIntervalMinutes` ∈ {5, 10, 15, 20, 30, 60};
   `bookingHorizonDays` between 1 and 365; `minimumNoticeHours` between 0 and 720;
-  `reservationTtlMinutes` between 3 and 30; `cancellationFeePercent` between 0
-  and 100; `cancellationFeeAmountCents >= 0`.
+  `reservationTtlMinutes` between 3 and 30; `freeCancellationHours` between 0
+  and 720; `cancellationFeePercent` between 0 and 100;
+  `cancellationFeeAmountCents >= 0`; `dataRetentionDays` between 30 and 3650.
 - **Deletion**: cascade with the organization only.
 
 #### 3. `ClosedDay`
@@ -589,8 +590,8 @@ for every employee at once, which is what an office actually wants.
 
 - **Fields**: `id`, `organizationId`, `date DateTime @db.Date`,
   `reason String?`, `createdAt`, `updatedAt`.
-- **Indexes**: `@@unique([organizationId, date])`,
-  `@@index([organizationId, date])`.
+- **Indexes**: `@@unique([organizationId, date])` (the backing unique index also
+  serves lookups by organization and date).
 - **Deletion**: hard delete. It is configuration, not history; a booking that
   already exists on a newly closed day is surfaced as a conflict in the office UI
   rather than being altered (Task 8.4).
@@ -644,7 +645,8 @@ employees never log in, and one login can exist without a calendar.
 - **Relations**: optional one-to-one `OfficeUser`; has many `WorkingHours`,
   `AvailabilityException`, `TimeOff`, `BlockedTime`, `EmployeeService`,
   `Booking`.
-- **Indexes**: `@@index([organizationId, archivedAt, displayOrder])`,
+- **Indexes**: `@@unique([organizationId, id])` (composite Booking FK target),
+  `@@index([organizationId, archivedAt, displayOrder])`,
   `@@index([organizationId, isBookableOnline])`.
 - **Deletion**: archive. Bookings reference the employee permanently; archiving
   is refused if the employee has any booking in a blocking status in the future,
@@ -743,7 +745,8 @@ Grouping for the public service list.
 - **Fields**: `id`, `organizationId`, `name`, `description String?`,
   `displayOrder Int @default(0)`, `archivedAt DateTime?`, `createdAt`,
   `updatedAt`.
-- **Indexes**: `@@unique([organizationId, name])`,
+- **Indexes**: `@@unique([organizationId, id])` (composite Booking FK target),
+  `@@unique([organizationId, name])`,
   `@@index([organizationId, archivedAt, displayOrder])`.
 - **Deletion**: archive; refused while a non-archived `Service` still points at
   it.
@@ -789,6 +792,8 @@ override.
   `priceOverrideCents ?? service.priceCents`, computed in one place
   (`resolveEffectivePrice`, Task 2.4) and used by both the public quote and the
   Checkout line item, so the displayed price and the charged price cannot drift.
+  Both the application contract and a database `CHECK` require a non-null
+  `priceOverrideCents` to be greater than or equal to zero.
 
 #### 15. `Customer`
 
@@ -799,7 +804,8 @@ A person who books. Created on first booking, then matched by normalised email.
   `marketingConsentAt DateTime?`, `internalNote String?`,
   `archivedAt DateTime?`, `createdAt`, `updatedAt`.
 - **Relations**: has many `Booking` (`onDelete: Restrict`).
-- **Indexes**: `@@unique([organizationId, emailNormalized])`,
+- **Indexes**: `@@unique([organizationId, id])` (composite Booking FK target),
+  `@@unique([organizationId, emailNormalized])`,
   `@@index([organizationId, lastName, firstName])`, `@@index([organizationId, phone])`.
 - **Deletion**: archive plus pseudonymisation on an erasure request — email,
   names, and phone are overwritten with `deleted-<id>@invalid` and empty strings
@@ -833,22 +839,25 @@ appointment. One row, one exclusion constraint.
   - payment link: `stripeCheckoutSessionId String? @unique`,
     `idempotencyKeyId String? @unique`
   - customer input: `customerNote String?`, `locale Locale`
-  - reschedule lineage: `rescheduledFromBookingId String? @unique`
+  - reschedule lineage: `rescheduledFromBookingId String?`
   - audit: `createdByOfficeUserId String?`, `canceledByOfficeUserId String?`,
     `cancellationReason String?`, `createdAt`, `updatedAt`
-- **Relations**: `Customer`, `Employee`, `Service` — all `onDelete: Restrict`;
+- **Relations**: `Customer`, `Employee`, `Service`, and the reschedule
+  self-relation all use composite `(organizationId, id)` foreign keys, so a
+  booking cannot point at another tenant's row; all are `onDelete: Restrict`;
   has many `BookingStatusHistory`, `Payment`, `ManualPayment`, `Notification`,
   `ManagementToken`; has at most one open `CancellationRequest` and one open
   `RescheduleRequest`; self-relation for reschedule lineage.
 - **Indexes**:
+  - `@@unique([organizationId, id])` — composite self-FK target
   - `@@unique([organizationId, reference])`
+  - `@@unique([organizationId, rescheduledFromBookingId])`
   - `@@index([organizationId, employeeId, blockStartsAt])` — calendar reads
   - `@@index([organizationId, status, startsAt])` — dashboard and day views
   - `@@index([organizationId, customerId, startsAt])` — customer history
   - `@@index([status, expiresAt])` — the expiry sweeper's only scan
   - `@@index([organizationId, status, blockStartsAt, blockEndsAt])` — availability snapshot loads
-  - unique `stripeCheckoutSessionId`, unique `idempotencyKeyId`, unique
-    `rescheduledFromBookingId`
+  - unique `stripeCheckoutSessionId`, unique `idempotencyKeyId`
   - plus `bookings_block_range_check` and `bookings_no_overlap` from Task 1.3
 - **Deletion**: **never**. Not archived either — the status enum already carries
   every terminal outcome, and money rows are `Restrict`-attached. There is no
@@ -864,8 +873,9 @@ appointment. One row, one exclusion constraint.
     directly.
   - Snapshot columns exist so that changing a service's price or duration never
     alters an existing booking, an invoice, or a refund calculation.
-  - `expiresAt` is non-null exactly while `status` is `PENDING_PAYMENT` or
-    `EXPIRING`, enforced by a `CHECK`.
+  - `expiresAt` is required while `status` is `PENDING_PAYMENT` or `EXPIRING`,
+    enforced by a `CHECK`, and retained after confirmation or expiration as an
+    audit timestamp.
   - `reference` is generated from a Crockford base-32 alphabet with the ambiguous
     characters removed, six characters after the `SF-` prefix, retried on unique
     violation. It is for humans on the phone; it is **not** an authentication
@@ -1043,6 +1053,7 @@ describes; drained by the worker.
 
 - **Fields**: `id`, `organizationId`, `aggregateType String`,
   `aggregateId String`, `eventType String`, `payload Json`,
+  `encryptedSensitivePayload Bytes?`,
   `availableAt DateTime @default(now())`, `dispatchedAt DateTime?`,
   `attempts Int @default(0)`, `lastError String?`, `createdAt`.
 - **Indexes**: `@@index([dispatchedAt, availableAt])` — the dispatcher's claim
@@ -1051,6 +1062,11 @@ describes; drained by the worker.
   that long on purpose: it is the audit trail for "was the confirmation email
   ever queued?".
 - **Notes**: `availableAt` supports delayed events without a second mechanism.
+  `payload` must never contain credentials or bearer tokens. Rare sensitive
+  delivery data is encrypted with AES-256-GCM under a dedicated, rotated
+  environment key; the byte envelope contains its version, nonce, auth tag, and
+  ciphertext. Workers decrypt only immediately before provider delivery, never
+  log the plaintext, and the 14-day outbox sweep removes the ciphertext.
   `payload` is validated against a Zod schema per `eventType` on the way out, so
   a malformed payload fails at the dispatcher with a named event type rather than
   deep inside a processor.
@@ -1203,10 +1219,10 @@ constant and the constraint predicate agree.
 | --- | --- | --- | --- | --- |
 | — | `PENDING_PAYMENT` | `POST /public/bookings` | slot free under advisory lock; exclusion constraint holds | history row; `IdempotencyKey` linked; `expiresAt = now + reservationTtlMinutes` |
 | — | `CONFIRMED` | `POST /office/bookings` | slot free under advisory lock | history row; `AuditLog`; outbox `booking.confirmed` |
-| `PENDING_PAYMENT` | `CONFIRMED` | `checkout.session.completed` with `payment_status = 'paid'`, or `async_payment_succeeded` | booking row locked `FOR UPDATE`; not already terminal | `Payment` upsert `SUCCEEDED`; `expiresAt = null`; `confirmedAt`; `ManagementToken`; history; outbox `booking.confirmed` |
-| `PENDING_PAYMENT` | `PAYMENT_FAILED` | `checkout.session.expired` (customer abandoned before the sweeper ran) or `async_payment_failed` | booking row locked `FOR UPDATE` | `Payment` `FAILED` if one exists; `expiresAt = null`; history; outbox `booking.payment_failed` |
+| `PENDING_PAYMENT` | `CONFIRMED` | `checkout.session.completed` with `payment_status = 'paid'`, or `async_payment_succeeded` | booking row locked `FOR UPDATE`; not already terminal | `Payment` upsert `SUCCEEDED`; retain `expiresAt`; set `confirmedAt`; `ManagementToken`; history; outbox `booking.confirmed` |
+| `PENDING_PAYMENT` | `PAYMENT_FAILED` | `checkout.session.expired` (customer abandoned before the sweeper ran) or `async_payment_failed` | booking row locked `FOR UPDATE` | `Payment` `FAILED` if one exists; retain `expiresAt`; history; outbox `booking.payment_failed` |
 | `PENDING_PAYMENT` | `EXPIRING` | expiry sweeper or per-booking timer | `expiresAt < now()` re-checked inside the transaction | history; outbox `booking.expiry_requested` |
-| `EXPIRING` | `EXPIRED` | expiry job, after Stripe confirms the session is expired | Stripe returned `status = 'expired'` | `expiresAt = null`; history; **slot released here and nowhere earlier** |
+| `EXPIRING` | `EXPIRED` | expiry job, after Stripe confirms the session is expired | Stripe returned `status = 'expired'` | retain `expiresAt`; history; **slot released here and nowhere earlier** |
 | `EXPIRING` | `CONFIRMED` | expiry job, when Stripe reports the session already completed | Stripe returned `status = 'complete'` and `payment_status = 'paid'` | identical effects to the webhook confirmation path, and idempotent with it |
 | `CONFIRMED` | `CANCELED_BY_CUSTOMER` | `POST /manage/cancel` outside the fee window, or an approved `CancellationRequest` | `startsAt > now()` | `canceledAt`; history; `Refund` `PENDING` when a `Payment` exists; outbox `booking.canceled` |
 | `CONFIRMED` | `CANCELED_BY_BUSINESS` | `POST /office/bookings/:id/cancel`, or reschedule approval | actor is `OWNER`/`ADMIN`; refund requires the refund capability | `canceledAt`; `canceledByOfficeUserId`; `cancellationReason`; history; `AuditLog`; optional `Refund`; outbox `booking.canceled` |
@@ -1420,8 +1436,10 @@ English and is for developers and logs; the web app renders locale copy keyed by
 - *Cursor* for endpoints a customer or a long list drives
   (`GET /office/bookings`, `GET /office/customers`, `GET /office/audit-log`):
   `?limit=50&cursor=<opaque>` → `{ items, nextCursor }`. `limit` ≤ 100,
-  default 25. The cursor is base64url of `{ createdAt, id }`, so it is stable
-  under inserts.
+  default 25. The cursor is base64url of `{ sort, value, id }`, where `value` is
+  the active sort field (`startsAt` or `createdAt`) and `sort` includes its
+  direction. Decoding verifies that the cursor sort matches the request, and the
+  boundary comparison uses the same value plus `id` as the final tie-breaker.
 - *Bounded window, no pagination* for calendar reads
   (`GET /office/calendar?from=&to=`): the range is capped at 62 days and returns
   everything in it. Paginating a calendar is a worse interface than refusing a
@@ -2305,11 +2323,11 @@ account.
 ### 10.8 Personal data, logging, and retention
 
 - **Logging**: pino with a fixed redaction path list — `req.headers.authorization`,
-  `req.headers.cookie`, `req.body.password`, `req.body.newPassword`,
+  `req.headers.cookie`, `req.headers.idempotency-key`, `req.body.password`, `req.body.newPassword`,
   `req.body.currentPassword`, `req.body.customer.email`, `req.body.customer.phone`,
   `req.body.customerNote`, `*.email`, `*.phone`, `*.tokenHash`, `*.token`. A unit
-  test posts a body containing every one of these and asserts none appears in the
-  serialised log line.
+  test submits a request containing every one of these body/header values and
+  asserts none appears in the serialised log line.
 - **Correlation**: one `correlationId` per request (from `X-Request-Id` or newly
   minted) carried through AsyncLocalStorage into every log line, every outbox row,
   every job, and every error envelope, so an incident is traceable from a
@@ -2491,11 +2509,11 @@ same template:
   implementation.
 - **Validation scenarios** — the concrete cases the tests must cover.
 - **Steps** — `- [ ]` checkboxes.
-- **Commands** — copy-pasteable, run from `/Users/robert/www/shape-and-flow`.
+- **Commands** — copy-pasteable, run from `.`.
 - **Expected result** — what "done" looks like.
 - **Commit** — the suggested message.
 
-All commands are run from `/Users/robert/www/shape-and-flow` unless stated
+All commands are run from `.` unless stated
 otherwise. `pnpm api` and `pnpm web` are shorthand written into the root
 `package.json` in Task 0.1 for
 `pnpm --filter @shape-and-flow/booking-api` and
@@ -2512,12 +2530,12 @@ workspace root is the repository root, with Node and pnpm pinned by the
 repository rather than by the machine.
 
 **Files.**
-- `/Users/robert/www/shape-and-flow/pnpm-workspace.yaml` (new)
-- `/Users/robert/www/shape-and-flow/package.json` (new)
-- `/Users/robert/www/shape-and-flow/.npmrc` (new)
-- `/Users/robert/www/shape-and-flow/.tool-versions` (new)
-- `/Users/robert/www/shape-and-flow/.gitignore` (edit)
-- `/Users/robert/www/shape-and-flow/.editorconfig` (new)
+- `pnpm-workspace.yaml` (new)
+- `package.json` (new)
+- `.npmrc` (new)
+- `.tool-versions` (new)
+- `.gitignore` (edit)
+- `.editorconfig` (new)
 
 **Produces for later tasks.** The workspace globs every later package registers
 under, and the delegating script names every later task's commands use.
@@ -2624,13 +2642,13 @@ matched packages, and `git status --porcelain` lists only the new tracked files.
 defaults for every package in `booking-app`, so no package invents its own rules.
 
 **Files.**
-- `/Users/robert/www/shape-and-flow/booking-app/packages/config/package.json` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/packages/config/tsconfig.base.json` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/packages/config/tsconfig.node.json` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/packages/config/tsconfig.vue.json` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/packages/config/eslint.config.js` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/packages/config/prettier.config.js` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/packages/config/vitest.base.ts` (new)
+- `booking-app/packages/config/package.json` (new)
+- `booking-app/packages/config/tsconfig.base.json` (new)
+- `booking-app/packages/config/tsconfig.node.json` (new)
+- `booking-app/packages/config/tsconfig.vue.json` (new)
+- `booking-app/packages/config/eslint.config.js` (new)
+- `booking-app/packages/config/prettier.config.js` (new)
+- `booking-app/packages/config/vitest.base.ts` (new)
 
 **Produces for later tasks.**
 
@@ -2688,8 +2706,11 @@ tooling flags it, then delete it.
     message: 'Raw unsafe SQL is banned. Use Prisma.sql tagged templates.'
   }
   ```
-  plus `no-restricted-properties` banning `process.env` outside
-  `**/config/env.schema.ts`.
+  plus `no-restricted-properties` banning `process.env`. Apply file-glob
+  overrides (the rule itself cannot express path exceptions) for the validated
+  `**/src/config/env.schema.ts`, build/test `**/*.config.{ts,js,mjs}` files,
+  `**/prisma/seed.ts`, `**/test/**`, and `**/e2e/**`. Application modules,
+  including `config.module.ts`, consume the validated `ENV` provider instead.
 - [ ] Write `prettier.config.js`: `printWidth: 100`, `singleQuote: true`,
   `semi: true`, `trailingComma: 'all'`, `arrowParens: 'always'`.
 - [ ] Write `vitest.base.ts` exporting `baseVitestConfig`.
@@ -2716,9 +2737,9 @@ ports and distinct project names, so a test run can never touch the development
 database and a future second product cannot collide with either.
 
 **Files.**
-- `/Users/robert/www/shape-and-flow/booking-app/docker-compose.yml` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/docker-compose.test.yml` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/.env.example` (new)
+- `booking-app/docker-compose.yml` (new)
+- `booking-app/docker-compose.test.yml` (new)
+- `booking-app/.env.example` (new)
 
 **Produces for later tasks.** `DATABASE_URL` and `REDIS_URL` values every later
 task's commands assume:
@@ -2831,6 +2852,7 @@ the command if a container is unhealthy.
   SESSION_COOKIE_NAME=sf_office_session
   SESSION_IDLE_TTL_MINUTES=720
   SESSION_ABSOLUTE_TTL_MINUTES=10080
+  OUTBOX_ENCRYPTION_KEY=base64_32_byte_key
   ENABLE_API_DOCS=true
   ```
 - [ ] Add a comment block at the top of `.env.example` stating that `.env` is
@@ -2859,7 +2881,7 @@ distinct ports; the extension query returns one row named `btree_gist`.
 same order, against real Postgres and Redis services.
 
 **Files.**
-- `/Users/robert/www/shape-and-flow/.github/workflows/ci.yml` (new)
+- `.github/workflows/ci.yml` (new)
 
 **Produces for later tasks.** The job names later tasks extend
 (`lint`, `test`, `integration`, `e2e`, `build`).
@@ -2890,9 +2912,11 @@ failing lint rule and confirming the job goes red, then removing it.
   `DATABASE_URL=postgresql://booking:booking@localhost:5432/booking_test?schema=public`
   and `REDIS_URL=redis://localhost:6379`; steps `pnpm api prisma:migrate:deploy`
   then `pnpm test:integration`.
-- [ ] Job `e2e` `needs: [integration]`: install Playwright browsers with
-  `--with-deps chromium`, run `pnpm test:e2e`, upload `playwright-report/` on
-  failure.
+- [ ] Job `e2e` provisions its own Postgres and Redis services, applies
+  migrations, starts the API and web app, installs Playwright browsers with
+  `--with-deps chromium`, runs `pnpm test:e2e`, and uploads
+  `playwright-report/` on failure. It does not depend on another job's service
+  containers, which are job-local and cannot be shared.
 - [ ] Job `build` `needs: [lint, test]`: `pnpm build`.
 - [ ] Add `permissions: { contents: read }` at the workflow level.
 
@@ -2917,21 +2941,21 @@ environment, exposes `/api/health/live`, and has a Prisma client wired to the
 development database — with Vitest configured for unit tests.
 
 **Files.**
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/package.json` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/tsconfig.json` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/eslint.config.js` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/nest-cli.json` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/vitest.config.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/test/setup.unit.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/main.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/app.module.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/config/env.schema.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/config/config.module.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/prisma/prisma.service.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/prisma/prisma.module.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/health/health.controller.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/health/health.module.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/prisma/schema.prisma` (new, datasource and generator only)
+- `booking-app/apps/api/package.json` (new)
+- `booking-app/apps/api/tsconfig.json` (new)
+- `booking-app/apps/api/eslint.config.js` (new)
+- `booking-app/apps/api/nest-cli.json` (new)
+- `booking-app/apps/api/vitest.config.ts` (new)
+- `booking-app/apps/api/test/setup.unit.ts` (new)
+- `booking-app/apps/api/src/main.ts` (new)
+- `booking-app/apps/api/src/app.module.ts` (new)
+- `booking-app/apps/api/src/config/env.schema.ts` (new)
+- `booking-app/apps/api/src/config/config.module.ts` (new)
+- `booking-app/apps/api/src/prisma/prisma.service.ts` (new)
+- `booking-app/apps/api/src/prisma/prisma.module.ts` (new)
+- `booking-app/apps/api/src/health/health.controller.ts` (new)
+- `booking-app/apps/api/src/health/health.module.ts` (new)
+- `booking-app/apps/api/prisma/schema.prisma` (new, datasource and generator only)
 
 **Produces for later tasks.**
 
@@ -2947,7 +2971,7 @@ models yet. **API changes.** `GET /api/health/live`. **Frontend changes.** None.
 **Tests first.**
 
 ```ts
-// /Users/robert/www/shape-and-flow/booking-app/apps/api/src/config/env.schema.spec.ts
+// booking-app/apps/api/src/config/env.schema.spec.ts
 import { describe, expect, it } from 'vitest';
 import { envSchema } from './env.schema.js';
 
@@ -2971,6 +2995,7 @@ const valid = {
   SESSION_COOKIE_NAME: 'sf_office_session',
   SESSION_IDLE_TTL_MINUTES: '720',
   SESSION_ABSOLUTE_TTL_MINUTES: '10080',
+  OUTBOX_ENCRYPTION_KEY: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
   ENABLE_API_DOCS: 'false',
 };
 
@@ -3010,7 +3035,7 @@ describe('envSchema', () => {
 ```
 
 ```ts
-// /Users/robert/www/shape-and-flow/booking-app/apps/api/src/config/env-example.spec.ts
+// booking-app/apps/api/src/config/env-example.spec.ts
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { envSchema } from './env.schema.js';
@@ -3027,7 +3052,7 @@ describe('.env.example', () => {
         .filter((line) => /^[A-Z][A-Z0-9_]*=/.test(line))
         .map((line) => line.split('=')[0]),
     );
-    const declared = new Set(Object.keys(envSchema._def.shape()));
+    const declared = new Set(Object.keys(envSchema.shape));
     expect([...declared].filter((k) => !documented.has(k))).toEqual([]);
     expect([...documented].filter((k) => !declared.has(k))).toEqual([]);
   });
@@ -3040,6 +3065,8 @@ describe('.env.example', () => {
 - [ ] A non-`postgresql://` `DATABASE_URL` fails.
 - [ ] `EMAIL_PROVIDER=resend` without `RESEND_API_KEY` fails with a message naming the key.
 - [ ] `SMS_PROVIDER=twilio` without SID, token, and sender fails.
+- [ ] Settings validation rejects `freeCancellationHours` outside `0..720` and
+  `dataRetentionDays` outside `30..3650`, matching the database `CHECK`.
 - [ ] An almost-empty environment reports more than five issues in one pass.
 - [ ] `.env.example` and the schema declare exactly the same key set.
 - [ ] `GET /api/health/live` returns `200 { "status": "ok" }` with no database access.
@@ -3073,15 +3100,19 @@ describe('.env.example', () => {
 - [ ] Write `prisma/schema.prisma` with only:
   ```prisma
   generator client {
-    provider = "prisma-client-js"
-    output   = "../node_modules/.prisma/client"
+    provider            = "prisma-client"
+    output              = "../src/generated/prisma"
+    moduleFormat        = "esm"
+    importFileExtension = "js"
   }
 
   datasource db {
     provider = "postgresql"
-    url      = env("DATABASE_URL")
   }
   ```
+  Prisma 7 reads the migration URL from `prisma.config.ts`; runtime clients use
+  `@prisma/adapter-pg` with the validated `DATABASE_URL` rather than a datasource
+  URL embedded in the schema.
 - [ ] Write `prisma.service.ts` extending `PrismaClient`, calling `$connect()` in
   `onModuleInit` and `$disconnect()` in `onModuleDestroy`, with `log` levels driven
   by `LOG_LEVEL`.
@@ -3123,8 +3154,8 @@ app boots, `/api/health/live` returns `{"status":"ok"}`, and deleting
 migration, so every later task has real tables to work against.
 
 **Files.**
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/prisma/schema.prisma` (edit)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/prisma/migrations/20260801000000_init/migration.sql` (generated, then reviewed)
+- `booking-app/apps/api/prisma/schema.prisma` (edit)
+- `booking-app/apps/api/prisma/migrations/20260801000000_init/migration.sql` (generated, then reviewed)
 
 **Produces for later tasks.** The generated Prisma client types — every service,
 contract, and test from here on imports model and enum types from
@@ -3136,7 +3167,7 @@ constraint listed in §4.4. **API changes.** None. **Frontend changes.** None.
 **Tests first.**
 
 ```ts
-// /Users/robert/www/shape-and-flow/booking-app/apps/api/src/prisma/schema.contract.spec.ts
+// booking-app/apps/api/src/prisma/schema.contract.spec.ts
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
@@ -3300,7 +3331,7 @@ describe('schema.prisma', () => {
     idempotencyKeyId            String?       @unique @map("idempotency_key_id")
     customerNote                String?       @map("customer_note")
     locale                      Locale
-    rescheduledFromBookingId    String?       @unique @map("rescheduled_from_booking_id")
+    rescheduledFromBookingId    String?       @map("rescheduled_from_booking_id")
     createdByOfficeUserId       String?       @map("created_by_office_user_id")
     canceledByOfficeUserId      String?       @map("canceled_by_office_user_id")
     cancellationReason          String?       @map("cancellation_reason")
@@ -3308,21 +3339,24 @@ describe('schema.prisma', () => {
     updatedAt                   DateTime      @updatedAt      @map("updated_at") @db.Timestamptz(3)
 
     organization        Organization @relation(fields: [organizationId], references: [id])
-    customer            Customer     @relation(fields: [customerId], references: [id], onDelete: Restrict)
-    employee            Employee     @relation(fields: [employeeId], references: [id], onDelete: Restrict)
-    service             Service      @relation(fields: [serviceId], references: [id], onDelete: Restrict)
-    rescheduledFrom     Booking?     @relation("BookingReschedule", fields: [rescheduledFromBookingId], references: [id])
+    customer            Customer     @relation(fields: [organizationId, customerId], references: [organizationId, id], onDelete: Restrict)
+    employee            Employee     @relation(fields: [organizationId, employeeId], references: [organizationId, id], onDelete: Restrict)
+    service             Service      @relation(fields: [organizationId, serviceId], references: [organizationId, id], onDelete: Restrict)
+    rescheduledFrom     Booking?     @relation("BookingReschedule", fields: [organizationId, rescheduledFromBookingId], references: [organizationId, id], onDelete: Restrict)
     rescheduledTo       Booking?     @relation("BookingReschedule")
     statusHistory       BookingStatusHistory[]
     payments            Payment[]
     manualPayments      ManualPayment[]
     refunds             Refund[]
     managementTokens    ManagementToken[]
+
     notifications       Notification[]
     cancellationRequests CancellationRequest[]
     rescheduleRequests  RescheduleRequest[]
 
+    @@unique([organizationId, id])
     @@unique([organizationId, reference])
+    @@unique([organizationId, rescheduledFromBookingId])
     @@index([organizationId, employeeId, blockStartsAt])
     @@index([organizationId, status, startsAt])
     @@index([organizationId, customerId, startsAt])
@@ -3331,6 +3365,9 @@ describe('schema.prisma', () => {
     @@map("bookings")
   }
   ```
+  `Customer`, `Employee`, and `Service` likewise declare
+  `@@unique([organizationId, id])`, which is the referenced side of the three
+  tenant-consistent composite foreign keys.
 - [ ] Run `prisma format`, then `prisma validate`.
 - [ ] Generate the migration with
   `prisma migrate dev --name init --create-only`, read the SQL, confirm every
@@ -3368,13 +3405,13 @@ level — and build the integration-test harness that proves it against a real
 PostgreSQL.
 
 **Files.**
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/prisma/migrations/20260801000100_calendar_constraints/migration.sql` (new, hand-written)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/vitest.integration.config.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/test/setup.integration.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/test/database.harness.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/test/factories/index.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/common/prisma-errors/prisma-errors.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/booking/booking-status.machine.ts` (new)
+- `booking-app/apps/api/prisma/migrations/20260801000100_calendar_constraints/migration.sql` (new, hand-written)
+- `booking-app/apps/api/vitest.integration.config.ts` (new)
+- `booking-app/apps/api/test/setup.integration.ts` (new)
+- `booking-app/apps/api/test/database.harness.ts` (new)
+- `booking-app/apps/api/test/factories/index.ts` (new)
+- `booking-app/apps/api/src/common/prisma-errors/prisma-errors.ts` (new)
+- `booking-app/apps/api/src/booking/booking-status.machine.ts` (new)
 
 **Produces for later tasks.**
 
@@ -3398,7 +3435,7 @@ unique indexes, and the value `CHECK`s from §4.3.
 **Tests first.**
 
 ```ts
-// /Users/robert/www/shape-and-flow/booking-app/apps/api/test/integration/calendar-constraints.int.spec.ts
+// booking-app/apps/api/test/integration/calendar-constraints.int.spec.ts
 import { PrismaClient } from '@prisma/client';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { isExclusionViolation } from '../../src/common/prisma-errors/prisma-errors.js';
@@ -3557,8 +3594,7 @@ describe('constraint inventory', () => {
       CHECK (ends_at > starts_at),
     ADD CONSTRAINT bookings_expires_at_matches_status
       CHECK (
-        (status IN ('PENDING_PAYMENT', 'EXPIRING') AND expires_at IS NOT NULL)
-        OR (status NOT IN ('PENDING_PAYMENT', 'EXPIRING') AND expires_at IS NULL)
+        status NOT IN ('PENDING_PAYMENT', 'EXPIRING') OR expires_at IS NOT NULL
       ),
     ADD CONSTRAINT bookings_no_overlap EXCLUDE USING gist (
       organization_id WITH =,
@@ -3704,12 +3740,12 @@ PostgreSQL, including the predicate-versus-constant agreement test, and the
 a loud failure instead of a leak, and seed a demonstrable business.
 
 **Files.**
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/organization/organization-context.service.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/organization/organization.module.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/prisma/tenant.extension.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/prisma/prisma.service.ts` (edit)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/prisma/seed.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/package.json` (edit — `prisma.seed`)
+- `booking-app/apps/api/src/organization/organization-context.service.ts` (new)
+- `booking-app/apps/api/src/organization/organization.module.ts` (new)
+- `booking-app/apps/api/src/prisma/tenant.extension.ts` (new)
+- `booking-app/apps/api/src/prisma/prisma.service.ts` (edit)
+- `booking-app/apps/api/prisma/seed.ts` (new)
+- `booking-app/apps/api/package.json` (edit — `prisma.seed`)
 
 **Produces for later tasks.**
 
@@ -3728,7 +3764,7 @@ export function withTenantGuard(client: PrismaClient): PrismaClient;
 **Tests first.**
 
 ```ts
-// /Users/robert/www/shape-and-flow/booking-app/apps/api/test/integration/tenant-extension.int.spec.ts
+// booking-app/apps/api/test/integration/tenant-extension.int.spec.ts
 import { describe, expect, it, beforeEach } from 'vitest';
 import { withTestDatabase } from '../database.harness.js';
 import { seedOrganization, makeBooking } from '../factories/index.js';
@@ -3777,7 +3813,7 @@ describe('tenant extension', () => {
 ```
 
 ```ts
-// /Users/robert/www/shape-and-flow/booking-app/packages/contracts/src/no-organization-id.spec.ts
+// booking-app/packages/contracts/src/no-organization-id.spec.ts
 // (this file is created with the contracts package in Task 3.1; the assertion is
 //  stated here because it
 //  is the third enforcement layer for the same invariant and must not be forgotten)
@@ -3813,13 +3849,15 @@ describe('request contracts', () => {
 
 **Steps.**
 - [ ] Write `tenant.extension.ts` using `Prisma.defineExtension` with a
-  `$allModels` query hook: read the model's field list from
-  `Prisma.dmmf.datamodel.models`, skip models without an `organizationId` field,
-  allow `findUnique`/`findUniqueOrThrow`/`upsert` by unique key, inject the
-  context organization id into `create`/`createMany` when absent, and throw
-  `new Error(\`${model}.${operation} requires organizationId in where\`)`
-  otherwise. Expose the unguarded client as `$unsafeGlobal` with a comment listing
-  the four permitted call sites.
+  `$allModels` query hook and a schema-contract test that keeps the guarded model
+  list synchronized with required `organizationId` fields. Skip models without
+  a required tenant field; allow `findUnique`/`findUniqueOrThrow` only with a
+  subsequent `assertOwned`; require every other filter to equal the current
+  tenant (directly or in a top-level `AND`). Reject foreign explicit tenant ids
+  in `create`, `createMany`, and update payloads. An `upsert` must use a
+  tenant-bearing compound unique key, must match the current tenant, and receives
+  that tenant in its create payload. Deliberately global operations use the raw
+  `PrismaService` at explicitly reviewed call sites.
 - [ ] Wire the extension in `PrismaService` behind a factory so tests can build a
   client with an explicit context.
 - [ ] Write `organization-context.service.ts`: `onApplicationBootstrap` loads the
@@ -3875,9 +3913,9 @@ timezone, and buffer arithmetic testable at the volume it needs.
 currency to reach a Stripe line item or an invoice.
 
 **Files.**
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/domain/money/money.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/domain/money/money.spec.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/domain/money/format.ts` (new)
+- `booking-app/apps/api/src/domain/money/money.ts` (new)
+- `booking-app/apps/api/src/domain/money/money.spec.ts` (new)
+- `booking-app/apps/api/src/domain/money/format.ts` (new)
 
 **Produces for later tasks.**
 
@@ -3917,6 +3955,11 @@ describe('Money', () => {
     expect(() => Money.fromCents(Number.NaN)).toThrow();
     expect(() => Money.fromCents(Number.POSITIVE_INFINITY)).toThrow();
   });
+  it('rejects amounts outside the safe integer range', () => {
+    expect(Money.fromCents(Number.MAX_SAFE_INTEGER).amountCents).toBe(Number.MAX_SAFE_INTEGER);
+    expect(() => Money.fromCents(Number.MAX_SAFE_INTEGER + 2)).toThrow(/safe integer/i);
+    expect(() => Money.fromCents(Number.MIN_SAFE_INTEGER - 2)).toThrow(/safe integer/i);
+  });
   it('refuses to mix currencies', () => {
     expect(() => Money.fromCents(100, 'EUR').plus(Money.fromCents(100, 'CHF'))).toThrow(/currency/i);
   });
@@ -3947,7 +3990,8 @@ describe('Money', () => {
 ```
 
 **Validation scenarios.**
-- [ ] Non-integer, `NaN`, and `Infinity` amounts throw at construction.
+- [ ] Non-integer, `NaN`, `Infinity`, and values outside JavaScript's safe
+  integer range throw at construction; both safe boundaries are accepted.
 - [ ] Mixed-currency arithmetic throws.
 - [ ] Addition and subtraction are exact, negatives allowed (a compensating manual
   payment needs them).
@@ -3958,7 +4002,8 @@ describe('Money', () => {
 
 **Steps.**
 - [ ] Implement `Money` as a frozen class with a private constructor and
-  `Object.freeze(this)`, so no caller can mutate an amount in place.
+  `Object.freeze(this)`, validating cents with `Number.isSafeInteger`, so no
+  caller can mutate an amount in place or introduce imprecise cent arithmetic.
 - [ ] `percent` computes `Math.trunc((amountCents * percent) / 100)` and documents
   that the remainder stays with the customer.
 - [ ] Implement `formatMoney` with `Intl.NumberFormat` (`de-DE` / `en-IE`,
@@ -3989,11 +4034,11 @@ deliberate `priceCents * 2` written outside the money module and then removed.
 and instants, and refuses to produce a wrong answer across a DST transition.
 
 **Files.**
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/domain/time/local-time.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/domain/time/local-time.spec.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/domain/time/interval.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/domain/time/interval.spec.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/domain/time/clock.ts` (new)
+- `booking-app/apps/api/src/domain/time/local-time.ts` (new)
+- `booking-app/apps/api/src/domain/time/local-time.spec.ts` (new)
+- `booking-app/apps/api/src/domain/time/interval.ts` (new)
+- `booking-app/apps/api/src/domain/time/interval.spec.ts` (new)
+- `booking-app/apps/api/src/domain/time/clock.ts` (new)
 
 **Produces for later tasks.**
 
@@ -4189,9 +4234,9 @@ correct across DST, buffers, breaks, exceptions, time off, closed days, minimum
 notice, and the booking horizon.
 
 **Files.**
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/domain/availability/types.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/domain/availability/engine.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/domain/availability/engine.spec.ts` (new)
+- `booking-app/apps/api/src/domain/availability/types.ts` (new)
+- `booking-app/apps/api/src/domain/availability/engine.ts` (new)
+- `booking-app/apps/api/src/domain/availability/engine.spec.ts` (new)
 
 **Produces for later tasks.**
 
@@ -4458,11 +4503,11 @@ cases and the `isSlotBookable` agreement property.
 one deterministic rule for "any available employee".
 
 **Files.**
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/domain/pricing/pricing.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/domain/pricing/pricing.spec.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/domain/pricing/cancellation-fee.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/domain/employee-selection/select-employee.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/domain/employee-selection/select-employee.spec.ts` (new)
+- `booking-app/apps/api/src/domain/pricing/pricing.ts` (new)
+- `booking-app/apps/api/src/domain/pricing/pricing.spec.ts` (new)
+- `booking-app/apps/api/src/domain/pricing/cancellation-fee.ts` (new)
+- `booking-app/apps/api/src/domain/employee-selection/select-employee.ts` (new)
+- `booking-app/apps/api/src/domain/employee-selection/select-employee.spec.ts` (new)
 
 **Produces for later tasks.**
 
@@ -4476,7 +4521,7 @@ export function computeSuggestedRetainedAmount(input: {
   paid: Money; startsAt: Date; now: Date;
   settings: { freeCancellationHours: number; cancellationFeePolicy: CancellationFeePolicy;
               cancellationFeeAmountCents: number; cancellationFeePercent: number };
-}): { insideFreeWindow: boolean; suggestedRetained: Money; suggestedRefund: Money };
+}): { feeApplies: boolean; suggestedRetained: Money; suggestedRefund: Money };
 
 export function selectEmployee(candidates: EmployeeCandidate[]): string;
 export interface EmployeeCandidate { employeeId: string; bookingsThatDay: number; displayOrder: number }
@@ -4516,13 +4561,13 @@ describe('computeSuggestedRetainedAmount', () => {
 
   it('retains nothing outside the free-cancellation window', () => {
     const r = computeSuggestedRetainedAmount({ paid, startsAt, now: new Date('2026-08-10T07:00:00Z'), settings: settings() });
-    expect(r.insideFreeWindow).toBe(false);
+    expect(r.feeApplies).toBe(false);
     expect(r.suggestedRetained.amountCents).toBe(0);
     expect(r.suggestedRefund.amountCents).toBe(4500);
   });
   it('retains nothing inside the window when the policy is NONE', () => {
     const r = computeSuggestedRetainedAmount({ paid, startsAt, now: new Date('2026-08-13T07:00:00Z'), settings: settings() });
-    expect(r.insideFreeWindow).toBe(true);
+    expect(r.feeApplies).toBe(true);
     expect(r.suggestedRetained.amountCents).toBe(0);
   });
   it('retains a fixed amount, capped at what was paid', () => {
@@ -4552,7 +4597,7 @@ describe('computeSuggestedRetainedAmount', () => {
       paid, startsAt, now: new Date('2026-08-11T07:00:00Z'), // exactly 72 h
       settings: settings({ cancellationFeePolicy: 'FIXED_AMOUNT', cancellationFeeAmountCents: 2000 }),
     });
-    expect(r.insideFreeWindow).toBe(false);
+    expect(r.feeApplies).toBe(false);
     expect(r.suggestedRetained.amountCents).toBe(0);
   });
   it('retains nothing when nothing was paid', () => {
@@ -4647,22 +4692,22 @@ boundary and the down-rounding behaviour are both proven.
 and a correlation id that reaches every log line and every job.
 
 **Files.**
-- `/Users/robert/www/shape-and-flow/booking-app/packages/contracts/package.json` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/packages/contracts/tsconfig.json` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/packages/contracts/src/index.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/packages/contracts/src/enums.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/packages/contracts/src/errors.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/packages/contracts/src/primitives.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/packages/contracts/src/pagination.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/packages/contracts/src/no-organization-id.spec.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/common/errors/app-error.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/common/errors/global-exception.filter.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/common/errors/global-exception.filter.spec.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/common/correlation/correlation.store.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/common/correlation/correlation.middleware.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/common/logging/logger.module.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/common/logging/redaction.spec.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/app.module.ts` (edit)
+- `booking-app/packages/contracts/package.json` (new)
+- `booking-app/packages/contracts/tsconfig.json` (new)
+- `booking-app/packages/contracts/src/index.ts` (new)
+- `booking-app/packages/contracts/src/enums.ts` (new)
+- `booking-app/packages/contracts/src/errors.ts` (new)
+- `booking-app/packages/contracts/src/primitives.ts` (new)
+- `booking-app/packages/contracts/src/pagination.ts` (new)
+- `booking-app/packages/contracts/src/no-organization-id.spec.ts` (new)
+- `booking-app/apps/api/src/common/errors/app-error.ts` (new)
+- `booking-app/apps/api/src/common/errors/global-exception.filter.ts` (new)
+- `booking-app/apps/api/src/common/errors/global-exception.filter.spec.ts` (new)
+- `booking-app/apps/api/src/common/correlation/correlation.store.ts` (new)
+- `booking-app/apps/api/src/common/correlation/correlation.middleware.ts` (new)
+- `booking-app/apps/api/src/common/logging/logger.module.ts` (new)
+- `booking-app/apps/api/src/common/logging/redaction.spec.ts` (new)
+- `booking-app/apps/api/src/app.module.ts` (edit)
 
 **Produces for later tasks.**
 
@@ -4833,14 +4878,14 @@ already in every payment signature, and ship fakes good enough that every test a
 local development run needs no third-party credentials.
 
 **Files.**
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/providers/payment/payment-provider.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/providers/payment/fake-payment.provider.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/providers/email/email-provider.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/providers/email/fake-email.provider.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/providers/sms/sms-provider.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/providers/sms/fake-sms.provider.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/providers/providers.module.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/providers/payment/fake-payment.provider.spec.ts` (new)
+- `booking-app/apps/api/src/providers/payment/payment-provider.ts` (new)
+- `booking-app/apps/api/src/providers/payment/fake-payment.provider.ts` (new)
+- `booking-app/apps/api/src/providers/email/email-provider.ts` (new)
+- `booking-app/apps/api/src/providers/email/fake-email.provider.ts` (new)
+- `booking-app/apps/api/src/providers/sms/sms-provider.ts` (new)
+- `booking-app/apps/api/src/providers/sms/fake-sms.provider.ts` (new)
+- `booking-app/apps/api/src/providers/providers.module.ts` (new)
+- `booking-app/apps/api/src/providers/payment/fake-payment.provider.spec.ts` (new)
 
 **Produces for later tasks.**
 
@@ -4983,10 +5028,10 @@ version pinned, card-only payment methods, and the two expiry outcomes the saga
 depends on distinguished correctly.
 
 **Files.**
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/providers/payment/stripe-payment.provider.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/providers/payment/stripe-payment.provider.spec.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/providers/payment/stripe.errors.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/providers/providers.module.ts` (edit)
+- `booking-app/apps/api/src/providers/payment/stripe-payment.provider.ts` (new)
+- `booking-app/apps/api/src/providers/payment/stripe-payment.provider.spec.ts` (new)
+- `booking-app/apps/api/src/providers/payment/stripe.errors.ts` (new)
+- `booking-app/apps/api/src/providers/providers.module.ts` (edit)
 
 **Produces for later tasks.** The production `PaymentProvider` binding; the
 `ExpireResult` discrimination the expiry saga branches on.
@@ -5080,7 +5125,8 @@ describe('StripePaymentProvider', () => {
   lowercase currency.
 - [ ] `client_reference_id` and `metadata.bookingId` are both set, so an event can
   be correlated even if the session id was never persisted (§7.1).
-- [ ] `expires_at` matches the reservation deadline in epoch seconds.
+- [ ] Stripe's `expires_at` is at least 30 minutes after session creation; the
+  application's five-minute reservation deadline remains on `Booking.expiresAt`.
 - [ ] An idempotency key is forwarded on session creation and on refund creation.
 - [ ] `expire` success → `{ outcome: 'EXPIRED' }`.
 - [ ] `expire` "already complete" → a `retrieve` follow-up and
@@ -5101,9 +5147,11 @@ describe('StripePaymentProvider', () => {
   `{ stripeAccount }`, absent → `{}`. One helper, so the Connect switch is one
   line.
 - [ ] Implement `createCheckoutSession` with `line_items` built from the
-  server-resolved price, `customer_email`, `locale`, `expires_at`,
+  server-resolved price, `customer_email`, `locale`, an `expires_at` at least 30
+  minutes in the future (never the shorter `reservationTtlMinutes` deadline),
   `client_reference_id`, `metadata`, and `payment_intent_data.metadata` so the
-  charge carries the booking id too.
+  charge carries the booking id too. The internal expiry saga calls
+  `expireCheckoutSession` when the five-minute application hold expires.
 - [ ] Implement `expireCheckoutSession` catching `StripeInvalidRequestError` whose
   message matches `/already complete/i`, then `retrieve`-ing the session and
   returning `ALREADY_COMPLETE` with `payment_status`. Every other error rethrows.
@@ -5132,13 +5180,13 @@ branches and the inert Connect seam.
 their status webhooks and one uniform failure classification.
 
 **Files.**
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/providers/email/resend-email.provider.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/providers/email/resend-email.provider.spec.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/providers/email/resend-signature.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/providers/sms/twilio-sms.provider.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/providers/sms/twilio-sms.provider.spec.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/providers/sms/twilio-signature.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/providers/providers.module.ts` (edit)
+- `booking-app/apps/api/src/providers/email/resend-email.provider.ts` (new)
+- `booking-app/apps/api/src/providers/email/resend-email.provider.spec.ts` (new)
+- `booking-app/apps/api/src/providers/email/resend-signature.ts` (new)
+- `booking-app/apps/api/src/providers/sms/twilio-sms.provider.ts` (new)
+- `booking-app/apps/api/src/providers/sms/twilio-sms.provider.spec.ts` (new)
+- `booking-app/apps/api/src/providers/sms/twilio-signature.ts` (new)
+- `booking-app/apps/api/src/providers/providers.module.ts` (edit)
 
 **Produces for later tasks.**
 
@@ -5259,11 +5307,11 @@ verifiers proven against a hand-computed HMAC rather than a mock.
 processor can never receive a shape it does not expect.
 
 **Files.**
-- `/Users/robert/www/shape-and-flow/booking-app/packages/contracts/src/queues/index.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/packages/contracts/src/queues/queues.spec.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/messaging/queues/queues.module.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/messaging/queues/redis.provider.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/messaging/queues/enqueue.service.ts` (new)
+- `booking-app/packages/contracts/src/queues/index.ts` (new)
+- `booking-app/packages/contracts/src/queues/queues.spec.ts` (new)
+- `booking-app/apps/api/src/messaging/queues/queues.module.ts` (new)
+- `booking-app/apps/api/src/messaging/queues/redis.provider.ts` (new)
+- `booking-app/apps/api/src/messaging/queues/enqueue.service.ts` (new)
 
 **Produces for later tasks.**
 
@@ -5386,11 +5434,11 @@ queues registered and logs one line listing them.
 confirmation email can be lost to a crash.
 
 **Files.**
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/messaging/outbox/outbox.recorder.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/messaging/outbox/outbox.dispatcher.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/messaging/outbox/outbox.reconciler.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/messaging/outbox/outbox.module.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/test/integration/outbox.int.spec.ts` (new)
+- `booking-app/apps/api/src/messaging/outbox/outbox.recorder.ts` (new)
+- `booking-app/apps/api/src/messaging/outbox/outbox.dispatcher.ts` (new)
+- `booking-app/apps/api/src/messaging/outbox/outbox.reconciler.ts` (new)
+- `booking-app/apps/api/src/messaging/outbox/outbox.module.ts` (new)
+- `booking-app/apps/api/test/integration/outbox.int.spec.ts` (new)
 
 **Produces for later tasks.**
 
@@ -5586,10 +5634,10 @@ test that proves the claim query does not double-dispatch.
 mid-processing, and impossible to lose.
 
 **Files.**
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/messaging/inbox/inbox.recorder.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/messaging/inbox/inbox.reconciler.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/messaging/inbox/inbox.module.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/test/integration/inbox.int.spec.ts` (new)
+- `booking-app/apps/api/src/messaging/inbox/inbox.recorder.ts` (new)
+- `booking-app/apps/api/src/messaging/inbox/inbox.reconciler.ts` (new)
+- `booking-app/apps/api/src/messaging/inbox/inbox.module.ts` (new)
+- `booking-app/apps/api/test/integration/inbox.int.spec.ts` (new)
 
 **Produces for later tasks.**
 
@@ -5716,12 +5764,12 @@ uniqueness case and the reconciler window.
 safely retryable, with the Checkout URL reachable only by the key holder.
 
 **Files.**
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/messaging/idempotency/idempotency.service.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/messaging/idempotency/idempotency.interceptor.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/messaging/idempotency/idempotent.decorator.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/messaging/idempotency/request-hash.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/messaging/idempotency/request-hash.spec.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/test/integration/idempotency.int.spec.ts` (new)
+- `booking-app/apps/api/src/messaging/idempotency/idempotency.service.ts` (new)
+- `booking-app/apps/api/src/messaging/idempotency/idempotency.interceptor.ts` (new)
+- `booking-app/apps/api/src/messaging/idempotency/idempotent.decorator.ts` (new)
+- `booking-app/apps/api/src/messaging/idempotency/request-hash.ts` (new)
+- `booking-app/apps/api/src/messaging/idempotency/request-hash.spec.ts` (new)
+- `booking-app/apps/api/test/integration/idempotency.int.spec.ts` (new)
 
 **Produces for later tasks.**
 
@@ -5880,13 +5928,13 @@ concurrent-`begin` race and the abandon-on-failure path.
 availability snapshot loaded in a bounded number of queries.
 
 **Files.**
-- `/Users/robert/www/shape-and-flow/booking-app/packages/contracts/src/public/index.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/public/public-catalog.controller.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/public/public-availability.controller.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/public/availability-snapshot.service.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/public/public.module.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/common/guards/public.decorator.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/test/integration/public-availability.int.spec.ts` (new)
+- `booking-app/packages/contracts/src/public/index.ts` (new)
+- `booking-app/apps/api/src/public/public-catalog.controller.ts` (new)
+- `booking-app/apps/api/src/public/public-availability.controller.ts` (new)
+- `booking-app/apps/api/src/public/availability-snapshot.service.ts` (new)
+- `booking-app/apps/api/src/public/public.module.ts` (new)
+- `booking-app/apps/api/src/common/guards/public.decorator.ts` (new)
+- `booking-app/apps/api/test/integration/public-availability.int.spec.ts` (new)
 
 **Produces for later tasks.**
 
@@ -6025,11 +6073,11 @@ provably free of double-booking, with "any available employee" resolved
 server-side before the insert.
 
 **Files.**
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/booking/reservation.service.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/booking/booking-reference.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/booking/calendar-lock.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/booking/customer-upsert.service.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/test/integration/reservation.int.spec.ts` (new)
+- `booking-app/apps/api/src/booking/reservation.service.ts` (new)
+- `booking-app/apps/api/src/booking/booking-reference.ts` (new)
+- `booking-app/apps/api/src/booking/calendar-lock.ts` (new)
+- `booking-app/apps/api/src/booking/customer-upsert.service.ts` (new)
+- `booking-app/apps/api/test/integration/reservation.int.spec.ts` (new)
 
 **Produces for later tasks.**
 
@@ -6200,11 +6248,11 @@ can catch.
 any transaction, and make the Checkout URL replayable only by the key holder.
 
 **Files.**
-- `/Users/robert/www/shape-and-flow/booking-app/packages/contracts/src/public/bookings.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/public/public-bookings.controller.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/booking/booking-checkout.service.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/booking/booking.module.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/test/integration/public-bookings.int.spec.ts` (new)
+- `booking-app/packages/contracts/src/public/bookings.ts` (new)
+- `booking-app/apps/api/src/public/public-bookings.controller.ts` (new)
+- `booking-app/apps/api/src/booking/booking-checkout.service.ts` (new)
+- `booking-app/apps/api/src/booking/booking.module.ts` (new)
+- `booking-app/apps/api/test/integration/public-bookings.int.spec.ts` (new)
 
 **Produces for later tasks.**
 
@@ -6356,12 +6404,12 @@ proves no network call is inside a transaction.
 a duplicate or out-of-order delivery a no-op.
 
 **Files.**
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/webhooks/stripe-webhook.controller.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/webhooks/raw-body.middleware.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/webhooks/webhooks.module.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/booking/booking-confirmation.service.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/booking/processors/stripe-event.processor.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/test/integration/stripe-webhook.int.spec.ts` (new)
+- `booking-app/apps/api/src/webhooks/stripe-webhook.controller.ts` (new)
+- `booking-app/apps/api/src/webhooks/raw-body.middleware.ts` (new)
+- `booking-app/apps/api/src/webhooks/webhooks.module.ts` (new)
+- `booking-app/apps/api/src/booking/booking-confirmation.service.ts` (new)
+- `booking-app/apps/api/src/booking/processors/stripe-event.processor.ts` (new)
+- `booking-app/apps/api/test/integration/stripe-webhook.int.spec.ts` (new)
 
 **Produces for later tasks.**
 
@@ -6476,7 +6524,7 @@ describe('POST /api/webhooks/stripe', () => {
 - [ ] A valid event stores an inbox row, enqueues with `jobId = stripe:<eventId>`,
   and returns `200` before processing.
 - [ ] A duplicate delivery returns `200`, stores nothing, enqueues nothing.
-- [ ] Confirmation sets `CONFIRMED`, clears `expiresAt`, sets `confirmedAt`, upserts
+- [ ] Confirmation sets `CONFIRMED`, retains `expiresAt`, sets `confirmedAt`, upserts
   the `Payment` to `SUCCEEDED`, issues one `ManagementToken`, writes one history row,
   and writes one `booking.confirmed` outbox row.
 - [ ] Processing twice changes nothing the second time — every count stays at one.
@@ -6499,9 +6547,10 @@ describe('POST /api/webhooks/stripe', () => {
   the booking `FOR UPDATE`; return `ALREADY_CONFIRMED` when the status is already
   `CONFIRMED` or terminal; assert the transition; update the booking; upsert the
   payment by `stripeCheckoutSessionId`; create the `ManagementToken` from a fresh
-  256-bit secret whose hash only is stored, returning the plaintext to the caller
-  for the notification payload; write history; write the `booking.confirmed`
-  outbox row.
+  256-bit secret whose hash only is stored in `ManagementToken`; encrypt the
+  plaintext token into `OutboxEvent.encryptedSensitivePayload` with AES-256-GCM;
+  keep the ordinary JSON payload token-free; write history; write the
+  `booking.confirmed` outbox row.
 - [ ] Implement the processor: read the inbox row, `parseJobPayload`, resolve the
   booking by `stripeCheckoutSessionId` and fall back to `client_reference_id`,
   branch by event type, then `markProcessed`; on a thrown error call `markFailed`
@@ -6509,9 +6558,10 @@ describe('POST /api/webhooks/stripe', () => {
 - [ ] Handle `async_payment_succeeded` through the same `confirmPaid`, and
   `async_payment_failed` / `payment_intent.payment_failed` through
   `markPaymentFailed`.
-- [ ] Pass the plaintext management token into the outbox payload rather than
-  storing it, so the confirmation email can contain the link and the database still
-  holds only the hash.
+- [ ] In the notification worker, decrypt the sensitive outbox envelope only in
+  memory immediately before rendering the confirmation link, zero/drop the
+  plaintext reference after the provider call, and redact it from all errors and
+  logs. Never persist the raw token in JSON, a job payload, or a notification row.
 
 **Commands.**
 ```bash
@@ -6531,10 +6581,10 @@ double-processing test proving idempotency across all five side effects.
 dead, and confirm the booking instead if the customer paid in the meantime.
 
 **Files.**
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/booking/expiry.service.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/booking/processors/expiry.processor.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/booking/expiry.sweeper.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/test/integration/expiry-saga.int.spec.ts` (new)
+- `booking-app/apps/api/src/booking/expiry.service.ts` (new)
+- `booking-app/apps/api/src/booking/processors/expiry.processor.ts` (new)
+- `booking-app/apps/api/src/booking/expiry.sweeper.ts` (new)
+- `booking-app/apps/api/test/integration/expiry-saga.int.spec.ts` (new)
 
 **Produces for later tasks.**
 
@@ -6675,7 +6725,7 @@ describe('expiry saga', () => {
   `EXPIRING` return the settled outcome; if no session id, transactionally
   `EXPIRING → EXPIRED`; otherwise call `expireCheckoutSession` **outside** any
   transaction and branch:
-  - [ ] `EXPIRED` → transactional `EXPIRING → EXPIRED`, `expiresAt = null`, history.
+  - [ ] `EXPIRED` → transactional `EXPIRING → EXPIRED`, retaining `expiresAt`, history.
   - [ ] `ALREADY_COMPLETE` with `paymentStatus: 'paid'` → `retrieveCheckoutSession`
     for the payment intent and charge, then delegate to
     `BookingConfirmationService.confirmPaid` with
@@ -6714,12 +6764,12 @@ slot-stays-blocked assertions and the concurrent-confirmation race.
 make the token unable to leak through a log, a referrer, or a different booking.
 
 **Files.**
-- `/Users/robert/www/shape-and-flow/booking-app/packages/contracts/src/manage/index.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/manage/management-token.service.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/manage/management-token.guard.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/manage/manage.controller.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/manage/manage.module.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/test/integration/manage-auth.int.spec.ts` (new)
+- `booking-app/packages/contracts/src/manage/index.ts` (new)
+- `booking-app/apps/api/src/manage/management-token.service.ts` (new)
+- `booking-app/apps/api/src/manage/management-token.guard.ts` (new)
+- `booking-app/apps/api/src/manage/manage.controller.ts` (new)
+- `booking-app/apps/api/src/manage/manage.module.ts` (new)
+- `booking-app/apps/api/test/integration/manage-auth.int.spec.ts` (new)
 
 **Produces for later tasks.**
 
@@ -6841,9 +6891,9 @@ no-internal-ids assertion over the serialised response.
 request inside it — with the slot still blocked while the office decides.
 
 **Files.**
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/booking/cancellation.service.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/manage/manage-cancel.controller.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/test/integration/cancellation.int.spec.ts` (new)
+- `booking-app/apps/api/src/booking/cancellation.service.ts` (new)
+- `booking-app/apps/api/src/manage/manage-cancel.controller.ts` (new)
+- `booking-app/apps/api/test/integration/cancellation.int.spec.ts` (new)
 
 **Produces for later tasks.**
 
@@ -7010,10 +7060,10 @@ test and the slot-stays-blocked assertion for an open request.
 webhook, or an out-of-order event.
 
 **Files.**
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/payment/refund.service.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/payment/processors/refund.processor.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/payment/refund-webhook.handler.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/test/integration/refund.int.spec.ts` (new)
+- `booking-app/apps/api/src/payment/refund.service.ts` (new)
+- `booking-app/apps/api/src/payment/processors/refund.processor.ts` (new)
+- `booking-app/apps/api/src/payment/refund-webhook.handler.ts` (new)
+- `booking-app/apps/api/test/integration/refund.int.spec.ts` (new)
 
 **Produces for later tasks.**
 
@@ -7170,9 +7220,9 @@ out-of-order webhook and the sum invariant.
 and the new slot be unbooked or double-booked in between.
 
 **Files.**
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/booking/reschedule.service.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/manage/manage-reschedule.controller.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/test/integration/reschedule.int.spec.ts` (new)
+- `booking-app/apps/api/src/booking/reschedule.service.ts` (new)
+- `booking-app/apps/api/src/manage/manage-reschedule.controller.ts` (new)
+- `booking-app/apps/api/test/integration/reschedule.int.spec.ts` (new)
 
 **Produces for later tasks.**
 
@@ -7318,9 +7368,9 @@ lock-ordering assertion and the atomic slot swap.
 let the business cancel with an optional refund.
 
 **Files.**
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/booking/attendance.service.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/booking/audit.service.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/test/integration/attendance.int.spec.ts` (new)
+- `booking-app/apps/api/src/booking/attendance.service.ts` (new)
+- `booking-app/apps/api/src/booking/audit.service.ts` (new)
+- `booking-app/apps/api/test/integration/attendance.int.spec.ts` (new)
 
 **Produces for later tasks.**
 
@@ -7461,16 +7511,16 @@ orphaned-request closure.
 missing German translation is a compile error rather than an English email.
 
 **Files.**
-- `/Users/robert/www/shape-and-flow/booking-app/packages/notification-templates/package.json` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/packages/notification-templates/tsconfig.json` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/packages/notification-templates/src/index.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/packages/notification-templates/src/data.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/packages/notification-templates/src/format.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/packages/notification-templates/src/layout.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/packages/notification-templates/src/de/*.ts` (new, one per kind)
-- `/Users/robert/www/shape-and-flow/booking-app/packages/notification-templates/src/en/*.ts` (new, one per kind)
-- `/Users/robert/www/shape-and-flow/booking-app/packages/notification-templates/src/templates.spec.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/packages/notification-templates/src/__snapshots__/` (generated)
+- `booking-app/packages/notification-templates/package.json` (new)
+- `booking-app/packages/notification-templates/tsconfig.json` (new)
+- `booking-app/packages/notification-templates/src/index.ts` (new)
+- `booking-app/packages/notification-templates/src/data.ts` (new)
+- `booking-app/packages/notification-templates/src/format.ts` (new)
+- `booking-app/packages/notification-templates/src/layout.ts` (new)
+- `booking-app/packages/notification-templates/src/de/*.ts` (new, one per kind)
+- `booking-app/packages/notification-templates/src/en/*.ts` (new, one per kind)
+- `booking-app/packages/notification-templates/src/templates.spec.ts` (new)
+- `booking-app/packages/notification-templates/src/__snapshots__/` (generated)
 
 **Produces for later tasks.**
 
@@ -7604,13 +7654,13 @@ falling back to English.
 delivery all the way to the provider's verdict.
 
 **Files.**
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/notification/notification.service.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/notification/dedupe-key.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/notification/processors/notification-send.processor.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/notification/processors/booking-event.processor.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/notification/notification.reconciler.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/webhooks/messaging-webhook.controller.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/test/integration/notifications.int.spec.ts` (new)
+- `booking-app/apps/api/src/notification/notification.service.ts` (new)
+- `booking-app/apps/api/src/notification/dedupe-key.ts` (new)
+- `booking-app/apps/api/src/notification/processors/notification-send.processor.ts` (new)
+- `booking-app/apps/api/src/notification/processors/booking-event.processor.ts` (new)
+- `booking-app/apps/api/src/notification/notification.reconciler.ts` (new)
+- `booking-app/apps/api/src/webhooks/messaging-webhook.controller.ts` (new)
+- `booking-app/apps/api/test/integration/notifications.int.spec.ts` (new)
 
 **Produces for later tasks.**
 
@@ -7787,10 +7837,10 @@ both webhook providers and the dedupe assertion.
 that has moved, been cancelled, or already happened.
 
 **Files.**
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/notification/reminder.service.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/notification/processors/reminder.processor.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/notification/reminder.reconciler.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/test/integration/reminders.int.spec.ts` (new)
+- `booking-app/apps/api/src/notification/reminder.service.ts` (new)
+- `booking-app/apps/api/src/notification/processors/reminder.processor.ts` (new)
+- `booking-app/apps/api/src/notification/reminder.reconciler.ts` (new)
+- `booking-app/apps/api/test/integration/reminders.int.spec.ts` (new)
 
 **Produces for later tasks.**
 
@@ -7942,12 +7992,12 @@ reschedule-job-id case and the Redis-loss recovery.
 reconciler, and schedule — and an HTTP process that owns none of them.
 
 **Files.**
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/worker.main.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/worker.module.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/messaging/queues/scheduler.service.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/messaging/queues/worker-registrar.service.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/Dockerfile` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/test/integration/worker-bootstrap.int.spec.ts` (new)
+- `booking-app/apps/api/src/worker.main.ts` (new)
+- `booking-app/apps/api/src/worker.module.ts` (new)
+- `booking-app/apps/api/src/messaging/queues/scheduler.service.ts` (new)
+- `booking-app/apps/api/src/messaging/queues/worker-registrar.service.ts` (new)
+- `booking-app/apps/api/Dockerfile` (new)
+- `booking-app/apps/api/test/integration/worker-bootstrap.int.spec.ts` (new)
 
 **Produces for later tasks.** The `worker` Docker target and the repeatable job
 schedule the deployment relies on.
@@ -8065,7 +8115,7 @@ pnpm api test:integration -- test/integration/worker-bootstrap.int.spec.ts
 pnpm api build
 APP_ROLE=worker node booking-app/apps/api/dist/worker.main.js &
 sleep 3 && kill -TERM %1
-docker build -f booking-app/apps/api/Dockerfile --target worker -t shape-and-flow-booking-worker booking-app
+docker build -f booking-app/apps/api/Dockerfile --target worker -t shape-and-flow-booking-worker .
 ```
 
 **Expected successful result.** All bootstrap tests green; the worker starts, logs
@@ -8083,15 +8133,15 @@ targets build.
 enumeration, fixation, brute force, and CSRF all fail.
 
 **Files.**
-- `/Users/robert/www/shape-and-flow/booking-app/packages/contracts/src/auth/index.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/auth/password.service.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/auth/session.store.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/auth/office-session.guard.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/auth/csrf-header.guard.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/auth/auth.controller.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/auth/password-reset.service.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/auth/auth.module.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/test/integration/auth.int.spec.ts` (new)
+- `booking-app/packages/contracts/src/auth/index.ts` (new)
+- `booking-app/apps/api/src/auth/password.service.ts` (new)
+- `booking-app/apps/api/src/auth/session.store.ts` (new)
+- `booking-app/apps/api/src/auth/office-session.guard.ts` (new)
+- `booking-app/apps/api/src/auth/csrf-header.guard.ts` (new)
+- `booking-app/apps/api/src/auth/auth.controller.ts` (new)
+- `booking-app/apps/api/src/auth/password-reset.service.ts` (new)
+- `booking-app/apps/api/src/auth/auth.module.ts` (new)
+- `booking-app/apps/api/test/integration/auth.int.spec.ts` (new)
 
 **Produces for later tasks.**
 
@@ -8290,13 +8340,13 @@ timing-equality assertion and the absolute session cap.
 by tests, and make every consequential office action leave a trace.
 
 **Files.**
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/auth/roles.decorator.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/auth/roles.guard.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/auth/refund-capability.guard.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/auth/employee-scope.service.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/common/audit/audit.interceptor.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/test/integration/authorization.int.spec.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/test/integration/tenant-isolation.int.spec.ts` (new)
+- `booking-app/apps/api/src/auth/roles.decorator.ts` (new)
+- `booking-app/apps/api/src/auth/roles.guard.ts` (new)
+- `booking-app/apps/api/src/auth/refund-capability.guard.ts` (new)
+- `booking-app/apps/api/src/auth/employee-scope.service.ts` (new)
+- `booking-app/apps/api/src/common/audit/audit.interceptor.ts` (new)
+- `booking-app/apps/api/test/integration/authorization.int.spec.ts` (new)
+- `booking-app/apps/api/test/integration/tenant-isolation.int.spec.ts` (new)
 
 **Produces for later tasks.**
 
@@ -8454,14 +8504,14 @@ both list and detail endpoints, and the router metadata test passing.
 bounded query set.
 
 **Files.**
-- `/Users/robert/www/shape-and-flow/booking-app/packages/contracts/src/office/dashboard.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/packages/contracts/src/office/calendar.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/office/dashboard.controller.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/office/dashboard.service.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/office/calendar.controller.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/office/calendar.service.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/office/display-status.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/test/integration/office-calendar.int.spec.ts` (new)
+- `booking-app/packages/contracts/src/office/dashboard.ts` (new)
+- `booking-app/packages/contracts/src/office/calendar.ts` (new)
+- `booking-app/apps/api/src/office/dashboard.controller.ts` (new)
+- `booking-app/apps/api/src/office/dashboard.service.ts` (new)
+- `booking-app/apps/api/src/office/calendar.controller.ts` (new)
+- `booking-app/apps/api/src/office/calendar.service.ts` (new)
+- `booking-app/apps/api/src/office/display-status.ts` (new)
+- `booking-app/apps/api/test/integration/office-calendar.int.spec.ts` (new)
 
 **Produces for later tasks.**
 
@@ -8609,18 +8659,18 @@ boundary and the query-count ceiling.
 the same advisory lock as booking creation.
 
 **Files.**
-- `/Users/robert/www/shape-and-flow/booking-app/packages/contracts/src/office/staff.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/packages/contracts/src/office/catalog.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/packages/contracts/src/office/settings.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/office/employees.controller.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/office/employees.service.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/office/availability-admin.controller.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/office/availability-admin.service.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/office/catalog.controller.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/office/catalog.service.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/office/settings.controller.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/office/office-users.controller.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/test/integration/office-admin.int.spec.ts` (new)
+- `booking-app/packages/contracts/src/office/staff.ts` (new)
+- `booking-app/packages/contracts/src/office/catalog.ts` (new)
+- `booking-app/packages/contracts/src/office/settings.ts` (new)
+- `booking-app/apps/api/src/office/employees.controller.ts` (new)
+- `booking-app/apps/api/src/office/employees.service.ts` (new)
+- `booking-app/apps/api/src/office/availability-admin.controller.ts` (new)
+- `booking-app/apps/api/src/office/availability-admin.service.ts` (new)
+- `booking-app/apps/api/src/office/catalog.controller.ts` (new)
+- `booking-app/apps/api/src/office/catalog.service.ts` (new)
+- `booking-app/apps/api/src/office/settings.controller.ts` (new)
+- `booking-app/apps/api/src/office/office-users.controller.ts` (new)
+- `booking-app/apps/api/test/integration/office-admin.int.spec.ts` (new)
 
 **Produces for later tasks.** Everything the office web area in Stage 10 renders.
 
@@ -8804,15 +8854,15 @@ conflict paths that depend on the advisory lock.
 exports that are the accounting hand-off.
 
 **Files.**
-- `/Users/robert/www/shape-and-flow/booking-app/packages/contracts/src/office/bookings.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/office/office-bookings.controller.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/office/office-bookings.service.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/office/requests.controller.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/payment/manual-payment.service.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/office/customers.controller.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/office/exports.controller.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/office/csv.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/test/integration/office-bookings.int.spec.ts` (new)
+- `booking-app/packages/contracts/src/office/bookings.ts` (new)
+- `booking-app/apps/api/src/office/office-bookings.controller.ts` (new)
+- `booking-app/apps/api/src/office/office-bookings.service.ts` (new)
+- `booking-app/apps/api/src/office/requests.controller.ts` (new)
+- `booking-app/apps/api/src/payment/manual-payment.service.ts` (new)
+- `booking-app/apps/api/src/office/customers.controller.ts` (new)
+- `booking-app/apps/api/src/office/exports.controller.ts` (new)
+- `booking-app/apps/api/src/office/csv.ts` (new)
+- `booking-app/apps/api/test/integration/office-bookings.int.spec.ts` (new)
 
 **Produces for later tasks.** The complete office API the web area consumes.
 
@@ -8991,8 +9041,10 @@ describe('CSV export', () => {
 - [ ] Wire `POST /office/bookings/:id/refunds` to `RefundService.request` behind
   `@RequiresRefundCapability()`, and the cancellation, completion, no-show, and
   decision routes to the Stage 6 services.
-- [ ] Implement cursor pagination as a shared helper: encode `{ createdAt, id }`,
-  decode defensively, and always add `id` as the final sort key so the order is total.
+- [ ] Implement cursor pagination as a shared helper: encode
+  `{ sort, value, id }`, reject a cursor whose sort/direction differs from the
+  request, compare `value` using that direction, and always add `id` as the
+  final sort key so the order is total.
 - [ ] Implement `csv.ts` with `toCsvRow` (quote when the cell contains `;`, `"`, or a
   newline; double embedded quotes) and `neutralise` (prefix `'` for `=`, `+`, `-`,
   `@`), and stream the export with a `Readable` so a large range does not buffer.
@@ -9020,20 +9072,20 @@ and orange palette is defined once as CSS custom properties and consumed through
 semantic Tailwind names.
 
 **Files.**
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/package.json` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/index.html` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/vite.config.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/tsconfig.json` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/src/main.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/src/App.vue` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/src/router/index.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/src/styles/main.css` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/packages/ui/package.json` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/packages/ui/src/tokens.css` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/packages/ui/src/tailwind-preset.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/packages/ui/src/icons.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/packages/ui/src/components/*.vue` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/packages/ui/src/tokens.spec.ts` (new)
+- `booking-app/apps/web/package.json` (new)
+- `booking-app/apps/web/index.html` (new)
+- `booking-app/apps/web/vite.config.ts` (new)
+- `booking-app/apps/web/tsconfig.json` (new)
+- `booking-app/apps/web/src/main.ts` (new)
+- `booking-app/apps/web/src/App.vue` (new)
+- `booking-app/apps/web/src/router/index.ts` (new)
+- `booking-app/apps/web/src/styles/main.css` (new)
+- `booking-app/packages/ui/package.json` (new)
+- `booking-app/packages/ui/src/tokens.css` (new)
+- `booking-app/packages/ui/src/tailwind-preset.ts` (new)
+- `booking-app/packages/ui/src/icons.ts` (new)
+- `booking-app/packages/ui/src/components/*.vue` (new)
+- `booking-app/packages/ui/src/tokens.spec.ts` (new)
 
 **Produces for later tasks.** `SfButton`, `SfInput`, `SfSelect`, `SfCard`,
 `SfBadge`, `SfSpinner`, `SfAlert`, `SfModal`, `SfIcon`, `SfSkeleton`, plus the
@@ -9192,14 +9244,14 @@ accessibility tests green, and a production build with no external network reque
 client whose types come from the contracts package.
 
 **Files.**
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/src/i18n/index.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/src/i18n/de.json` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/src/i18n/en.json` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/src/i18n/i18n.spec.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/src/api/client.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/src/api/errors.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/src/api/client.spec.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/src/stores/locale.ts` (new)
+- `booking-app/apps/web/src/i18n/index.ts` (new)
+- `booking-app/apps/web/src/i18n/de.json` (new)
+- `booking-app/apps/web/src/i18n/en.json` (new)
+- `booking-app/apps/web/src/i18n/i18n.spec.ts` (new)
+- `booking-app/apps/web/src/api/client.ts` (new)
+- `booking-app/apps/web/src/api/errors.ts` (new)
+- `booking-app/apps/web/src/api/client.spec.ts` (new)
+- `booking-app/apps/web/src/stores/locale.ts` (new)
 
 **Produces for later tasks.**
 
@@ -9351,17 +9403,17 @@ key-parity test.
 countdown visible before they leave for Stripe.
 
 **Files.**
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/src/stores/booking-draft.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/src/pages/public/BookingLayout.vue` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/src/pages/public/StepService.vue` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/src/pages/public/StepEmployee.vue` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/src/pages/public/StepSlot.vue` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/src/pages/public/StepDetails.vue` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/src/pages/public/RedirectToCheckout.vue` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/src/components/SlotPicker.vue` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/src/components/ReservationCountdown.vue` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/src/stores/booking-draft.spec.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/src/components/ReservationCountdown.spec.ts` (new)
+- `booking-app/apps/web/src/stores/booking-draft.ts` (new)
+- `booking-app/apps/web/src/pages/public/BookingLayout.vue` (new)
+- `booking-app/apps/web/src/pages/public/StepService.vue` (new)
+- `booking-app/apps/web/src/pages/public/StepEmployee.vue` (new)
+- `booking-app/apps/web/src/pages/public/StepSlot.vue` (new)
+- `booking-app/apps/web/src/pages/public/StepDetails.vue` (new)
+- `booking-app/apps/web/src/pages/public/RedirectToCheckout.vue` (new)
+- `booking-app/apps/web/src/components/SlotPicker.vue` (new)
+- `booking-app/apps/web/src/components/ReservationCountdown.vue` (new)
+- `booking-app/apps/web/src/stores/booking-draft.spec.ts` (new)
+- `booking-app/apps/web/src/components/ReservationCountdown.spec.ts` (new)
 
 **Produces for later tasks.** The flow the end-to-end tests in Task 11.1 drive.
 
@@ -9500,14 +9552,14 @@ against the fake payment provider and lands on Checkout.
 self-service page for the booking, and one tap to reach the business.
 
 **Files.**
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/src/pages/public/BookingSuccess.vue` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/src/pages/public/BookingCanceled.vue` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/src/pages/public/ManageBooking.vue` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/src/pages/public/ManageReschedule.vue` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/src/components/WhatsAppButton.vue` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/src/composables/useManagementToken.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/src/composables/useManagementToken.spec.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/src/components/WhatsAppButton.spec.ts` (new)
+- `booking-app/apps/web/src/pages/public/BookingSuccess.vue` (new)
+- `booking-app/apps/web/src/pages/public/BookingCanceled.vue` (new)
+- `booking-app/apps/web/src/pages/public/ManageBooking.vue` (new)
+- `booking-app/apps/web/src/pages/public/ManageReschedule.vue` (new)
+- `booking-app/apps/web/src/components/WhatsAppButton.vue` (new)
+- `booking-app/apps/web/src/composables/useManagementToken.ts` (new)
+- `booking-app/apps/web/src/composables/useManagementToken.spec.ts` (new)
+- `booking-app/apps/web/src/components/WhatsAppButton.spec.ts` (new)
 
 **Produces for later tasks.** The pages the end-to-end suite asserts on.
 
@@ -9624,13 +9676,13 @@ storage, and the success page resolves against the fake provider.
 and a session expiry that never loses a form.
 
 **Files.**
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/src/pages/office/OfficeLayout.vue` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/src/pages/office/OfficeLogin.vue` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/src/pages/office/OfficeForgotPassword.vue` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/src/pages/office/OfficeResetPassword.vue` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/src/stores/session.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/src/router/office-guard.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/src/stores/session.spec.ts` (new)
+- `booking-app/apps/web/src/pages/office/OfficeLayout.vue` (new)
+- `booking-app/apps/web/src/pages/office/OfficeLogin.vue` (new)
+- `booking-app/apps/web/src/pages/office/OfficeForgotPassword.vue` (new)
+- `booking-app/apps/web/src/pages/office/OfficeResetPassword.vue` (new)
+- `booking-app/apps/web/src/stores/session.ts` (new)
+- `booking-app/apps/web/src/router/office-guard.ts` (new)
+- `booking-app/apps/web/src/stores/session.spec.ts` (new)
 
 **Produces for later tasks.** `useSession()` with `role`, `canIssueRefunds`, and
 `employeeId`, used by every office screen to hide what the API would refuse.
@@ -9727,14 +9779,14 @@ the build output; an expired session returns to the attempted route.
 every action happens.
 
 **Files.**
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/src/pages/office/OfficeDashboard.vue` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/src/pages/office/OfficeCalendar.vue` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/src/pages/office/BookingDetail.vue` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/src/pages/office/BookingList.vue` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/src/components/office/CalendarGrid.vue` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/src/components/office/StatusBadge.vue` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/src/components/office/CalendarGrid.spec.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/src/components/office/StatusBadge.spec.ts` (new)
+- `booking-app/apps/web/src/pages/office/OfficeDashboard.vue` (new)
+- `booking-app/apps/web/src/pages/office/OfficeCalendar.vue` (new)
+- `booking-app/apps/web/src/pages/office/BookingDetail.vue` (new)
+- `booking-app/apps/web/src/pages/office/BookingList.vue` (new)
+- `booking-app/apps/web/src/components/office/CalendarGrid.vue` (new)
+- `booking-app/apps/web/src/components/office/StatusBadge.vue` (new)
+- `booking-app/apps/web/src/components/office/CalendarGrid.spec.ts` (new)
+- `booking-app/apps/web/src/components/office/StatusBadge.spec.ts` (new)
 
 **Produces for later tasks.** The screens the end-to-end office journey drives.
 
@@ -9842,17 +9894,17 @@ seeded week correctly and every action round-trips.
 export buttons.
 
 **Files.**
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/src/pages/office/EmployeesPage.vue` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/src/pages/office/WorkingHoursEditor.vue` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/src/pages/office/ServicesPage.vue` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/src/pages/office/AvailabilityPage.vue` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/src/pages/office/RequestsPage.vue` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/src/pages/office/CustomersPage.vue` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/src/pages/office/SettingsPage.vue` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/src/pages/office/UsersPage.vue` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/src/pages/office/ExportsPage.vue` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/src/pages/office/WorkingHoursEditor.spec.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/src/pages/office/RequestsPage.spec.ts` (new)
+- `booking-app/apps/web/src/pages/office/EmployeesPage.vue` (new)
+- `booking-app/apps/web/src/pages/office/WorkingHoursEditor.vue` (new)
+- `booking-app/apps/web/src/pages/office/ServicesPage.vue` (new)
+- `booking-app/apps/web/src/pages/office/AvailabilityPage.vue` (new)
+- `booking-app/apps/web/src/pages/office/RequestsPage.vue` (new)
+- `booking-app/apps/web/src/pages/office/CustomersPage.vue` (new)
+- `booking-app/apps/web/src/pages/office/SettingsPage.vue` (new)
+- `booking-app/apps/web/src/pages/office/UsersPage.vue` (new)
+- `booking-app/apps/web/src/pages/office/ExportsPage.vue` (new)
+- `booking-app/apps/web/src/pages/office/WorkingHoursEditor.spec.ts` (new)
+- `booking-app/apps/web/src/pages/office/RequestsPage.spec.ts` (new)
 
 **Produces for later tasks.** A complete office area, so Task 11.1 can drive a full
 journey.
@@ -9983,14 +10035,14 @@ real browser, against a real database and real queues, with the payment provider
 faked.
 
 **Files.**
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/playwright.config.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/e2e/fixtures/stack.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/e2e/customer-booking.spec.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/e2e/customer-expiry.spec.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/e2e/customer-manage.spec.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/e2e/office-journey.spec.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/e2e/accessibility.spec.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/test-support/test-support.controller.ts` (new)
+- `booking-app/apps/web/playwright.config.ts` (new)
+- `booking-app/apps/web/e2e/fixtures/stack.ts` (new)
+- `booking-app/apps/web/e2e/customer-booking.spec.ts` (new)
+- `booking-app/apps/web/e2e/customer-expiry.spec.ts` (new)
+- `booking-app/apps/web/e2e/customer-manage.spec.ts` (new)
+- `booking-app/apps/web/e2e/office-journey.spec.ts` (new)
+- `booking-app/apps/web/e2e/accessibility.spec.ts` (new)
+- `booking-app/apps/api/src/test-support/test-support.controller.ts` (new)
 
 **Produces for later tasks.** The regression net every later change runs against.
 
@@ -10238,13 +10290,13 @@ both viewports; the whole suite under five minutes.
 the office before a customer reports it.
 
 **Files.**
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/health/health.module.ts` (edit)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/health/queue.indicator.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/health/migration.indicator.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/health/operations.service.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/common/logging/request-log.interceptor.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/src/common/shutdown/shutdown.service.ts` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/apps/api/test/integration/health.int.spec.ts` (new)
+- `booking-app/apps/api/src/health/health.module.ts` (edit)
+- `booking-app/apps/api/src/health/queue.indicator.ts` (new)
+- `booking-app/apps/api/src/health/migration.indicator.ts` (new)
+- `booking-app/apps/api/src/health/operations.service.ts` (new)
+- `booking-app/apps/api/src/common/logging/request-log.interceptor.ts` (new)
+- `booking-app/apps/api/src/common/shutdown/shutdown.service.ts` (new)
+- `booking-app/apps/api/test/integration/health.int.spec.ts` (new)
 
 **Produces for later tasks.** `GET /api/health/live|ready|detail` and the operations
 counters the dashboard reads.
@@ -10273,7 +10325,10 @@ describe('health', () => {
   });
 
   it('ready fails when a shipped migration is not applied', async () => {
-    await prisma.$executeRawUnsafe(`DELETE FROM _prisma_migrations WHERE migration_name LIKE '%calendar_constraints'`);
+    const migrationName = '%calendar_constraints';
+    await prisma.$executeRaw(
+      Prisma.sql`DELETE FROM _prisma_migrations WHERE migration_name LIKE ${migrationName}`,
+    );
     const res = await request(app).get('/api/health/ready').expect(503);
     expect(res.body.details.migrations.status).toBe('down');
     expect(res.body.details.migrations.pending).toContain('calendar_constraints');
@@ -10377,14 +10432,14 @@ missing-migration detection and the end-to-end correlation-id propagation.
 **Objective.** A deployment a single operator can run, restore, and understand.
 
 **Files.**
-- `/Users/robert/www/shape-and-flow/booking-app/apps/web/Dockerfile` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/docker-compose.prod.yml` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/infrastructure/nginx/booking.conf` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/infrastructure/scripts/backup.sh` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/infrastructure/scripts/restore.sh` (new)
-- `/Users/robert/www/shape-and-flow/booking-app/docs/operations.md` (new)
-- `/Users/robert/www/shape-and-flow/README.md` (edit)
-- `/Users/robert/www/shape-and-flow/.github/workflows/ci.yml` (edit)
+- `booking-app/apps/web/Dockerfile` (new)
+- `booking-app/docker-compose.prod.yml` (new)
+- `booking-app/infrastructure/nginx/booking.conf` (new)
+- `booking-app/infrastructure/scripts/backup.sh` (new)
+- `booking-app/infrastructure/scripts/restore.sh` (new)
+- `booking-app/docs/operations.md` (new)
+- `README.md` (edit)
+- `.github/workflows/ci.yml` (edit)
 
 **Produces for later tasks.** Nothing — this is the last task.
 
@@ -10465,9 +10520,9 @@ backup taken, the volume destroyed, and the backup restored.
 
 **Commands.**
 ```bash
-docker build -f booking-app/apps/api/Dockerfile --target api    -t sf-booking-api    booking-app
-docker build -f booking-app/apps/api/Dockerfile --target worker -t sf-booking-worker booking-app
-docker build -f booking-app/apps/web/Dockerfile                 -t sf-booking-web    booking-app
+docker build -f booking-app/apps/api/Dockerfile --target api    -t sf-booking-api    .
+docker build -f booking-app/apps/api/Dockerfile --target worker -t sf-booking-worker .
+docker build -f booking-app/apps/web/Dockerfile                 -t sf-booking-web    .
 docker compose -f booking-app/docker-compose.prod.yml up -d --wait
 curl -fsS http://localhost/api/health/ready | jq
 booking-app/infrastructure/scripts/backup.sh

@@ -3,7 +3,7 @@ import swc from 'unplugin-swc';
 import { defineConfig, mergeConfig } from 'vitest/config';
 
 const TEST_DATABASE_URL =
-  process.env.DATABASE_URL ??
+  process.env.TEST_DATABASE_URL ??
   'postgresql://booking:booking@localhost:5434/booking_test?schema=public';
 const TEST_REDIS_URL = process.env.REDIS_URL ?? 'redis://localhost:6381';
 

@@ -98,6 +98,13 @@ describe('the slot grid', () => {
     }
   });
 
+  it.each([0, -15, 2.5])('rejects an invalid scheduling interval of %s minutes', (interval) => {
+    const snap = snapshot();
+    snap.settings.schedulingIntervalMinutes = interval;
+
+    expect(() => generateAvailability(snap, FRIDAY, FRIDAY)).toThrow(/positive integer/i);
+  });
+
   it('reports customer-visible end times that exclude buffers', () => {
     const snap = snapshot({
       service: { id: 'svc', durationMinutes: 30, prepBufferMinutes: 10, cleanupBufferMinutes: 15 },
@@ -211,6 +218,33 @@ describe('breaks', () => {
     expect(local).toContain('10:30');
     expect(local).not.toContain('12:00');
     expect(local).toContain('12:30');
+  });
+
+  it('rejects a segment whose break cannot be placed on the DST timeline', () => {
+    const snap = snapshot({
+      now: new Date('2026-03-01T00:00:00.000Z'),
+      employees: [
+        employee({
+          workingHours: [
+            {
+              weekday: 'SUNDAY',
+              startMinute: 60,
+              endMinute: 5 * 60,
+              breaks: [{ startMinute: 2 * 60 + 15, endMinute: 2 * 60 + 45 }],
+            },
+          ],
+        }),
+      ],
+    });
+
+    const result = generateAvailability(snap, SPRING_FORWARD, SPRING_FORWARD);
+    expect(result.days[0]?.slots).toEqual([]);
+    expect(result.skipped).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ minute: 2 * 60 + 15, reason: 'NONEXISTENT' }),
+        expect.objectContaining({ minute: 2 * 60 + 45, reason: 'NONEXISTENT' }),
+      ]),
+    );
   });
 });
 

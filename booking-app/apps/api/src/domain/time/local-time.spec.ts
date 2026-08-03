@@ -116,6 +116,22 @@ describe('wallClockToInstant across the fall-back repeat', () => {
       reason: 'NONEXISTENT',
     });
   });
+
+  it('detects a 30-minute repeated interval', () => {
+    expect(wallClockToInstant('2026-04-05', 1 * 60 + 45, 'Australia/Lord_Howe')).toEqual({
+      ok: false,
+      reason: 'AMBIGUOUS',
+    });
+  });
+});
+
+describe('wallClockToInstant at midnight transitions', () => {
+  it('reports a skipped next midnight instead of silently moving to another date', () => {
+    expect(wallClockToInstant('2011-12-29', 1440, 'Pacific/Apia')).toEqual({
+      ok: false,
+      reason: 'NONEXISTENT',
+    });
+  });
 });
 
 describe('wallClockToInstantOrThrow', () => {

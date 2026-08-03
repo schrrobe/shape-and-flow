@@ -161,7 +161,8 @@ describe('booking invariants', () => {
     for (const column of ['organizationId', 'employeeId', 'blockStartsAt', 'blockEndsAt']) {
       const line = fieldLines(booking).find((candidate) => candidate.startsWith(`${column} `));
       expect(line, `${column} not found`).toBeDefined();
-      expect(line, `${column} must be NOT NULL for the exclusion constraint`).not.toMatch(/\?\s/);
+      const type = /^\w+\s+(\S+)/.exec(line ?? '')?.[1];
+      expect(type, `${column} must be NOT NULL for the exclusion constraint`).not.toMatch(/\?$/);
     }
   });
 

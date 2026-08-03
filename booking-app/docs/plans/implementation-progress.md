@@ -1,16 +1,16 @@
 # Phase 1 — Implementation Progress
 
-Companion to `phase-1-implementation-plan.md`. That document is the spec and does
-not change; this one records what is built, what is next, and the decisions taken
-while implementing that the plan could not have known.
+Companion to `phase-1-implementation-plan.md`. That document is the working spec
+and is revised when implementation or review proves a statement wrong; this one
+records what is built, what is next, and why the implementation diverged.
 
 | | |
 | --- | --- |
-| Branch | `feat/phase-1-booking-app` (nothing pushed) |
+| Branch | `feat/p1-01-foundation` (PR #2) |
 | Tasks complete | 12 of 49 |
-| Unit tests | 210 passing |
-| Integration tests | 47 passing |
-| Gates | `pnpm lint`, `format`, `typecheck`, `test`, `test:integration`, `build` all green |
+| Unit tests | 241 passing |
+| Integration tests | 68 passing |
+| Gates | Unit/integration/lint/format/typecheck/build are re-verified before each update; e2e is not available until the web workspace lands in its later stacked PR |
 
 ## Execution order — vertical slice
 
@@ -61,12 +61,18 @@ Deferred out of the slice: 3.4, and all of stages 6–11.
 
 ## Version drift from the plan, and why
 
+Snapshot as of 2026-08-02. Re-check these constraints when any pinned tool is
+updated: TypeScript support is documented in
+[`typescript-eslint`'s dependency versions](https://typescript-eslint.io/users/dependency-versions/),
+and Vitest's transformer change is covered by its
+[`experimentalOxc` migration note](https://vitest.dev/guide/migration.html#experimental-oxc).
+
 The plan was written against a slightly older ecosystem. Each of these was a
 decision, not a mechanical bump.
 
-- **TypeScript 6.0.3, not 7.** TS 7 is latest, but `typescript-eslint` 8.65 caps
-  at `<6.1.0`. Type-aware linting is load-bearing for several planned rules, so
-  the newest version that keeps it working wins.
+- **TypeScript 6.0.3, not 7.** As of the snapshot date,
+  `typescript-eslint` 8.65 caps support at `<6.1.0`. Type-aware linting is
+  load-bearing for several planned rules, so the newest compatible version wins.
 - **Prisma 7, with a driver adapter.** Prisma 7 removed `url` from the datasource
   block and requires an adapter, so `PrismaService` builds a `PrismaPg` pool from
   validated config. Its ESM-native `prisma-client` generator also removes the
@@ -145,5 +151,6 @@ Each of these would have passed a casual "it works" check.
   `booking_test`.
 - The seeded owner password is generated and printed once. Re-running the seed
   does not reset it.
-- `vitest.integration.config.ts` refuses to run unless `DATABASE_URL` names a
-  database containing `booking_test`.
+- `vitest.integration.config.ts` parses the PostgreSQL URL and refuses to run
+  unless its decoded database pathname is exactly `booking_test`; near-misses
+  such as `production_booking_test` are rejected before any truncation.

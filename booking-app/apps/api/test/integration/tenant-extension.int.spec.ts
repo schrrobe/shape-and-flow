@@ -74,11 +74,34 @@ describe('guarded reads', () => {
     expect(rows[0]?.organizationId).toBe(orgA.organization.id);
   });
 
+  it('rejects a foreign tenant id and non-equality tenant filters', async () => {
+    await prisma.booking.create({ data: makeBooking(orgB) });
+
+    await expect(
+      guarded.booking.findMany({ where: { organizationId: orgB.organization.id } }),
+    ).rejects.toThrow(/current organization/i);
+    await expect(
+      guarded.booking.findMany({
+        where: { organizationId: { not: orgA.organization.id } },
+      }),
+    ).rejects.toThrow(/current organization/i);
+  });
+
   it('accepts organizationId nested inside a top-level AND', async () => {
     await prisma.booking.create({ data: makeBooking(orgA) });
 
     const rows = await guarded.booking.findMany({
       where: { AND: [{ organizationId: orgA.organization.id }, { status: 'PENDING_PAYMENT' }] },
+    });
+
+    expect(rows).toHaveLength(1);
+  });
+
+  it('accepts an explicit equals filter for the current organization', async () => {
+    await prisma.booking.create({ data: makeBooking(orgA) });
+
+    const rows = await guarded.booking.findMany({
+      where: { organizationId: { equals: orgA.organization.id } },
     });
 
     expect(rows).toHaveLength(1);
@@ -92,13 +115,32 @@ describe('guarded reads', () => {
 });
 
 describe('unique-key access', () => {
-  it('allows findUnique, because a unique key cannot carry a tenant filter', async () => {
+  it('rejects findUnique without an explicit tenant predicate', async () => {
     const booking = await prisma.booking.create({ data: makeBooking(orgB) });
 
-    const found = await guarded.booking.findUnique({ where: { id: booking.id } });
+    await expect(guarded.booking.findUnique({ where: { id: booking.id } })).rejects.toThrow(
+      /requires organizationId/,
+    );
+  });
 
-    // The guard permits the read; ownership is the caller's responsibility.
-    expect(found?.organizationId).toBe(orgB.organization.id);
+  it('rejects findUnique with a foreign tenant predicate', async () => {
+    const booking = await prisma.booking.create({ data: makeBooking(orgB) });
+
+    await expect(
+      guarded.booking.findUnique({
+        where: { id: booking.id, organizationId: orgB.organization.id },
+      }),
+    ).rejects.toThrow(/current organization/i);
+  });
+
+  it('allows findUnique when the unique selector is scoped to the current tenant', async () => {
+    const booking = await prisma.booking.create({ data: makeBooking(orgA) });
+
+    const found = await guarded.booking.findUnique({
+      where: { id: booking.id, organizationId: orgA.organization.id },
+    });
+
+    expect(found?.organizationId).toBe(orgA.organization.id);
   });
 
   it('assertOwned turns a foreign row into 404, never 403', () => {
@@ -132,12 +174,24 @@ describe('creates', () => {
     expect(created.organizationId).toBe(orgA.organization.id);
   });
 
-  it('leaves an explicit organizationId alone', async () => {
-    const created = await guarded.serviceCategory.create({
-      data: { organizationId: orgB.organization.id, name: 'Explicit category' },
-    });
+  it('rejects a foreign explicit organizationId before creating a row', async () => {
+    await expect(
+      guarded.serviceCategory.create({
+        data: { organizationId: orgB.organization.id, name: 'Explicit category' },
+      }),
+    ).rejects.toThrow(/current organization/i);
 
-    expect(created.organizationId).toBe(orgB.organization.id);
+    await expect(
+      prisma.serviceCategory.findFirst({ where: { name: 'Explicit category' } }),
+    ).resolves.toBeNull();
+  });
+
+  it('allows an explicit organizationId when it matches the bound tenant', async () => {
+    await expect(
+      guarded.serviceCategory.create({
+        data: { organizationId: orgA.organization.id, name: 'Owned category' },
+      }),
+    ).resolves.toMatchObject({ organizationId: orgA.organization.id });
   });
 
   it('injects per row in createMany', async () => {
@@ -150,6 +204,114 @@ describe('creates', () => {
     });
 
     expect(rows).toHaveLength(2);
+  });
+
+  it('rejects a foreign organizationId in any createMany row', async () => {
+    await expect(
+      guarded.serviceCategory.createMany({
+        data: [
+          { organizationId: orgA.organization.id, name: 'Owned bulk row' },
+          { organizationId: orgB.organization.id, name: 'Foreign bulk row' },
+        ],
+      }),
+    ).rejects.toThrow(/current organization/i);
+  });
+
+  it('rejects nested relation creates through the guarded client', async () => {
+    await expect(
+      guarded.serviceCategory.create({
+        data: {
+          organizationId: orgA.organization.id,
+          name: 'Nested category',
+          services: {
+            create: {
+              organizationId: orgB.organization.id,
+              name: 'Foreign nested service',
+              durationMinutes: 30,
+              priceCents: 5000,
+            },
+          },
+        } as never,
+      }),
+    ).rejects.toThrow(/nested writes/i);
+  });
+});
+
+describe('upserts', () => {
+  it('rejects an upsert whose unique key belongs to another tenant', async () => {
+    await expect(
+      guarded.serviceCategory.upsert({
+        where: {
+          organizationId_name: {
+            organizationId: orgB.organization.id,
+            name: 'Massage',
+          },
+        },
+        create: { organizationId: orgA.organization.id, name: 'Never created' },
+        update: { name: 'Never updated' },
+      }),
+    ).rejects.toThrow(/current organization/i);
+  });
+
+  it('injects the tenant into an owned upsert create payload', async () => {
+    const created = await guarded.serviceCategory.upsert({
+      where: {
+        organizationId_name: {
+          organizationId: orgA.organization.id,
+          name: 'Upserted category',
+        },
+      },
+      create: { name: 'Upserted category' } as never,
+      update: {},
+    });
+
+    expect(created.organizationId).toBe(orgA.organization.id);
+  });
+
+  it('rejects a foreign tenant in an upsert create payload', async () => {
+    await expect(
+      guarded.serviceCategory.upsert({
+        where: {
+          organizationId_name: {
+            organizationId: orgA.organization.id,
+            name: 'Foreign create payload',
+          },
+        },
+        create: { organizationId: orgB.organization.id, name: 'Foreign create payload' },
+        update: {},
+      }),
+    ).rejects.toThrow(/current organization/i);
+  });
+});
+
+describe('updates', () => {
+  it('rejects changing organizationId through an update payload', async () => {
+    await expect(
+      guarded.serviceCategory.update({
+        where: {
+          organizationId_name: {
+            organizationId: orgA.organization.id,
+            name: 'Massage',
+          },
+        },
+        data: { organizationId: orgB.organization.id },
+      }),
+    ).rejects.toThrow(/current organization/i);
+  });
+
+  it('rejects nested relation updates through the guarded client', async () => {
+    const category = await prisma.serviceCategory.create({
+      data: { organizationId: orgA.organization.id, name: 'Owned for nested update' },
+    });
+
+    await expect(
+      guarded.serviceCategory.update({
+        where: { id: category.id, organizationId: orgA.organization.id },
+        data: {
+          services: { updateMany: { where: {}, data: { archivedAt: new Date() } } },
+        } as never,
+      }),
+    ).rejects.toThrow(/nested writes/i);
   });
 });
 
@@ -164,6 +326,23 @@ describe('models that are deliberately unguarded', () => {
     await expect(guarded.idempotencyKey.findMany()).resolves.toEqual([]);
     await expect(guarded.stripeWebhookEvent.findMany()).resolves.toEqual([]);
     await expect(guarded.messagingWebhookEvent.findMany()).resolves.toEqual([]);
+  });
+});
+
+describe('database tenant consistency', () => {
+  it('rejects a booking child row that names another tenant', async () => {
+    const foreignBooking = await prisma.booking.create({ data: makeBooking(orgB) });
+
+    await expect(
+      prisma.bookingStatusHistory.create({
+        data: {
+          organizationId: orgA.organization.id,
+          bookingId: foreignBooking.id,
+          toStatus: 'PENDING_PAYMENT',
+          actorType: 'SYSTEM',
+        },
+      }),
+    ).rejects.toMatchObject({ code: 'P2003' });
   });
 });
 
@@ -184,6 +363,15 @@ describe('transactions', () => {
     );
 
     expect(rows).toHaveLength(1);
+  });
+
+  it('injects organizationId into writes inside an interactive transaction', async () => {
+    const created = await guarded.$transaction(
+      async (tx) =>
+        await tx.serviceCategory.create({ data: { name: 'Transactional category' } as never }),
+    );
+
+    expect(created.organizationId).toBe(orgA.organization.id);
   });
 });
 
