@@ -3,6 +3,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { AppError } from '../common/errors/app-error.js';
 import { withSerializationRetry } from '../common/prisma-errors/serialization-retry.js';
 import { CLOCK } from '../domain/time/clock.js';
+import { OrganizationContextService } from '../organization/organization-context.service.js';
 import { BookingStatus, Prisma } from '../prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
@@ -42,6 +43,7 @@ export class AttendanceService {
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly organizations: OrganizationContextService,
     private readonly audit: AuditService,
     @Inject(CLOCK) private readonly clock: Clock,
   ) {}
@@ -98,9 +100,17 @@ export class AttendanceService {
       () =>
         this.prisma.$transaction(async (tx) => {
           const now = this.clock.now();
+          const organizationId = this.organizations.getOrganizationId();
 
+          // Scoped by organization, not by primary key alone. The office routes take the
+          // booking id from the caller, so without this the only thing standing between a
+          // tenant and another tenant's booking is the controller passing an id it is
+          // entitled to. `findUnique` cannot express the filter, so both the lock and the
+          // read carry it explicitly.
           const locked = await tx.$queryRaw<{ status: BookingStatus }[]>(
-            Prisma.sql`SELECT status FROM bookings WHERE id = ${input.bookingId} FOR UPDATE`,
+            Prisma.sql`SELECT status FROM bookings
+                       WHERE id = ${input.bookingId} AND organization_id = ${organizationId}
+                       FOR UPDATE`,
           );
 
           const current = locked[0]?.status;
@@ -109,8 +119,8 @@ export class AttendanceService {
             throw new AppError('NOT_FOUND', { message: 'Booking not found.' });
           }
 
-          const booking = await tx.booking.findUniqueOrThrow({
-            where: { id: input.bookingId },
+          const booking = await tx.booking.findFirstOrThrow({
+            where: { id: input.bookingId, organizationId },
             select: { organizationId: true, startsAt: true, endsAt: true, reference: true },
           });
 
@@ -170,12 +180,15 @@ export class AttendanceService {
   async reportStaleCompletions(): Promise<{ count: number }> {
     const cutoff = new Date(this.clock.now().getTime() - STALE_COMPLETION_AFTER_MS);
 
+    // One filter, one threshold, both read from the constant. A message that hardcodes
+    // "48 hours" starts lying the moment the constant moves.
+    const where = { status: BookingStatus.CONFIRMED, endsAt: { lt: cutoff } };
+    const hours = STALE_COMPLETION_AFTER_MS / 3_600_000;
+
     const [count, sample] = await Promise.all([
-      this.prisma.booking.count({
-        where: { status: BookingStatus.CONFIRMED, endsAt: { lt: cutoff } },
-      }),
+      this.prisma.booking.count({ where }),
       this.prisma.booking.findMany({
-        where: { status: BookingStatus.CONFIRMED, endsAt: { lt: cutoff } },
+        where,
         orderBy: { endsAt: 'asc' },
         take: STALE_SAMPLE_LIMIT,
         select: { reference: true, endsAt: true },
@@ -184,8 +197,8 @@ export class AttendanceService {
 
     if (count > 0) {
       this.logger.warn(
-        `${String(count)} confirmed bookings ended more than 48 hours ago and are still ` +
-          `unmarked; oldest: ${sample.map((row) => row.reference).join(', ')}`,
+        `${String(count)} confirmed bookings ended more than ${String(hours)} hours ago and ` +
+          `are still unmarked; oldest: ${sample.map((row) => row.reference).join(', ')}`,
       );
     }
 

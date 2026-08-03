@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 
+import { OrganizationContextService } from '../../organization/organization-context.service.js';
 import { ExpiryService } from '../expiry.service.js';
 
 import type { JOB, JobPayload } from '../../messaging/queues/job-contracts.js';
@@ -20,10 +21,18 @@ import type { JOB, JobPayload } from '../../messaging/queues/job-contracts.js';
 export class ExpiryProcessor {
   private readonly logger = new Logger('ExpiryProcessor');
 
-  constructor(private readonly expiry: ExpiryService) {}
+  constructor(
+    private readonly expiry: ExpiryService,
+    private readonly organizations: OrganizationContextService,
+  ) {}
 
   async handle(payload: JobPayload<typeof JOB.BOOKING_EXPIRY_REQUESTED>): Promise<void> {
     const { bookingId } = payload;
+
+    // The payload names the tenant, so it is checked rather than ignored. A worker has no
+    // request to resolve an organization from, and the saga talks to Stripe — so a job
+    // running against the wrong organization would expire a session on the wrong account.
+    this.organizations.require(payload.organizationId);
 
     // Phase one first. Usually a no-op — the delayed job normally arrives when the
     // booking is already EXPIRING because phase one ran from the sweeper — but running it

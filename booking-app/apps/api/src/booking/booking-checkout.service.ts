@@ -92,7 +92,9 @@ export class BookingCheckoutService {
       },
     );
 
-    await this.attach(booking, session.sessionId);
+    // `expiresAt` passed explicitly, so the guard above is what the type system carries
+    // into `attach` rather than something it has to re-derive.
+    await this.attach(booking, session.sessionId, booking.expiresAt);
 
     return { checkoutUrl: session.url, sessionId: session.sessionId };
   }
@@ -104,8 +106,12 @@ export class BookingCheckoutService {
    * expiry job, so "the reservation exists" and "something will eventually release
    * it" commit together.
    */
-  private async attach(booking: Booking, sessionId: string): Promise<void> {
-    const organizationId = this.organizations.getOrganizationId();
+  private async attach(booking: Booking, sessionId: string, expiresAt: Date): Promise<void> {
+    // From the booking, not from the request context. The two must agree, and nothing here
+    // checks that they do — so if the ambient context ever resolved a different
+    // organization, the payment and outbox rows would land under the wrong tenant while
+    // the booking row stayed under the right one.
+    const { organizationId } = booking;
 
     await withSerializationRetry(
       () =>
@@ -137,8 +143,10 @@ export class BookingCheckoutService {
             aggregateId: booking.id,
             eventType: JOB.BOOKING_EXPIRY_REQUESTED,
             payload: { organizationId, bookingId: booking.id },
-            // Due when the reservation lapses, not now.
-            ...(booking.expiresAt === null ? {} : { availableAt: booking.expiresAt }),
+            // Due when the reservation lapses, not now. A non-nullable parameter rather
+            // than a fallback: an outbox row without `availableAt` is due immediately, and
+            // the expiry saga would release a reservation the customer is still paying for.
+            availableAt: expiresAt,
           });
         }),
       'attach-checkout-session',

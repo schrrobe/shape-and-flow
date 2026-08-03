@@ -46,10 +46,16 @@ export class ExpirySweeper {
   /**
    * Start phase one for every reservation whose time has passed.
    *
-   * `FOR UPDATE SKIP LOCKED` so two workers sweeping at once split the work instead of
-   * waiting on each other. Claimed inside a transaction that is then released — the row
-   * is not held while `beginExpiry` takes its own lock, because that would deadlock with
-   * itself.
+   * Deliberately *not* `FOR UPDATE SKIP LOCKED`. That clause only splits work between
+   * workers while the transaction holding the locks is still open, and this query cannot
+   * be one: the rows must be released before `beginExpiry` takes its own lock on each of
+   * them, or the sweep would deadlock against itself. Run as a standalone statement,
+   * PostgreSQL commits the implicit transaction the moment it returns and every lock goes
+   * with it — so the clause would claim nothing and only read as though it did.
+   *
+   * Two workers therefore see the same rows. That is safe rather than merely tolerable:
+   * `beginExpiry` re-checks the status under its own lock and returns `NOT_APPLICABLE` for
+   * a booking the other worker already moved.
    */
   async sweepOverdue(): Promise<number> {
     const now = this.clock.now();
@@ -58,7 +64,6 @@ export class ExpirySweeper {
       SELECT id FROM bookings
       WHERE status = 'PENDING_PAYMENT' AND expires_at < ${now}
       ORDER BY expires_at
-      FOR UPDATE SKIP LOCKED
       LIMIT ${EXPIRY_SWEEP_BATCH}
     `);
 
@@ -100,18 +105,32 @@ export class ExpirySweeper {
       select: { id: true, organizationId: true },
     });
 
+    let redriven = 0;
+
     for (const booking of stuck) {
-      await this.enqueue.enqueue(
-        JOB.BOOKING_EXPIRY_REQUESTED,
-        { organizationId: booking.organizationId, bookingId: booking.id },
-        { jobId: jobIdFor('expiry', 'retry', booking.id) },
-      );
+      // Per booking, for the same reason as the overdue loop above: one Redis error must
+      // not abandon the rest of the batch to keep blocking their slots until the next tick.
+      try {
+        await this.enqueue.enqueue(
+          JOB.BOOKING_EXPIRY_REQUESTED,
+          { organizationId: booking.organizationId, bookingId: booking.id },
+          { jobId: jobIdFor('expiry', 'retry', booking.id) },
+        );
+        redriven += 1;
+      } catch (error) {
+        this.logger.error(
+          `could not re-drive expiry for ${booking.id}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
     }
 
-    if (stuck.length > 0) {
-      this.logger.warn(`re-drove ${String(stuck.length)} bookings stuck in EXPIRING`);
+    // What was actually enqueued, not what was found: the caller reports this number.
+    if (redriven > 0) {
+      this.logger.warn(`re-drove ${String(redriven)} bookings stuck in EXPIRING`);
     }
 
-    return stuck.length;
+    return redriven;
   }
 }

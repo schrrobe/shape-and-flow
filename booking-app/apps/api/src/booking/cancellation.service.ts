@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 
 import { AppError } from '../common/errors/app-error.js';
 import { isUniqueViolation } from '../common/prisma-errors/prisma-errors.js';
@@ -70,6 +70,8 @@ const CANCELLABLE = {
  */
 @Injectable()
 export class CancellationService {
+  private readonly logger = new Logger('Cancellation');
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly organizations: OrganizationContextService,
@@ -125,7 +127,7 @@ export class CancellationService {
     return await withSerializationRetry(
       () =>
         this.prisma.$transaction(async (tx) => {
-          const current = await this.lock(tx, booking.id);
+          const current = await this.lock(tx, booking.id, booking.organizationId);
 
           if (current !== BookingStatus.CONFIRMED) {
             throw notCancellable('This booking is no longer cancellable.');
@@ -153,7 +155,9 @@ export class CancellationService {
             },
           });
 
-          const refundId = await this.requestRefund(tx, booking, paid, {
+          // What is left to give back, not what arrived. A booking whose payment was
+          // already partly refunded must not have its gross amount refunded again.
+          const refundId = await this.requestRefund(tx, booking, this.refundableTotal(booking), {
             reason: RefundReason.CUSTOMER_CANCELLATION,
           });
 
@@ -182,31 +186,46 @@ export class CancellationService {
     reason?: string,
   ): Promise<CancelByCustomerResult> {
     try {
-      return await this.prisma.$transaction(async (tx) => {
-        const request = await tx.cancellationRequest.create({
-          data: {
-            organizationId: booking.organizationId,
-            bookingId: booking.id,
-            ...(reason === undefined ? {} : { reason }),
-            // Frozen. The customer was shown this number; deciding against a later
-            // policy would charge them something they never saw.
-            suggestedRetainedAmountCents: suggestedRetained.amountCents,
-          },
-          select: { id: true },
-        });
+      return await withSerializationRetry(
+        () =>
+          this.prisma.$transaction(async (tx) => {
+            // Re-read under the lock, exactly as `cancelImmediately` does. The status was
+            // last seen outside any transaction, and a booking cancelled, completed or
+            // marked no-show since then would otherwise collect a PENDING request that
+            // blocks the next legitimate one through `cancellation_requests_one_open`
+            // and outlives the booking it is about.
+            const current = await this.lock(tx, booking.id, booking.organizationId);
 
-        // The office has to be told, and the customer has to be told it is pending. Both
-        // through the outbox, so the notifications commit with the request.
-        await this.outbox.record(tx, {
-          organizationId: booking.organizationId,
-          aggregateType: 'CancellationRequest',
-          aggregateId: request.id,
-          eventType: JOB.NOTIFICATION_SEND,
-          payload: { organizationId: booking.organizationId, notificationId: request.id },
-        });
+            if (current !== BookingStatus.CONFIRMED) {
+              throw notCancellable(`A ${current} booking cannot be cancelled.`);
+            }
 
-        return { outcome: 'REQUESTED' as const, requestId: request.id, suggestedRetained };
-      });
+            const request = await tx.cancellationRequest.create({
+              data: {
+                organizationId: booking.organizationId,
+                bookingId: booking.id,
+                ...(reason === undefined ? {} : { reason }),
+                // Frozen. The customer was shown this number; deciding against a later
+                // policy would charge them something they never saw.
+                suggestedRetainedAmountCents: suggestedRetained.amountCents,
+              },
+              select: { id: true },
+            });
+
+            // The office has to be told, and the customer has to be told it is pending.
+            // Both through the outbox, so the notifications commit with the request.
+            await this.outbox.record(tx, {
+              organizationId: booking.organizationId,
+              aggregateType: 'CancellationRequest',
+              aggregateId: request.id,
+              eventType: JOB.NOTIFICATION_SEND,
+              payload: { organizationId: booking.organizationId, notificationId: request.id },
+            });
+
+            return { outcome: 'REQUESTED' as const, requestId: request.id, suggestedRetained };
+          }),
+        'open-cancellation-request',
+      );
     } catch (error) {
       // The partial unique index allows one PENDING request per booking. A second one is
       // the customer clicking twice, or asking again while they wait.
@@ -229,8 +248,28 @@ export class CancellationService {
     await withSerializationRetry(
       () =>
         this.prisma.$transaction(async (tx) => {
+          const organizationId = this.organizations.getOrganizationId();
+
+          // Unlocked, and only to learn which booking to lock. Both rows are then locked
+          // booking-first, which is the order `cancelByBusiness` takes through
+          // `closeOpenRequests`. Locking the request first here instead would have the
+          // two paths each holding the lock the other needs next, and PostgreSQL would
+          // resolve that by aborting one of them.
+          const target = await tx.cancellationRequest.findFirst({
+            where: { id: input.requestId, organizationId },
+            select: { bookingId: true },
+          });
+
+          if (target === null) {
+            throw new AppError('NOT_FOUND', { message: 'Cancellation request not found.' });
+          }
+
+          await this.lock(tx, target.bookingId, organizationId);
+
           const locked = await tx.$queryRaw<{ id: string; decision: string }[]>(
-            Prisma.sql`SELECT id, decision FROM cancellation_requests WHERE id = ${input.requestId} FOR UPDATE`,
+            Prisma.sql`SELECT id, decision FROM cancellation_requests
+                       WHERE id = ${input.requestId} AND organization_id = ${organizationId}
+                       FOR UPDATE`,
           );
 
           if (locked[0] === undefined) {
@@ -243,8 +282,8 @@ export class CancellationService {
             });
           }
 
-          const request = await tx.cancellationRequest.findUniqueOrThrow({
-            where: { id: input.requestId },
+          const request = await tx.cancellationRequest.findFirstOrThrow({
+            where: { id: input.requestId, organizationId },
             select: {
               id: true,
               bookingId: true,
@@ -253,8 +292,8 @@ export class CancellationService {
             },
           });
 
-          const booking = await tx.booking.findUniqueOrThrow({
-            where: { id: request.bookingId },
+          const booking = await tx.booking.findFirstOrThrow({
+            where: { id: request.bookingId, organizationId },
             select: CANCELLABLE,
           });
 
@@ -300,7 +339,7 @@ export class CancellationService {
     input: DecideRequestInput,
   ): Promise<string | null> {
     const now = this.clock.now();
-    const current = await this.lock(tx, booking.id);
+    const current = await this.lock(tx, booking.id, booking.organizationId);
 
     // The business may have cancelled it in the meantime, or the appointment may have
     // happened. Either way the request is being decided about something settled.
@@ -331,10 +370,14 @@ export class CancellationService {
       },
     });
 
-    const refundId = await this.requestRefund(tx, booking, paid.minus(retained), {
-      reason: RefundReason.CUSTOMER_CANCELLATION,
-      officeUserId: input.officeUserId,
-    });
+    // `paid` is the gross the retained fee was computed against; the refund itself is
+    // bounded by what has not already gone back.
+    const refundId = await this.requestRefund(
+      tx,
+      booking,
+      paid.minus(retained).cappedAt(this.refundableTotal(booking)),
+      { reason: RefundReason.CUSTOMER_CANCELLATION, officeUserId: input.officeUserId },
+    );
 
     await this.outbox.record(tx, {
       organizationId: booking.organizationId,
@@ -362,14 +405,17 @@ export class CancellationService {
     return await withSerializationRetry(
       () =>
         this.prisma.$transaction(async (tx) => {
-          const current = await this.lock(tx, input.bookingId);
+          // The office route takes the booking id from the caller, so the organization is
+          // part of every lookup here rather than assumed from the id alone.
+          const organizationId = this.organizations.getOrganizationId();
+          const current = await this.lock(tx, input.bookingId, organizationId);
 
           if (current !== BookingStatus.CONFIRMED) {
             throw notCancellable(`A ${current} booking cannot be cancelled.`);
           }
 
-          const booking = await tx.booking.findUniqueOrThrow({
-            where: { id: input.bookingId },
+          const booking = await tx.booking.findFirstOrThrow({
+            where: { id: input.bookingId, organizationId },
             select: CANCELLABLE,
           });
 
@@ -488,21 +534,35 @@ export class CancellationService {
   ): Promise<string | null> {
     if (amount.amountCents <= 0) return null;
 
-    const payment = booking.payments.find(
-      (candidate) =>
-        candidate.status === PaymentStatus.SUCCEEDED ||
-        candidate.status === PaymentStatus.PARTIALLY_REFUNDED,
+    // The first settled payment with anything left on it, in a defined order. A refund row
+    // is attached to one payment, so it must not be able to exceed that payment's own
+    // remaining balance — `Refund.amountCents` is what settlement recomputes the payment's
+    // status from.
+    const payment = settledPayments(booking).find((candidate) =>
+      remainingOn(candidate, booking.currency).isPositive(),
     );
 
-    // An unpaid manual booking cancels with nothing to give back.
+    // An unpaid manual booking cancels with nothing to give back, and so does one whose
+    // payment has already been refunded in full.
     if (payment === undefined) return null;
+
+    const remaining = remainingOn(payment, booking.currency);
+    const refundable = amount.cappedAt(remaining);
+
+    if (!refundable.equals(amount)) {
+      // Worth a line rather than silence: the caller asked for more than this payment can
+      // give back, which usually means two settled payments on one booking.
+      this.logger.warn(
+        `capped refund on booking ${booking.id} from ${amount.toString()} to ${refundable.toString()}`,
+      );
+    }
 
     const refund = await tx.refund.create({
       data: {
         organizationId: booking.organizationId,
         bookingId: booking.id,
         paymentId: payment.id,
-        amountCents: amount.amountCents,
+        amountCents: refundable.amountCents,
         currency: booking.currency,
         status: 'PENDING',
         reason: options.reason,
@@ -562,10 +622,22 @@ export class CancellationService {
     });
   }
 
-  /** Lock the booking row and return its current status. */
-  private async lock(tx: Prisma.TransactionClient, bookingId: string): Promise<BookingStatus> {
+  /**
+   * Lock the booking row and return its current status.
+   *
+   * The organization is part of the predicate rather than checked afterwards: a row
+   * belonging to another tenant must not be locked at all, and a `FOR UPDATE` that finds
+   * nothing is the same 404 as a booking that does not exist.
+   */
+  private async lock(
+    tx: Prisma.TransactionClient,
+    bookingId: string,
+    organizationId: string,
+  ): Promise<BookingStatus> {
     const rows = await tx.$queryRaw<{ status: BookingStatus }[]>(
-      Prisma.sql`SELECT status FROM bookings WHERE id = ${bookingId} FOR UPDATE`,
+      Prisma.sql`SELECT status FROM bookings
+                 WHERE id = ${bookingId} AND organization_id = ${organizationId}
+                 FOR UPDATE`,
     );
 
     if (rows[0] === undefined) {
@@ -590,19 +662,54 @@ export class CancellationService {
 
   /** What actually settled. A PENDING payment has not been received. */
   private paidTotal(booking: CancellableBooking): Money {
-    const settled: PaymentStatus[] = [
-      PaymentStatus.SUCCEEDED,
-      PaymentStatus.PARTIALLY_REFUNDED,
-      PaymentStatus.REFUNDED,
-    ];
-
     return Money.sum(
-      booking.payments
-        .filter((payment) => settled.includes(payment.status))
-        .map((payment) => Money.fromCents(payment.amountCents, booking.currency)),
+      settledPayments(booking).map((payment) =>
+        Money.fromCents(payment.amountCents, booking.currency),
+      ),
       booking.currency,
     );
   }
+
+  /**
+   * What can still be given back, which is not what was paid.
+   *
+   * A payment already refunded — in full or in part — has returned that money once.
+   * Basing a cancellation refund on the gross amount would send it a second time, with
+   * Stripe's own rejection as the only thing in the way. So the refunded amount comes off
+   * the balance here, before any refund row is created.
+   */
+  private refundableTotal(booking: CancellableBooking): Money {
+    return Money.sum(
+      settledPayments(booking).map((payment) => remainingOn(payment, booking.currency)),
+      booking.currency,
+    );
+  }
+}
+
+const SETTLED_PAYMENT_STATUSES: PaymentStatus[] = [
+  PaymentStatus.SUCCEEDED,
+  PaymentStatus.PARTIALLY_REFUNDED,
+  PaymentStatus.REFUNDED,
+];
+
+/**
+ * Settled payments, in a defined order.
+ *
+ * Sorted by id because `Payment` is indexed only on `bookingId`, so the order the rows
+ * arrive in is whatever PostgreSQL found convenient. A refund that picks "the settled
+ * payment" needs that choice to be the same one every time it is recomputed.
+ */
+function settledPayments(booking: CancellableBooking): CancellableBooking['payments'] {
+  return booking.payments
+    .filter((payment) => SETTLED_PAYMENT_STATUSES.includes(payment.status))
+    .toSorted((left, right) => left.id.localeCompare(right.id));
+}
+
+/** What is left to refund on one payment. Through Money, so no cents are subtracted by hand. */
+function remainingOn(payment: CancellableBooking['payments'][number], currency: string): Money {
+  return Money.fromCents(payment.amountCents, currency).minus(
+    Money.fromCents(payment.refundedAmountCents, currency),
+  );
 }
 
 interface CancellableBooking {

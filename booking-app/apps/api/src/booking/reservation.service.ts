@@ -7,7 +7,7 @@ import { isSlotBookable } from '../domain/availability/engine.js';
 import { selectEmployee } from '../domain/employee-selection/select-employee.js';
 import { Money } from '../domain/money/money.js';
 import { CLOCK } from '../domain/time/clock.js';
-import { instantToLocalDate } from '../domain/time/local-time.js';
+import { instantToLocalDate, wallClockToInstantOrThrow } from '../domain/time/local-time.js';
 import { OrganizationContextService } from '../organization/organization-context.service.js';
 import { BookingStatus } from '../prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
@@ -16,7 +16,7 @@ import { AvailabilitySnapshotService } from '../public/availability-snapshot.ser
 import { generateBookingReference } from './booking-reference.js';
 import { BLOCKING_BOOKING_STATUSES, assertTransition } from './booking-status.machine.js';
 import { withCalendarLock } from './calendar-lock.js';
-import { CustomerUpsertService } from './customer-upsert.service.js';
+import { CUSTOMER_EMAIL_CONSTRAINT, CustomerUpsertService } from './customer-upsert.service.js';
 
 import type { CustomerInput } from './customer-upsert.service.js';
 import type { EmployeeCandidate } from '../domain/employee-selection/select-employee.js';
@@ -191,10 +191,13 @@ export class ReservationService {
     const zone = this.organizations.getTimezone();
     const date = instantToLocalDate(startsAt, zone);
 
-    // The local day, as an instant range. Padded like the snapshot window for the same
-    // reason: local midnight is not UTC midnight.
-    const dayStart = new Date(`${date}T00:00:00.000Z`);
-    const dayEnd = new Date(dayStart.getTime() + 86_400_000);
+    // The local day, as an instant range. Converted through the organization's zone, not
+    // parsed as UTC: local midnight is not UTC midnight, and treating it as such counts a
+    // neighbouring day's bookings near the boundary — which skews the load-balanced pick.
+    // The end is the next local midnight rather than +24h, so a clock change does not
+    // shorten or stretch the day.
+    const dayStart = wallClockToInstantOrThrow(date, 0, zone);
+    const dayEnd = wallClockToInstantOrThrow(date, 1440, zone);
 
     const [employees, counts] = await Promise.all([
       this.prisma.employee.findMany({
@@ -257,6 +260,18 @@ export class ReservationService {
           continue;
         }
 
+        // Two first-time bookings for the same new email address, at the same moment: both
+        // customer upserts read no row and both insert, and one loses. Retried here for the
+        // same reason as a reference collision, and it has to be *here* — the losing
+        // statement has already aborted the transaction, so nothing inside it can re-read
+        // the row the winner committed. The next attempt starts clean and finds it.
+        if (isUniqueViolation(error, CUSTOMER_EMAIL_CONSTRAINT) && attempt < REFERENCE_ATTEMPTS) {
+          this.logger.warn(
+            `concurrent first booking for the same customer; retrying (attempt ${String(attempt)})`,
+          );
+          continue;
+        }
+
         // The constraint fired, which means another transaction won the slot between the
         // re-check and the insert. A 409 is the honest answer; a 500 would be a lie.
         if (isExclusionViolation(error, 'bookings_no_overlap')) {
@@ -309,6 +324,15 @@ export class ReservationService {
             select: { id: true, displayName: true },
           });
 
+          // Name, price and currency re-read inside the lock, for the same reason the
+          // buffers come from the snapshot: the pre-lock read could have been overtaken by
+          // an edit, and these three are what the customer is charged and shown. The
+          // snapshot itself carries only what the availability engine needs.
+          const priced = await tx.service.findFirstOrThrow({
+            where: { id: service.id, organizationId },
+            select: { name: true, priceCents: true, currency: true },
+          });
+
           const customer = await this.customers.upsert(tx, organizationId, input.customer);
 
           // Buffers come from the snapshot, so a service edited between the read and
@@ -337,12 +361,12 @@ export class ReservationService {
               endsAt,
               blockStartsAt,
               blockEndsAt,
-              serviceNameSnapshot: service.name,
+              serviceNameSnapshot: priced.name,
               durationMinutesSnapshot: snapshot.service.durationMinutes,
               prepBufferMinutesSnapshot: snapshot.service.prepBufferMinutes,
               cleanupBufferMinutesSnapshot: snapshot.service.cleanupBufferMinutes,
-              priceCentsSnapshot: service.priceCents,
-              currency: service.currency,
+              priceCentsSnapshot: priced.priceCents,
+              currency: priced.currency,
               status: BookingStatus.PENDING_PAYMENT,
               expiresAt,
               locale: input.locale,
@@ -365,7 +389,7 @@ export class ReservationService {
           return {
             booking,
             employee,
-            price: Money.fromCents(service.priceCents, service.currency),
+            price: Money.fromCents(priced.priceCents, priced.currency),
           };
         }),
       // Generous but bounded. The lock is held for the whole transaction, so a
