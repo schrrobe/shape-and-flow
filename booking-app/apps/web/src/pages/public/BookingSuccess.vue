@@ -46,6 +46,16 @@ const { data: organization, run: loadOrganization } = useAsyncData((signal) =>
 
 const confirmed = computed(() => booking.value?.status === 'CONFIRMED');
 
+/**
+ * The address the confirmation went to, captured before the draft is cleared.
+ *
+ * `onMounted` resets the draft — the attempt is over and the key must not be reused — and
+ * the sentence below is bound to this rather than to the store, which by then is empty.
+ * The one line that tells a customer where to look for their confirmation was rendering
+ * without an address.
+ */
+const confirmationEmail = ref(draft.email);
+
 let controller: AbortController | null = null;
 let timer: ReturnType<typeof setTimeout> | undefined;
 let attempt = 0;
@@ -81,15 +91,6 @@ async function poll(): Promise<void> {
   }, delay);
 }
 
-/**
- * The address the confirmation went to, read before the draft is cleared.
- *
- * The confirmed paragraph names it, and that paragraph only renders once polling resolves —
- * always after this mount. Bound straight to the store it was reliably empty by then, so the
- * page promised an email to nobody in particular.
- */
-const email = ref(draft.email);
-
 onMounted(() => {
   // No session id means there is nothing to resolve — and nothing to clear either: somebody
   // who opened this page by mistake must not lose a booking they are part-way through.
@@ -119,11 +120,13 @@ onBeforeUnmount(() => {
     <template v-else>
       <SfCard as="section">
         <h1 ref="heading" tabindex="-1" class="text-xl font-semibold tracking-tight outline-none">
-          {{ confirmed ? t('success.confirmedTitle') : t('success.pendingTitle') }}
+          <span :data-test="confirmed ? 'confirmed' : 'pending'">
+            {{ confirmed ? t('success.confirmedTitle') : t('success.pendingTitle') }}
+          </span>
         </h1>
 
         <p v-if="confirmed" class="mt-2 text-text-secondary">
-          {{ t('success.confirmedBody', { email }) }}
+          {{ t('success.confirmedBody', { email: confirmationEmail }) }}
         </p>
 
         <!-- Three states, and the third never claims failure. A payment that has not been
@@ -142,7 +145,7 @@ onBeforeUnmount(() => {
 
         <dl v-else-if="booking !== null" class="mt-4 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
           <dt class="text-text-secondary">{{ t('success.reference') }}</dt>
-          <dd class="font-mono">{{ booking.reference }}</dd>
+          <dd class="font-mono" data-test="reference">{{ booking.reference }}</dd>
 
           <dt class="text-text-secondary">{{ t('booking.summaryService') }}</dt>
           <dd>{{ booking.serviceName }}</dd>
@@ -151,7 +154,7 @@ onBeforeUnmount(() => {
           <dd>{{ booking.employeeDisplayName }}</dd>
 
           <dt class="text-text-secondary">{{ t('booking.summaryTime') }}</dt>
-          <dd>{{ d(new Date(booking.startsAt), 'full') }}</dd>
+          <dd data-test="confirmed-slot">{{ d(new Date(booking.startsAt), 'full') }}</dd>
 
           <dt class="text-text-secondary">{{ t('booking.summaryPrice') }}</dt>
           <dd>{{ money(booking.price) }}</dd>

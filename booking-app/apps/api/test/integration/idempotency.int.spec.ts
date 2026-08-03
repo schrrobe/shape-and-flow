@@ -204,6 +204,26 @@ describe('abandon', () => {
     expect(await service.begin(KEY, 'booking.create', 'h1')).toEqual({ outcome: 'NEW' });
   });
 
+  it('keeps a key already bound to a reservation, and releases its lease at once', async () => {
+    // Deleting it would strand the held booking: the retry would find no claim, book
+    // again, and collide with the slot its own first attempt is holding.
+    await service.begin(KEY, 'booking.create', 'h1');
+    await prisma.idempotencyKey.update({
+      where: { key: KEY },
+      data: { bookingId: 'clx-booking-1' },
+    });
+
+    await service.abandon(KEY);
+
+    const row = await prisma.idempotencyKey.findUniqueOrThrow({ where: { key: KEY } });
+    expect(row.state).toBe(IDEMPOTENCY_STATE.IN_PROGRESS);
+    expect(row.bookingId).toBe('clx-booking-1');
+    // Expired now rather than in two minutes, so the customer's retry is not told
+    // their own abandoned attempt is still running.
+    expect(row.expiresAt).toEqual(clock.now());
+    expect(await service.begin(KEY, 'booking.create', 'h1')).toEqual({ outcome: 'NEW' });
+  });
+
   it('will not delete a completed key', async () => {
     // Otherwise a late failure on a retried request would destroy the stored
     // response of the attempt that succeeded.

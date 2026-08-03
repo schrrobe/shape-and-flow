@@ -62,14 +62,20 @@ export class PublicBookingsController {
     this.assertAllowedRedirect(body.successUrl);
     this.assertAllowedRedirect(body.cancelUrl);
 
-    const { booking, employee, price } = await this.reservations.reserve({
-      serviceId: body.serviceId,
-      employeeId: body.employeeId ?? null,
-      startsAt: new Date(body.startsAt),
-      customer: { ...body.customer, locale: body.locale },
-      locale: body.locale,
-      ...(body.customerNote === undefined ? {} : { customerNote: body.customerNote }),
-    });
+    // Resume first. An attempt that reserved and then failed at the provider left a
+    // hold this key names; reserving again would ask for a slot the customer is
+    // already holding and be refused SLOT_UNAVAILABLE by their own first attempt.
+    const { booking, employee, price } =
+      (await this.reservations.resume(idempotencyKey)) ??
+      (await this.reservations.reserve({
+        serviceId: body.serviceId,
+        employeeId: body.employeeId ?? null,
+        startsAt: new Date(body.startsAt),
+        customer: { ...body.customer, locale: body.locale },
+        locale: body.locale,
+        idempotencyKey,
+        ...(body.customerNote === undefined ? {} : { customerNote: body.customerNote }),
+      }));
 
     const session = await this.openCheckout(booking, body, idempotencyKey);
 

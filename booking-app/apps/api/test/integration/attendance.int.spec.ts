@@ -247,6 +247,7 @@ describe('business cancellation', () => {
       bookingId,
       officeUserId: ctx.owner.id,
       reason: 'Krankheit',
+      mayIssueRefunds: true,
       refundAmountCents: ctx.service30.priceCents,
     });
 
@@ -276,6 +277,7 @@ describe('business cancellation', () => {
       bookingId,
       officeUserId: ctx.owner.id,
       reason: 'Umbau',
+      mayIssueRefunds: true,
     });
 
     // Absent and zero are different: one is a decision not to refund.
@@ -290,6 +292,7 @@ describe('business cancellation', () => {
         bookingId,
         officeUserId: ctx.owner.id,
         reason: 'Fehleintrag',
+        mayIssueRefunds: true,
       }),
     ).resolves.toBeDefined();
   });
@@ -314,6 +317,7 @@ describe('business cancellation', () => {
       bookingId,
       officeUserId: ctx.owner.id,
       reason: 'Kulanz',
+      mayIssueRefunds: true,
       refundAmountCents: ctx.service30.priceCents,
     });
 
@@ -342,6 +346,7 @@ describe('business cancellation', () => {
       bookingId,
       officeUserId: ctx.owner.id,
       reason: 'Umbau',
+      mayIssueRefunds: true,
     });
 
     // REJECTED: the appointment they wanted to move no longer exists.
@@ -358,6 +363,7 @@ describe('business cancellation', () => {
         bookingId,
         officeUserId: ctx.owner.id,
         reason: 'zu spät',
+        mayIssueRefunds: true,
       }),
     ).rejects.toMatchObject({ code: 'BOOKING_NOT_CANCELLABLE' });
   });

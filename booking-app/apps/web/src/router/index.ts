@@ -1,5 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router';
 
+import { installOfficeSessionHandling } from './office-guard.js';
+
 import type { RouteRecordRaw } from 'vue-router';
 
 /**
@@ -66,6 +68,114 @@ const routes: RouteRecordRaw[] = [
     component: () => import('../pages/public/ManageReschedule.vue'),
   },
 
+  /**
+   * The office area.
+   *
+   * `meta.area` marks it so the application shell renders the office chrome instead of the
+   * customer header, and `meta.requiresSession` is what the guard reads. The three
+   * authentication screens sit outside the layout: it builds a sidebar from capabilities,
+   * and there is no user to build one from until one of them has done its job.
+   */
+  {
+    path: '/office/login',
+    name: 'office-login',
+    component: () => import('../pages/office/OfficeLogin.vue'),
+    meta: { area: 'office' },
+  },
+  {
+    path: '/office/forgot-password',
+    name: 'office-forgot-password',
+    component: () => import('../pages/office/OfficeForgotPassword.vue'),
+    meta: { area: 'office' },
+  },
+  {
+    path: '/office/reset-password',
+    name: 'office-reset-password',
+    component: () => import('../pages/office/OfficeResetPassword.vue'),
+    meta: { area: 'office' },
+  },
+  {
+    path: '/office',
+    component: () => import('../pages/office/OfficeLayout.vue'),
+    meta: { area: 'office', requiresSession: true },
+    children: [
+      // No `meta` of its own: vue-router merges every matched record's meta into
+      // `route.meta`, so a child inherits the parent's `area` and `requiresSession`.
+      //
+      {
+        path: '',
+        name: 'office-dashboard',
+        component: () => import('../pages/office/OfficeDashboard.vue'),
+      },
+      {
+        path: 'calendar',
+        name: 'office-calendar',
+        component: () => import('../pages/office/OfficeCalendar.vue'),
+      },
+      {
+        path: 'bookings',
+        name: 'office-bookings',
+        component: () => import('../pages/office/BookingList.vue'),
+      },
+      // Before `bookings/:id` for the same reason the detail sits after the list: the
+      // resolution order does not depend on it, but a reader should not have to know that
+      // to be sure "new" is a screen rather than a booking id.
+      {
+        path: 'bookings/new',
+        name: 'office-booking-new',
+        component: () => import('../pages/office/NewBooking.vue'),
+      },
+      // After the list, so `/office/bookings` matches the list rather than the detail with
+      // an empty id — vue-router resolves static segments before dynamic ones, but the
+      // order is what makes that visible to a reader.
+      {
+        path: 'bookings/:id',
+        name: 'office-booking',
+        component: () => import('../pages/office/BookingDetail.vue'),
+      },
+      {
+        path: 'requests',
+        name: 'office-requests',
+        component: () => import('../pages/office/RequestsPage.vue'),
+      },
+      {
+        path: 'employees',
+        name: 'office-employees',
+        component: () => import('../pages/office/EmployeesPage.vue'),
+      },
+      {
+        path: 'services',
+        name: 'office-services',
+        component: () => import('../pages/office/ServicesPage.vue'),
+      },
+      {
+        path: 'availability',
+        name: 'office-availability',
+        component: () => import('../pages/office/AvailabilityPage.vue'),
+      },
+      {
+        path: 'customers',
+        name: 'office-customers',
+        component: () => import('../pages/office/CustomersPage.vue'),
+      },
+      {
+        path: 'exports',
+        name: 'office-exports',
+        component: () => import('../pages/office/ExportsPage.vue'),
+      },
+      {
+        path: 'users',
+        name: 'office-users',
+        component: () => import('../pages/office/UsersPage.vue'),
+      },
+      {
+        path: 'settings',
+        name: 'office-settings',
+        component: () => import('../pages/office/SettingsPage.vue'),
+      },
+    ],
+  },
+
   {
     path: '/:pathMatch(.*)*',
     name: 'not-found',
@@ -84,7 +194,11 @@ const routes: RouteRecordRaw[] = [
  * Matched on the route name, not on the shape of the hash: a rule that guesses which fragments
  * look like secrets would be wrong the first time the token alphabet changes.
  */
-const HASH_IS_A_CREDENTIAL: ReadonlySet<string> = new Set(['manage', 'manage-reschedule']);
+const HASH_IS_A_CREDENTIAL: ReadonlySet<string> = new Set([
+  'manage',
+  'manage-reschedule',
+  'office-reset-password',
+]);
 
 export const router = createRouter({
   history: createWebHistory(),
@@ -100,3 +214,5 @@ export const router = createRouter({
     return { top: 0 };
   },
 });
+
+installOfficeSessionHandling(router);

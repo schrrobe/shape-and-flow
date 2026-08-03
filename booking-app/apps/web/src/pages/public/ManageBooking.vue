@@ -125,7 +125,7 @@ async function cancel(): Promise<void> {
 
 <template>
   <div class="flex flex-col gap-4">
-    <SfCard v-if="linkDead" as="section">
+    <SfCard v-if="linkDead" as="section" data-test="link-expired">
       <h1 ref="heading" tabindex="-1" class="text-xl font-semibold outline-none">
         {{ t('manage.missingTitle') }}
       </h1>
@@ -154,7 +154,7 @@ async function cancel(): Promise<void> {
 
         <dl v-else-if="booking !== null" class="mt-4 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
           <dt class="text-text-secondary">{{ t('success.reference') }}</dt>
-          <dd class="font-mono">{{ booking.reference }}</dd>
+          <dd class="font-mono" data-test="reference">{{ booking.reference }}</dd>
 
           <dt class="text-text-secondary">{{ t('booking.summaryService') }}</dt>
           <dd>{{ booking.serviceName }}</dd>
@@ -176,6 +176,7 @@ async function cancel(): Promise<void> {
       <SfAlert
         v-if="outcome?.outcome === 'CANCELED'"
         tone="success"
+        data-test="cancel-outcome"
         :title="t('manage.canceledTitle')"
       >
         {{ canceledBody }}
@@ -184,6 +185,7 @@ async function cancel(): Promise<void> {
       <SfAlert
         v-else-if="outcome?.outcome === 'REQUESTED'"
         tone="info"
+        data-test="request-submitted"
         :title="t('manage.requestedTitle')"
       >
         {{ t('manage.requestedBody') }}
@@ -192,14 +194,14 @@ async function cancel(): Promise<void> {
       <SfCard v-else-if="policy !== null" as="section">
         <h2 class="font-semibold">{{ t('manage.cancelTitle') }}</h2>
 
-        <p v-if="!policy.cancellable" class="mt-2 text-text-secondary">
+        <p v-if="!policy.cancellable" class="mt-2 text-text-secondary" data-test="not-cancellable">
           {{ t('manage.notCancellable') }}
         </p>
 
         <template v-else>
           <!-- The consequence is stated here, before the button, and again in the dialog. Somebody
                about to give up money should not have to press anything to find out how much. -->
-          <p class="mt-2">{{ consequence }}</p>
+          <p class="mt-2" data-test="policy-consequence">{{ consequence }}</p>
           <p v-if="policy.feeApplies" class="mt-1 text-sm text-text-secondary">
             {{ t('manage.cancelNeedsApproval') }}
           </p>
@@ -209,7 +211,7 @@ async function cancel(): Promise<void> {
           </SfAlert>
 
           <div class="mt-4 flex flex-wrap gap-2">
-            <SfButton variant="danger" @click="confirmOpen = true">
+            <SfButton variant="danger" data-test="cancel" @click="confirmOpen = true">
               {{ t('manage.cancelConfirm') }}
             </SfButton>
             <RouterLink
@@ -239,9 +241,14 @@ async function cancel(): Promise<void> {
         @close="confirmOpen = false"
         @confirm="cancel"
       >
-        <p>{{ consequence }}</p>
+        <p data-test="confirm-consequence">{{ consequence }}</p>
         <div class="mt-3">
-          <SfTextarea v-model="cancelReason" :label="t('manage.cancelReason')" :rows="3" />
+          <SfTextarea
+            v-model="cancelReason"
+            data-test="cancel-reason"
+            :label="t('manage.cancelReason')"
+            :rows="3"
+          />
         </div>
       </SfModal>
     </template>

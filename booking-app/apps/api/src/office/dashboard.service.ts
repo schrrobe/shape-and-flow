@@ -17,6 +17,7 @@ import { Prisma } from '../prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
 import { deriveDisplayStatus } from './display-status.js';
+import { RECEIVED_PAYMENT_STATUSES } from './received.js';
 
 import type { VisibleEmployees } from '../auth/employee-scope.service.js';
 import type { OfficeSession } from '../auth/session.store.js';
@@ -170,6 +171,10 @@ export class DashboardService {
    * the domain's ban does not reach. It is a sum of same-currency integer columns, which
    * is the case `Money` exists to protect and not one it can help with here.
    *
+   * Both per-booking sums join on the **financial root**, not on the booking itself. A
+   * reschedule leaves the money on the row it arrived on, so counting a replacement's own
+   * payment rows reported every paid-then-moved appointment as still owing, permanently.
+   *
    * Both figures carry the caller's employee scope, like every other tile on the screen.
    * Revenue across the whole business is the last thing an EMPLOYEE session should be
    * handed, and the scope has to reach the payment rows through their booking, because
@@ -181,6 +186,10 @@ export class DashboardService {
     window: { startOfToday: Date; startOfTomorrow: Date; unpaidSince: Date },
   ): Promise<{ todayRevenueCents: number; unpaidConfirmedBookings: number }> {
     const { startOfToday, startOfTomorrow, unpaidSince } = window;
+
+    // The same list `receivedFrom` filters on, so the tile and every other financial
+    // reader cannot drift apart about what counts as money in.
+    const received = Prisma.join(RECEIVED_PAYMENT_STATUSES);
 
     // `b` is the bookings row in whichever subquery this is spliced into. Empty for an
     // unscoped role, so the statement has one shape rather than two.
@@ -198,7 +207,7 @@ export class DashboardService {
             SELECT SUM(p.amount_cents) FROM payments p
             JOIN bookings b ON b.id = p.booking_id
             WHERE p.organization_id = ${organizationId}
-              AND p.status IN ('SUCCEEDED', 'PARTIALLY_REFUNDED', 'REFUNDED')
+              AND p.status IN (${received})
               AND p.paid_at >= ${startOfToday} AND p.paid_at < ${startOfTomorrow}
               ${employees}
           ), 0)
@@ -220,12 +229,13 @@ export class DashboardService {
             AND (
               COALESCE((
                 SELECT SUM(p.amount_cents) FROM payments p
-                WHERE p.booking_id = b.id
-                  AND p.status IN ('SUCCEEDED', 'PARTIALLY_REFUNDED', 'REFUNDED')
+                WHERE p.booking_id = COALESCE(b.financial_root_booking_id, b.id)
+                  AND p.status IN (${received})
               ), 0)
               +
               COALESCE((
-                SELECT SUM(m.amount_cents) FROM manual_payments m WHERE m.booking_id = b.id
+                SELECT SUM(m.amount_cents) FROM manual_payments m
+                WHERE m.booking_id = COALESCE(b.financial_root_booking_id, b.id)
               ), 0)
             ) < b.price_cents_snapshot
         ) AS unpaid_confirmed_bookings

@@ -464,6 +464,44 @@ describe('GET /api/office/dashboard', () => {
     expect(await unpaid()).toBe(0);
   });
 
+  it('does not chase a rescheduled booking whose money is on the original row', async () => {
+    // A reschedule leaves the payment where it arrived. Counting the replacement's own
+    // payment rows made every paid-then-moved appointment show up here forever, and the
+    // office rang customers who had already paid.
+    const cookie = await signedInAs('OWNER');
+    const original = await bookingAt(berlin(TODAY, '10:00'));
+    await recordManualPayment(original.id, ctx.service30.priceCents);
+
+    const unpaid = async (): Promise<number> =>
+      (
+        (await get(cookie, '/api/office/dashboard').expect(200)).body as {
+          unpaidConfirmedBookings: number;
+        }
+      ).unpaidConfirmedBookings;
+
+    expect(await unpaid()).toBe(0);
+
+    await prisma.booking.update({
+      where: { id: original.id },
+      data: { status: 'CANCELED_BY_BUSINESS', canceledAt: NOW },
+    });
+
+    await prisma.booking.create({
+      data: {
+        ...makeBooking(ctx, {
+          status: 'CONFIRMED',
+          startsAt: berlin(TODAY, '14:00'),
+          expiresAt: null,
+        }),
+        confirmedAt: NOW,
+        rescheduledFromBookingId: original.id,
+        financialRootBookingId: original.id,
+      },
+    });
+
+    expect(await unpaid()).toBe(0);
+  });
+
   it('adds card and cash into one figure for today, and ignores yesterday', async () => {
     const cookie = await signedInAs('OWNER');
     const booking = await bookingAt(berlin(TODAY, '10:00'));

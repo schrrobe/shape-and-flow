@@ -12,6 +12,7 @@ import { prisma, resetDatabase } from '../database.harness.js';
 import { SLOT_FRIDAY_0900, makeBooking, seedOrganization } from '../factories/index.js';
 import { loadOrganization } from '../public-app.harness.js';
 
+import type { DecideRequestInput } from '../../src/booking/cancellation.service.js';
 import type { ReserveInput } from '../../src/booking/reservation.service.js';
 import type { BookingStatus } from '../../src/prisma/client.js';
 import type { BookingTestApp } from '../booking-app.harness.js';
@@ -208,6 +209,297 @@ describe('outside the fee window', () => {
   });
 });
 
+describe('a cancellation on top of an earlier refund', () => {
+  /** A refund already on the booking's payment, settled or still in flight. */
+  async function existingRefund(
+    bookingId: string,
+    amountCents: number,
+    status: 'SUCCEEDED' | 'PENDING',
+  ): Promise<void> {
+    const payment = await prisma.payment.findFirstOrThrow({ where: { bookingId } });
+
+    await prisma.refund.create({
+      data: {
+        organizationId: ctx.organization.id,
+        bookingId,
+        paymentId: payment.id,
+        amountCents,
+        currency: 'EUR',
+        status,
+        reason: 'GOODWILL',
+        idempotencyKey: `existing-${bookingId}-${status}`,
+      },
+    });
+
+    if (status === 'SUCCEEDED') {
+      await prisma.payment.update({
+        where: { id: payment.id },
+        data: { refundedAmountCents: amountCents, status: 'PARTIALLY_REFUNDED' },
+      });
+    }
+  }
+
+  it('refunds only the difference when part has already gone back', async () => {
+    // The target is cumulative — "the customer should end up with 45,00 back" — not a
+    // fresh instruction to send 45,00. Asking for the gross amount again would refund
+    // 55,00 against a 45,00 charge.
+    const booking = await confirmedPaid();
+    await existingRefund(booking.id, 1000, 'SUCCEEDED');
+
+    await service.cancelByCustomer(booking.id);
+
+    const refunds = await prisma.refund.findMany({
+      where: { bookingId: booking.id, reason: 'CUSTOMER_CANCELLATION' },
+    });
+    expect(refunds).toHaveLength(1);
+    expect(refunds[0]?.amountCents).toBe(ctx.service30.priceCents - 1000);
+  });
+
+  it('counts a refund still in flight against the same target', async () => {
+    const booking = await confirmedPaid();
+    await existingRefund(booking.id, 1500, 'PENDING');
+
+    await service.cancelByCustomer(booking.id);
+
+    const refunds = await prisma.refund.findMany({
+      where: { bookingId: booking.id, reason: 'CUSTOMER_CANCELLATION' },
+    });
+    expect(refunds[0]?.amountCents).toBe(ctx.service30.priceCents - 1500);
+  });
+
+  it('creates nothing when the target has already been met', async () => {
+    const booking = await confirmedPaid();
+    await existingRefund(booking.id, ctx.service30.priceCents, 'SUCCEEDED');
+
+    const result = await service.cancelByCustomer(booking.id);
+
+    expect(result).toMatchObject({ outcome: 'CANCELED', refundId: null });
+    expect(
+      await prisma.refund.count({
+        where: { bookingId: booking.id, reason: 'CUSTOMER_CANCELLATION' },
+      }),
+    ).toBe(0);
+  });
+
+  it('promises the customer what is actually being sent back', async () => {
+    // The number in this response is rendered on the /manage page as a commitment. Saying
+    // the gross paid total when 10,00 has already gone back promises money that will
+    // never arrive, and the customer finds out from their bank statement.
+    const booking = await confirmedPaid();
+    await existingRefund(booking.id, 1000, 'SUCCEEDED');
+
+    const result = await service.cancelByCustomer(booking.id);
+    if (result.outcome !== 'CANCELED') throw new Error('expected an immediate cancellation');
+
+    expect(result.refundExpected.amountCents).toBe(ctx.service30.priceCents - 1000);
+  });
+});
+
+describe('a booking whose money is on an earlier row', () => {
+  /** Two hours after the seeded slot, so the replacement is still outside the fee window. */
+  const MOVED_TO = new Date(SLOT_FRIDAY_0900.getTime() + 2 * 60 * 60_000);
+
+  /**
+   * What a reschedule leaves behind: the original cancelled with the payment still on it,
+   * and a replacement that points at it as its financial root.
+   */
+  async function rescheduledFrom(original: Booked): Promise<Booked> {
+    await prisma.booking.update({
+      where: { id: original.id },
+      data: { status: 'CANCELED_BY_BUSINESS', canceledAt: NOW },
+    });
+
+    const replacement = await prisma.booking.create({
+      data: {
+        ...makeBooking(ctx, { status: 'CONFIRMED', expiresAt: null, startsAt: MOVED_TO }),
+        confirmedAt: NOW,
+        rescheduledFromBookingId: original.id,
+        financialRootBookingId: original.id,
+      },
+    });
+
+    return { id: replacement.id, reference: replacement.reference };
+  }
+
+  it('refunds what the root was paid, not what the replacement holds', async () => {
+    // The replacement has no payment rows of its own. Reading them gave a paid total of
+    // zero, so the booking cancelled with no refund at all while the customer was shown
+    // the full amount on the page they cancelled from.
+    const replacement = await rescheduledFrom(await confirmedPaid());
+
+    const result = await service.cancelByCustomer(replacement.id);
+    if (result.outcome !== 'CANCELED') throw new Error('expected an immediate cancellation');
+
+    expect(result.refundExpected.amountCents).toBe(ctx.service30.priceCents);
+
+    const refund = await prisma.refund.findFirstOrThrow({
+      where: { bookingId: replacement.id, reason: 'CUSTOMER_CANCELLATION' },
+    });
+    expect(refund.amountCents).toBe(ctx.service30.priceCents);
+  });
+
+  it('applies the fee policy to the paid total on the root', async () => {
+    await withSettings({ cancellationFeePolicy: 'PERCENTAGE', cancellationFeePercent: 50 });
+    const replacement = await rescheduledFrom(await confirmedPaid());
+    clock.set(new Date(MOVED_TO.getTime() - 60 * 60_000));
+
+    const result = await service.cancelByCustomer(replacement.id);
+    if (result.outcome !== 'REQUESTED') throw new Error('expected a request');
+
+    // Half of what was paid on the root. A paid total of zero would have suggested
+    // retaining nothing, and the office would have decided against a number that was
+    // never true.
+    expect(result.suggestedRetained.amountCents).toBe(ctx.service30.priceCents / 2);
+  });
+
+  it('refunds the difference when the office approves the request', async () => {
+    await withSettings({ cancellationFeePolicy: 'PERCENTAGE', cancellationFeePercent: 50 });
+    const replacement = await rescheduledFrom(await confirmedPaid());
+    clock.set(new Date(MOVED_TO.getTime() - 60 * 60_000));
+
+    const opened = await service.cancelByCustomer(replacement.id);
+    if (opened.outcome !== 'REQUESTED') throw new Error('expected a request');
+
+    await service.decideRequest({
+      requestId: opened.requestId,
+      officeUserId: ctx.owner.id,
+      decision: 'APPROVED',
+      mayIssueRefunds: true,
+    });
+
+    const refund = await prisma.refund.findFirstOrThrow({
+      where: { bookingId: replacement.id, reason: 'CUSTOMER_CANCELLATION' },
+    });
+    expect(refund.amountCents).toBe(ctx.service30.priceCents / 2);
+  });
+
+  it('counts cash taken at the desk towards what goes back', async () => {
+    // A manual payment is recorded against the root as well, so a booking settled partly
+    // in cash and partly by card has a paid total neither table knows on its own.
+    const original = await confirmedPaid({}, 1000);
+    await prisma.manualPayment.create({
+      data: {
+        organizationId: ctx.organization.id,
+        bookingId: original.id,
+        amountCents: 2000,
+        currency: 'EUR',
+        method: 'CASH',
+        paidAt: NOW,
+        recordedByOfficeUserId: ctx.owner.id,
+      },
+    });
+
+    const replacement = await rescheduledFrom(original);
+    const result = await service.cancelByCustomer(replacement.id);
+    if (result.outcome !== 'CANCELED') throw new Error('expected an immediate cancellation');
+
+    // Only the card charge can be reversed electronically — Stripe cannot give back
+    // money it never took — so that is what the customer is promised here.
+    expect(result.refundExpected.amountCents).toBe(1000);
+
+    const refund = await prisma.refund.findFirstOrThrow({
+      where: { bookingId: replacement.id, reason: 'CUSTOMER_CANCELLATION' },
+    });
+    expect(refund.amountCents).toBe(1000);
+  });
+});
+
+describe('the notifications a request produces', () => {
+  it('queues a notification row for every send event it records', async () => {
+    const { booking } = await openRequest();
+
+    // The send processor looks the row up by id. An event whose payload names something
+    // that is not a notification is a job that can only ever fail.
+    const events = await prisma.outboxEvent.findMany({
+      where: { eventType: JOB.NOTIFICATION_SEND },
+    });
+    expect(events.length).toBeGreaterThan(0);
+
+    for (const event of events) {
+      const { notificationId } = event.payload as { notificationId: string };
+      await expect(
+        prisma.notification.findUniqueOrThrow({ where: { id: notificationId } }),
+      ).resolves.toBeDefined();
+    }
+
+    expect(
+      await prisma.notification.count({
+        where: { bookingId: booking.id, kind: 'CANCELLATION_REQUEST_RECEIVED' },
+      }),
+    ).toBe(1);
+    expect(
+      await prisma.notification.count({
+        where: { bookingId: booking.id, kind: 'OFFICE_CANCELLATION_REQUEST' },
+      }),
+    ).toBe(1);
+  });
+
+  it('tells the customer when their request is rejected', async () => {
+    const { booking, requestId } = await openRequest();
+
+    await service.decideRequest({
+      requestId,
+      officeUserId: ctx.owner.id,
+      decision: 'REJECTED',
+      mayIssueRefunds: true,
+      note: 'zu kurzfristig',
+    });
+
+    const decided = await prisma.notification.findFirstOrThrow({
+      where: { bookingId: booking.id, kind: 'CANCELLATION_REQUEST_DECIDED' },
+    });
+    expect((decided.payload as { approved: boolean }).approved).toBe(false);
+  });
+
+  it('tells the customer once when their request is approved', async () => {
+    const { booking, requestId } = await openRequest();
+
+    await service.decideRequest({
+      requestId,
+      officeUserId: ctx.owner.id,
+      decision: 'APPROVED',
+      mayIssueRefunds: true,
+    });
+
+    expect(
+      await prisma.notification.count({
+        where: { bookingId: booking.id, kind: 'CANCELLATION_REQUEST_DECIDED' },
+      }),
+    ).toBe(1);
+
+    // The decision message covers it, so the generic cancellation email must not be
+    // queued as well — two emails about one cancellation.
+    const event = await prisma.outboxEvent.findFirstOrThrow({
+      where: { aggregateId: booking.id, eventType: JOB.BOOKING_CANCELED },
+    });
+    expect(
+      (event.payload as { customerNotificationAlreadyQueued?: boolean })
+        .customerNotificationAlreadyQueued,
+    ).toBe(true);
+  });
+});
+
+describe('business cancellation', () => {
+  it('keeps an unpaid booking confirmed when an explicit refund cannot be made', async () => {
+    const booking = await confirmedUnpaid();
+
+    await expect(
+      service.cancelByBusiness({
+        bookingId: booking.id,
+        officeUserId: ctx.owner.id,
+        reason: 'Krankheit',
+        refundAmountCents: 100,
+        mayIssueRefunds: true,
+      }),
+    ).rejects.toMatchObject({ code: 'PAYMENT_NOT_REFUNDABLE' });
+
+    expect((await prisma.booking.findUniqueOrThrow({ where: { id: booking.id } })).status).toBe(
+      'CONFIRMED',
+    );
+    expect(await prisma.refund.count({ where: { bookingId: booking.id } })).toBe(0);
+  });
+});
+
 describe('inside the fee window', () => {
   it('opens a request and leaves the booking confirmed', async () => {
     await withSettings({ cancellationFeePolicy: 'PERCENTAGE', cancellationFeePercent: 50 });
@@ -309,6 +601,26 @@ describe('bookings that cannot be cancelled', () => {
 });
 
 describe('deciding a request', () => {
+  it('denies a refund when the capability decision is missing', async () => {
+    const { booking, requestId } = await openRequest();
+
+    await expect(
+      service.decideRequest({
+        requestId,
+        officeUserId: ctx.owner.id,
+        decision: 'APPROVED',
+      } as unknown as DecideRequestInput),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN_ROLE' });
+
+    expect((await prisma.booking.findUniqueOrThrow({ where: { id: booking.id } })).status).toBe(
+      'CONFIRMED',
+    );
+    expect(
+      (await prisma.cancellationRequest.findUniqueOrThrow({ where: { id: requestId } })).decision,
+    ).toBe('PENDING');
+    expect(await prisma.refund.count({ where: { bookingId: booking.id } })).toBe(0);
+  });
+
   it('approving cancels, refunds paid minus retained, and audits it', async () => {
     const { booking, requestId } = await openRequest();
 
@@ -316,6 +628,7 @@ describe('deciding a request', () => {
       requestId,
       officeUserId: ctx.owner.id,
       decision: 'APPROVED',
+      mayIssueRefunds: true,
       retainedAmountCents: 1000,
       note: 'Kulanz',
     });
@@ -347,7 +660,12 @@ describe('deciding a request', () => {
   it('falls back to the frozen suggestion when no amount is given', async () => {
     const { booking, requestId } = await openRequest();
 
-    await service.decideRequest({ requestId, officeUserId: ctx.owner.id, decision: 'APPROVED' });
+    await service.decideRequest({
+      requestId,
+      officeUserId: ctx.owner.id,
+      decision: 'APPROVED',
+      mayIssueRefunds: true,
+    });
 
     const refund = await prisma.refund.findFirstOrThrow({ where: { bookingId: booking.id } });
     expect(refund.amountCents).toBe(ctx.service30.priceCents / 2);
@@ -356,7 +674,12 @@ describe('deciding a request', () => {
   it('releases the slot once approved', async () => {
     const { requestId } = await openRequest();
 
-    await service.decideRequest({ requestId, officeUserId: ctx.owner.id, decision: 'APPROVED' });
+    await service.decideRequest({
+      requestId,
+      officeUserId: ctx.owner.id,
+      decision: 'APPROVED',
+      mayIssueRefunds: true,
+    });
 
     await expect(reservations.reserve(sameSlot())).resolves.toBeDefined();
   });
@@ -368,6 +691,7 @@ describe('deciding a request', () => {
       requestId,
       officeUserId: ctx.owner.id,
       decision: 'REJECTED',
+      mayIssueRefunds: true,
       note: 'zu kurzfristig',
     });
 
@@ -392,6 +716,7 @@ describe('deciding a request', () => {
         requestId,
         officeUserId: ctx.owner.id,
         decision: 'APPROVED',
+        mayIssueRefunds: true,
         retainedAmountCents: ctx.service30.priceCents + 500,
       }),
     ).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
@@ -400,10 +725,20 @@ describe('deciding a request', () => {
   it('refuses a second decision', async () => {
     const { requestId } = await openRequest();
 
-    await service.decideRequest({ requestId, officeUserId: ctx.owner.id, decision: 'REJECTED' });
+    await service.decideRequest({
+      requestId,
+      officeUserId: ctx.owner.id,
+      decision: 'REJECTED',
+      mayIssueRefunds: true,
+    });
 
     await expect(
-      service.decideRequest({ requestId, officeUserId: ctx.owner.id, decision: 'APPROVED' }),
+      service.decideRequest({
+        requestId,
+        officeUserId: ctx.owner.id,
+        decision: 'APPROVED',
+        mayIssueRefunds: true,
+      }),
     ).rejects.toMatchObject({ code: 'REQUEST_ALREADY_DECIDED' });
   });
 
@@ -415,6 +750,7 @@ describe('deciding a request', () => {
         requestId,
         officeUserId: ctx.owner.id,
         decision: 'APPROVED',
+        mayIssueRefunds: true,
         retainedAmountCents: -1,
       }),
     ).rejects.toThrow();

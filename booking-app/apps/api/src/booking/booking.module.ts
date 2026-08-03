@@ -1,12 +1,13 @@
 import { Module } from '@nestjs/common';
 
 import { ManagementTokenModule } from '../manage/management-token.module.js';
+import { NotificationModule } from '../notification/notification.module.js';
 import { PaymentModule } from '../payment/payment.module.js';
 import { PublicBookingsController } from '../public/public-bookings.controller.js';
 import { PublicModule } from '../public/public.module.js';
 
 import { AttendanceService } from './attendance.service.js';
-import { AuditService } from './audit.service.js';
+import { AuditWriterModule } from './audit.module.js';
 import { BookingCheckoutService } from './booking-checkout.service.js';
 import { BookingConfirmationService } from './booking-confirmation.service.js';
 import { CancellationService } from './cancellation.service.js';
@@ -28,9 +29,21 @@ import { ReservationService } from './reservation.service.js';
  * `POST /public/bookings` is registered here rather than in PublicModule even though it
  * sits under that path, because everything it calls lives here. The alternative is two
  * mutually dependent modules and a payment provider in every catalog test.
+ *
+ * NotificationModule is imported for `RequestNotificationService`. PaymentModule imports
+ * neither NotificationModule nor BookingModule, which is what keeps these dependencies
+ * from becoming a cycle. Cancelling and rescheduling compose customer-facing messages
+ * in the transaction that decides the request, so the message and the decision commit
+ * together.
  */
 @Module({
-  imports: [PublicModule, ManagementTokenModule, PaymentModule],
+  imports: [
+    PublicModule,
+    ManagementTokenModule,
+    PaymentModule,
+    AuditWriterModule,
+    NotificationModule,
+  ],
   controllers: [PublicBookingsController],
   providers: [
     ReservationService,
@@ -41,12 +54,12 @@ import { ReservationService } from './reservation.service.js';
     ExpiryService,
     ExpirySweeper,
     ExpiryProcessor,
-    AuditService,
     CancellationService,
     RescheduleService,
     AttendanceService,
   ],
   exports: [
+    AuditWriterModule,
     ReservationService,
     CustomerUpsertService,
     BookingCheckoutService,
@@ -55,7 +68,6 @@ import { ReservationService } from './reservation.service.js';
     ExpiryService,
     ExpirySweeper,
     ExpiryProcessor,
-    AuditService,
     CancellationService,
     RescheduleService,
     AttendanceService,

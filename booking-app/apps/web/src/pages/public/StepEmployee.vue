@@ -57,6 +57,7 @@ function choose(employeeId: string | null, displayName: string | null = null): v
       <SfCard v-if="offerAny" as="li" :padded="false">
         <button
           type="button"
+          data-test="employee-any"
           class="w-full rounded-sf p-4 text-left hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
           @click="choose(null)"
         >
@@ -68,6 +69,7 @@ function choose(employeeId: string | null, displayName: string | null = null): v
       <SfCard v-for="employee in employees" :key="employee.id" as="li" :padded="false">
         <button
           type="button"
+          data-test="employee-card"
           class="flex w-full items-baseline justify-between gap-4 rounded-sf p-4 text-left hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
           @click="choose(employee.id, employee.displayName)"
         >

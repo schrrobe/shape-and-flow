@@ -8,8 +8,11 @@ import { AuditModule } from './common/audit/audit.module.js';
 import { GlobalExceptionFilter } from './common/errors/global-exception.filter.js';
 import { AuthGuard } from './common/guards/auth.guard.js';
 import { LoggingModule } from './common/logging/logger.module.js';
+import { InFlightRequests } from './common/shutdown/inflight.js';
+import { ShutdownService } from './common/shutdown/shutdown.service.js';
 import { ThrottlingModule } from './common/throttling/throttling.module.js';
 import { ConfigModule } from './config/config.module.js';
+import { loadConfig } from './config/env.schema.js';
 import { DomainModule } from './domain/domain.module.js';
 import { HealthModule } from './health/health.module.js';
 import { ManageModule } from './manage/manage.module.js';
@@ -24,9 +27,18 @@ import { PaymentModule } from './payment/payment.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
 import { ProvidersModule } from './providers/providers.module.js';
 import { PublicModule } from './public/public.module.js';
+import { testSupportImports } from './test-support/test-support.module.js';
 import { WebhooksModule } from './webhooks/webhooks.module.js';
 
-/** The HTTP application. Queue processors live in WorkerModule instead. */
+/**
+ * The HTTP application. Queue processors live in WorkerModule instead.
+ *
+ * `loadConfig()` is called here, at decorator-evaluation time, because whether the
+ * test-support router exists is a question about the container rather than about a
+ * request. It is memoised and main.ts has already called it — main.ts imports this
+ * module dynamically, after the environment file is loaded, precisely so this sees
+ * the same configuration the process validated.
+ */
 @Module({
   imports: [
     ConfigModule,
@@ -50,11 +62,16 @@ import { WebhooksModule } from './webhooks/webhooks.module.js';
     PaymentModule,
     NotificationModule,
     WebhooksModule,
+    ...testSupportImports(loadConfig()),
   ],
   providers: [
     // Registered as a provider rather than with useGlobalFilters so it can take
     // dependencies later without changing how it is wired.
     { provide: APP_FILTER, useClass: GlobalExceptionFilter },
+    // The graceful stop. Its middleware is mounted in main.ts, because the counter
+    // has to see a request before any guard can reject it.
+    InFlightRequests,
+    ShutdownService,
     // Order matters: guards run in registration order, so the cheap in-memory
     // authorisation check happens before the one that talks to Redis.
     { provide: APP_GUARD, useClass: AuthGuard },

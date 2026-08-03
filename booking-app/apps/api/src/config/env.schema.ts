@@ -28,6 +28,15 @@ export const envSchema = z
     APP_ROLE: z.enum(['api', 'worker']).default('api'),
     PORT: z.coerce.number().int().min(1).max(65535).default(3000),
     LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
+    /**
+     * The share of `GET /public/availability` request lines that are written.
+     *
+     * That one endpoint is hit on every date change a browsing customer makes, and
+     * nothing else comes close to its volume. Defaulting to 1 means a deployment
+     * that has not thought about this is not quietly dropping lines; turning it
+     * down is a decision an operator takes when the log bill says so.
+     */
+    LOG_SAMPLE_RATE: z.coerce.number().min(0).max(1).default(1),
 
     // ── data stores ──────────────────────────────────────────────────────────
     DATABASE_URL: nonEmpty.refine(

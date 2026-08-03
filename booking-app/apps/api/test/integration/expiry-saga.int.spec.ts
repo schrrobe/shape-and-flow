@@ -211,7 +211,7 @@ describe('phase two', () => {
 
   it('confirms instead when the customer paid inside the window', async () => {
     const booking = await overdue();
-    payments.markPaid(booking.sessionId ?? '');
+    await payments.markPaid(booking.sessionId ?? '');
     await expiry.beginExpiry(booking.id);
 
     expect(await expiry.completeExpiry(booking.id)).toBe('CONFIRMED');
@@ -292,7 +292,7 @@ describe('phase two', () => {
 describe('the race with the webhook', () => {
   it('produces one payment, one token and one history row whichever wins', async () => {
     const booking = await overdue();
-    payments.markPaid(booking.sessionId ?? '');
+    await payments.markPaid(booking.sessionId ?? '');
     await expiry.beginExpiry(booking.id);
 
     // Both paths reach BookingConfirmationService at once. Its FOR UPDATE lock is what
@@ -348,7 +348,7 @@ describe('the processor', () => {
 
   it('confirms when the customer paid, driven entirely from the job', async () => {
     const booking = await overdue();
-    payments.markPaid(booking.sessionId ?? '');
+    await payments.markPaid(booking.sessionId ?? '');
 
     await processor.handle({ organizationId: ctx.organization.id, bookingId: booking.id });
 

@@ -39,6 +39,7 @@ const href = computed(() => {
   <!-- Nothing at all when there is no number: a dead link to wa.me is worse than no button. -->
   <a
     v-if="digits !== ''"
+    data-test="whatsapp-link"
     :href="href"
     target="_blank"
     rel="noopener noreferrer"

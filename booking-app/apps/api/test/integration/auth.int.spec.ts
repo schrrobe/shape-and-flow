@@ -246,6 +246,27 @@ describe('POST /api/auth/login', () => {
     expect((response.body as { message: string }).message).toBe('Invalid credentials.');
   });
 
+  it('counts parallel failures without losing increments', async () => {
+    // Read-then-write on a stale counter: two requests in flight both read the same
+    // value and both store it plus one, so the attempt that should have crossed the
+    // threshold leaves the account one below it and unlocked.
+    await prisma.officeUser.updateMany({
+      where: { email: OWNER_EMAIL },
+      data: { failedLoginAttempts: MAX_FAILED_ATTEMPTS - 2 },
+    });
+
+    const responses = await Promise.all([
+      login({ email: OWNER_EMAIL, password: 'wrong-but-long' }),
+      login({ email: OWNER_EMAIL, password: 'wrong-but-long' }),
+    ]);
+
+    expect(responses.map((response) => response.status)).toEqual([401, 401]);
+
+    const user = await prisma.officeUser.findFirstOrThrow({ where: { email: OWNER_EMAIL } });
+    expect(user.failedLoginAttempts).toBe(MAX_FAILED_ATTEMPTS);
+    expect(user.lockedUntil).not.toBeNull();
+  });
+
   it('accepts the password again once the lockout has passed', async () => {
     for (let attempt = 0; attempt < MAX_FAILED_ATTEMPTS; attempt += 1) {
       await login({ email: OWNER_EMAIL, password: 'wrong-but-long' }).expect(401);

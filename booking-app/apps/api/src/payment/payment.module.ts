@@ -1,5 +1,9 @@
 import { Module } from '@nestjs/common';
 
+import { AuditWriterModule } from '../booking/audit.module.js';
+
+import { BookingFinancialsService } from './booking-financials.service.js';
+import { ManualPaymentService } from './manual-payment.service.js';
 import { RefundProcessor } from './processors/refund.processor.js';
 import { RefundWebhookHandler } from './refund-webhook.handler.js';
 import { RefundService } from './refund.service.js';
@@ -13,7 +17,20 @@ import { RefundService } from './refund.service.js';
  * provider conversation that may need many attempts with the same idempotency key.
  */
 @Module({
-  providers: [RefundService, RefundProcessor, RefundWebhookHandler],
-  exports: [RefundService, RefundProcessor, RefundWebhookHandler],
+  imports: [AuditWriterModule],
+  providers: [
+    BookingFinancialsService,
+    RefundService,
+    RefundProcessor,
+    RefundWebhookHandler,
+    ManualPaymentService,
+  ],
+  exports: [
+    BookingFinancialsService,
+    RefundService,
+    RefundProcessor,
+    RefundWebhookHandler,
+    ManualPaymentService,
+  ],
 })
 export class PaymentModule {}

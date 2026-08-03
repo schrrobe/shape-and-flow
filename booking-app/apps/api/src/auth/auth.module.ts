@@ -35,6 +35,9 @@ import { SessionStore } from './session.store.js';
   ],
   exports: [
     PasswordService,
+    // Exported for the office's user management: creating an account sends a reset
+    // link rather than accepting a password, so the two flows share one implementation.
+    PasswordResetService,
     SessionStore,
     OfficeSessionGuard,
     CsrfHeaderGuard,

@@ -34,11 +34,10 @@ interface PersistedDraft {
   /** `null` means "any available employee", which is a real choice and not an empty one. */
   employeeId: string | null;
   /**
-   * Persisted rather than derived from `employeeId`.
+   * Whether the customer has answered the employee question at all.
    *
-   * "Anyone" is `employeeId: null`, which is indistinguishable from "not asked yet" — so
-   * deriving it meant a reload turned the choice back into an absence, and `enforceReachable`
-   * sent a customer with a slot already picked back to the employee step.
+   * Persisted rather than derived, because the one choice that cannot be told from its own
+   * absence is the common one: `employeeId: null` is both "anyone" and "not asked yet".
    */
   employeeChosen: boolean;
   slotStartsAt: string | null;
@@ -74,7 +73,17 @@ function readStored(): PersistedDraft {
 
     // Merged over a fresh draft, so a stored shape from an older deploy cannot produce
     // undefined fields the form would then render as "undefined".
-    return { ...emptyDraft(), ...(JSON.parse(raw) as Partial<PersistedDraft>) };
+    const parsed = JSON.parse(raw) as Partial<PersistedDraft>;
+    const draft = { ...emptyDraft(), ...parsed };
+
+    return {
+      ...draft,
+      // A draft written before this field existed is read by the old rule: a named
+      // employee was chosen, a null one was never asked about. Applied here, against the
+      // raw object, because the merge above would otherwise hide the difference between
+      // "absent" and "stored as false".
+      employeeChosen: parsed.employeeChosen ?? draft.employeeId !== null,
+    };
   } catch {
     return emptyDraft();
   }
@@ -108,13 +117,8 @@ export const useBookingDraft = defineStore('booking-draft', () => {
   const phone = ref(stored.phone);
   const note = ref(stored.note);
 
-  /**
-   * True once the customer has answered the employee step, "anyone" included.
-   *
-   * The `employeeId` fallback is for a draft written before this field existed: an id in
-   * storage was a choice then and still is now.
-   */
-  const employeeChosen = ref(stored.employeeChosen || stored.employeeId !== null);
+  /** True once the customer has answered the employee question, "anyone" included. */
+  const employeeChosen = ref(stored.employeeChosen);
 
   /**
    * The hosted payment page, and the reservation it belongs to.
@@ -170,6 +174,10 @@ export const useBookingDraft = defineStore('booking-draft', () => {
       note,
     ],
     persist,
+    // Synchronous, so what is stored is never one tick behind what is chosen. A reload
+    // is not something the page gets to schedule, and a watcher that flushed afterwards
+    // both lost the last choice and wrote an empty draft back over a `reset`.
+    { flush: 'sync' },
   );
 
   /** Start an attempt, or resume the one already in progress. */
@@ -275,6 +283,24 @@ export const useBookingDraft = defineStore('booking-draft', () => {
     reservation.value = null;
   }
 
+  /**
+   * The reservation lapsed: pick a new slot, under a new key.
+   *
+   * The key is the part `clearSlot` cannot do. It is bound to the booking the previous
+   * attempt held, so submitting a different slot under it is a spent key with a new body
+   * — which the API refuses as `IDEMPOTENCY_KEY_REUSED`. The customer would be told to
+   * pick again and then blocked from doing so.
+   *
+   * Everything chosen earlier stays: the service, the person and their own details were
+   * never the problem.
+   */
+  function expireReservation(): void {
+    slotStartsAt.value = null;
+    reservation.value = null;
+    idempotencyKey.value = crypto.randomUUID();
+    persist();
+  }
+
   const price = computed<MoneyDto | null>(() => reservation.value?.price ?? null);
 
   return {
@@ -302,6 +328,7 @@ export const useBookingDraft = defineStore('booking-draft', () => {
     canReach,
     furthestReachable,
     clearSlot,
+    expireReservation,
     reset,
   };
 });

@@ -23,6 +23,23 @@ export const REQUIRES_REFUND_CAPABILITY = 'auth:refund-capability';
 export const RequiresRefundCapability = (): MethodDecorator & ClassDecorator =>
   SetMetadata(REQUIRES_REFUND_CAPABILITY, true);
 
+/**
+ * The same rule, for the routes where it depends on the body.
+ *
+ * Cancelling a booking needs the capability only when the cancellation carries a
+ * non-zero refund, and deciding a cancellation request needs it only when the office
+ * retains less than the customer paid. A decorator cannot express "sometimes", so those
+ * call sites ask directly — through this, so there is one definition of who may move
+ * money back rather than a guard and a copy of it.
+ */
+export function assertMayIssueRefunds(session: OfficeSession): void {
+  if (session.role === 'OWNER' || session.canIssueRefunds) return;
+
+  throw new AppError('FORBIDDEN_ROLE', {
+    message: 'Your account may not perform this action.',
+  });
+}
+
 @Injectable()
 export class RefundCapabilityGuard implements CanActivate {
   constructor(private readonly reflector: Reflector) {}
@@ -47,10 +64,7 @@ export class RefundCapabilityGuard implements CanActivate {
       });
     }
 
-    if (session.role === 'OWNER' || session.canIssueRefunds) return true;
-
-    throw new AppError('FORBIDDEN_ROLE', {
-      message: 'Your account may not perform this action.',
-    });
+    assertMayIssueRefunds(session);
+    return true;
   }
 }

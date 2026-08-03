@@ -129,9 +129,16 @@ export const jobPayloadSchemas = {
     bookingId: cuidSchema,
     managementToken: z.string().optional(),
   }),
+  /**
+   * `customerNotificationAlreadyQueued` is set when the transaction that cancelled the
+   * booking also composed a customer message about it — a decided cancellation request
+   * says everything the generic email does and more. The processor still does the rest
+   * of its work; it only skips the second message.
+   */
   [JOB.BOOKING_CANCELED]: tenantJob({
     bookingId: cuidSchema,
     refundId: cuidSchema.optional(),
+    customerNotificationAlreadyQueued: z.boolean().optional(),
   }),
   [JOB.BOOKING_PAYMENT_FAILED]: tenantJob({ bookingId: cuidSchema }),
   /**
@@ -143,6 +150,7 @@ export const jobPayloadSchemas = {
     bookingId: cuidSchema,
     previousBookingId: cuidSchema,
     managementToken: z.string().optional(),
+    customerNotificationAlreadyQueued: z.boolean().optional(),
   }),
 
   [JOB.REFUND_REQUESTED]: tenantJob({ refundId: cuidSchema }),

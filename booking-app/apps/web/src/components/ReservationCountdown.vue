@@ -92,6 +92,7 @@ const tone = computed(() => {
 
 <template>
   <p
+    data-test="countdown"
     aria-live="polite"
     class="inline-flex items-center gap-2 rounded-sf px-3 py-1.5 text-sm"
     :class="tone"
