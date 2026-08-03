@@ -389,7 +389,8 @@ export class ExportsService {
       });
 
       for (const refund of rows) {
-        const occurredAt = refund.settledAt ?? refund.requestedAt;
+        const occurredAt =
+          state === 'SETTLED' ? (refund.settledAt ?? refund.requestedAt) : refund.requestedAt;
         yield {
           kind: 'REFUND',
           id: refund.id,
@@ -412,7 +413,10 @@ export class ExportsService {
       if (rows.length < PAGE_SIZE) return;
       const last = rows.at(-1);
       if (last === undefined) return;
-      cursor = { at: last.settledAt ?? last.requestedAt, id: last.id };
+      cursor = {
+        at: state === 'SETTLED' ? (last.settledAt ?? last.requestedAt) : last.requestedAt,
+        id: last.id,
+      };
     }
   }
 
