@@ -2,11 +2,13 @@ import { Controller, Get, Module } from '@nestjs/common';
 import request from 'supertest';
 import { beforeEach, describe, expect, it } from 'vitest';
 
+import { CLOCK } from '../../src/domain/time/clock.js';
 import { PublicModule } from '../../src/public/public.module.js';
 import { prisma, resetDatabase } from '../database.harness.js';
 import { BERLIN, seedOrganization } from '../factories/index.js';
 import { createPublicTestApp, loadOrganization } from '../public-app.harness.js';
 
+import type { Clock } from '../../src/domain/time/clock.js';
 import type { SeedContext } from '../factories/index.js';
 import type { Server } from 'node:http';
 
@@ -30,6 +32,43 @@ beforeEach(async () => {
 });
 
 describe('GET /public/organizations/current', () => {
+  it('keeps organization, clock, and query count isolated between two live apps', async () => {
+    const other = await seedOrganization(prisma, { slug: 'other-studio' });
+    const firstNow = new Date('2026-08-10T06:00:00.000Z');
+    const secondNow = new Date('2026-09-10T06:00:00.000Z');
+    const first = await createPublicTestApp({
+      organization: await loadOrganization(ctx.organization.id),
+      now: firstNow,
+      imports: [PublicModule],
+    });
+    const second = await createPublicTestApp({
+      organization: await loadOrganization(other.organization.id),
+      now: secondNow,
+      imports: [PublicModule],
+    });
+
+    try {
+      const firstResponse = await request(first.server())
+        .get('/public/organizations/current')
+        .expect(200);
+      const secondResponse = await request(second.server())
+        .get('/public/organizations/current')
+        .expect(200);
+      expect(firstResponse.body).toMatchObject({ id: ctx.organization.id });
+      expect(secondResponse.body).toMatchObject({ id: other.organization.id });
+      expect(first.app.get<Clock>(CLOCK).now()).toEqual(firstNow);
+      expect(second.app.get<Clock>(CLOCK).now()).toEqual(secondNow);
+
+      first.queryCounter.reset();
+      second.queryCounter.reset();
+      await request(first.server()).get('/public/services').expect(200);
+      expect(first.queryCounter.total()).toBeGreaterThan(0);
+      expect(second.queryCounter.total()).toBe(0);
+    } finally {
+      await Promise.all([first.close(), second.close()]);
+    }
+  });
+
   it('returns identity and the policy a booking page needs to explain itself', async () => {
     const response = await request(server()).get('/public/organizations/current').expect(200);
 

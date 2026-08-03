@@ -61,6 +61,28 @@ describe('createCheckoutSession', () => {
     expect(provider.sessions()).toHaveLength(1);
   });
 
+  it('rejects a checkout key reused with a different amount', async () => {
+    await provider.createCheckoutSession(context, input({ idempotencyKey: 'key-1' }));
+
+    await expect(
+      provider.createCheckoutSession(
+        context,
+        input({ idempotencyKey: 'key-1', amount: Money.fromCents(4600) }),
+      ),
+    ).rejects.toMatchObject({ code: 'IDEMPOTENCY_KEY_REUSED' });
+  });
+
+  it('rejects a checkout key reused with another changed field', async () => {
+    await provider.createCheckoutSession(context, input({ idempotencyKey: 'key-1' }));
+
+    await expect(
+      provider.createCheckoutSession(
+        context,
+        input({ idempotencyKey: 'key-1', successUrl: 'https://example.com/other' }),
+      ),
+    ).rejects.toMatchObject({ code: 'IDEMPOTENCY_KEY_REUSED' });
+  });
+
   it('creates distinct sessions for distinct keys', async () => {
     const first = await provider.createCheckoutSession(context, input({ idempotencyKey: 'key-1' }));
     const second = await provider.createCheckoutSession(
@@ -183,6 +205,42 @@ describe('createRefund', () => {
 
     expect(second.refundId).toBe(first.refundId);
     expect(provider.refundCalls()).toHaveLength(1);
+  });
+
+  it('rejects a refund key reused with a different amount', async () => {
+    const chargeId = await paidSession();
+    await provider.createRefund(context, {
+      chargeId,
+      amount: Money.fromCents(2000),
+      idempotencyKey: 'rf-1',
+    });
+
+    await expect(
+      provider.createRefund(context, {
+        chargeId,
+        amount: Money.fromCents(2100),
+        idempotencyKey: 'rf-1',
+      }),
+    ).rejects.toMatchObject({ code: 'IDEMPOTENCY_KEY_REUSED' });
+  });
+
+  it('rejects a refund key reused with a different reason', async () => {
+    const chargeId = await paidSession();
+    await provider.createRefund(context, {
+      chargeId,
+      amount: Money.fromCents(2000),
+      idempotencyKey: 'rf-1',
+      reason: 'first reason',
+    });
+
+    await expect(
+      provider.createRefund(context, {
+        chargeId,
+        amount: Money.fromCents(2000),
+        idempotencyKey: 'rf-1',
+        reason: 'changed reason',
+      }),
+    ).rejects.toMatchObject({ code: 'IDEMPOTENCY_KEY_REUSED' });
   });
 
   it('refuses more than the refundable remainder', async () => {

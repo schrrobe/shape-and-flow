@@ -205,7 +205,7 @@ export class InboxReconciler {
    * logged at `error` with the type and the id.
    */
   private async reportPoisoned(): Promise<number> {
-    const [stripe, messaging] = await Promise.all([
+    const [stripe, messaging, stripeTotal, messagingTotal] = await Promise.all([
       this.prisma.stripeWebhookEvent.findMany({
         where: poisonedWhere,
         orderBy: { receivedAt: 'asc' },
@@ -218,6 +218,8 @@ export class InboxReconciler {
         take: SAMPLE_LIMIT,
         select: { provider: true, providerEventId: true, type: true, attempts: true },
       }),
+      this.prisma.stripeWebhookEvent.count({ where: poisonedWhere }),
+      this.prisma.messagingWebhookEvent.count({ where: poisonedWhere }),
     ]);
 
     for (const row of stripe) {
@@ -232,7 +234,7 @@ export class InboxReconciler {
       );
     }
 
-    return stripe.length + messaging.length;
+    return stripeTotal + messagingTotal;
   }
 
   /** Delete processed events past their retention window. */

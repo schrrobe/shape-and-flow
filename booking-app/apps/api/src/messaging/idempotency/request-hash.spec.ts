@@ -70,6 +70,11 @@ describe('canonicalRequestHash', () => {
     expect(canonicalRequestHash('text')).not.toBe(canonicalRequestHash({ 0: 'text' }));
   });
 
+  it('normalises an absent top-level body to JSON null', () => {
+    expect(canonicalRequestJson(undefined)).toBe('null');
+    expect(canonicalRequestHash(undefined)).toBe(canonicalRequestHash(null));
+  });
+
   it('produces a hex sha256', () => {
     expect(canonicalRequestHash({ a: 1 })).toMatch(/^[0-9a-f]{64}$/);
   });

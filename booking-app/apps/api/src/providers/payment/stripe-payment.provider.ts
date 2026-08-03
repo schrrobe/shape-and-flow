@@ -6,6 +6,7 @@ import { isSessionAlreadyCompleteError } from './stripe.errors.js';
 
 import type {
   CheckoutSessionResult,
+  CheckoutSessionStatus,
   PaymentStatusValue,
   RefundStatusValue,
   CreateCheckoutSessionInput,
@@ -45,6 +46,9 @@ export const STRIPE_API_VERSION = Stripe.API_VERSION;
 /** Stripe rejects `expires_at` closer than this. Documented, not guessed. */
 export const STRIPE_MIN_SESSION_TTL_MINUTES = 30;
 
+/** Stripe rejects `expires_at` further out than this. Documented, not guessed. */
+export const STRIPE_MAX_SESSION_TTL_MINUTES = 24 * 60;
+
 export interface StripePaymentProviderOptions {
   webhookSecret: string;
   /** Signature tolerance in seconds. */
@@ -68,6 +72,13 @@ export function toPaymentStatus(value: string): PaymentStatusValue {
   if (value === 'paid') return 'paid';
   if (value === 'no_payment_required') return 'no_payment_required';
   return 'unpaid';
+}
+
+/** Narrow an open Stripe status union without letting an unknown state escape. */
+export function toSessionStatus(value: string | null): CheckoutSessionStatus {
+  if (value === 'complete') return 'complete';
+  if (value === 'expired') return 'expired';
+  return 'open';
 }
 
 /**
@@ -188,7 +199,7 @@ export class StripePaymentProvider implements PaymentProvider {
 
     return {
       sessionId: session.id,
-      status: session.status ?? 'open',
+      status: toSessionStatus(session.status),
       paymentStatus: toPaymentStatus(session.payment_status),
       paymentIntentId:
         typeof session.payment_intent === 'string'
@@ -290,7 +301,9 @@ export class StripePaymentProvider implements PaymentProvider {
    * runs at all.
    */
   private expiresAtEpochSeconds(requested: Date): number {
-    const earliest = this.clock.now().getTime() + STRIPE_MIN_SESSION_TTL_MINUTES * 60_000;
-    return Math.ceil(Math.max(requested.getTime(), earliest) / 1000);
+    const now = this.clock.now().getTime();
+    const earliest = now + STRIPE_MIN_SESSION_TTL_MINUTES * 60_000;
+    const latest = now + STRIPE_MAX_SESSION_TTL_MINUTES * 60_000;
+    return Math.ceil(Math.min(Math.max(requested.getTime(), earliest), latest) / 1000);
   }
 }

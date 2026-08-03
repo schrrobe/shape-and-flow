@@ -50,6 +50,7 @@ describe('EnqueueService against a real Redis', () => {
     const [job] = await queues[QUEUE.MAINTENANCE].getJobs(['waiting']);
     expect(job?.opts.attempts).toBe(DEFAULT_JOB_OPTIONS.attempts);
     expect(job?.opts.backoff).toMatchObject({ type: 'exponential', delay: 5_000 });
+    expect(job?.opts.removeOnFail).toMatchObject({ age: 604_800, count: 20_000 });
   });
 
   it('stamps the ambient correlation id onto the payload', async () => {
@@ -201,25 +202,26 @@ describe('the module lifecycle, through a real Nest container', () => {
     await app.init();
 
     const connection = app.get<Redis>(REDIS);
-    expect(connection.status).toBe('ready');
-
-    // A round trip through the container's own queues, not the harness's, so this
-    // exercises the wiring QueuesModule produces.
-    const enqueueService = app.get(EnqueueService);
-    await enqueueService.enqueue(JOB.SWEEP_OUTBOX, {});
-    expect(await enqueueService.queue(QUEUE.MAINTENANCE).getJobCounts('waiting')).toMatchObject({
-      waiting: 1,
-    });
-
-    // Listener registered before close, and awaited after: ioredis flips `status`
-    // to 'end' on the socket close event, which lands after `quit()` resolves, so
-    // reading the property straight after `close()` races it. If the shutdown hook
-    // ever stops running, this waits out the test timeout and names itself.
     const ended = new Promise<void>((resolve) => {
       connection.once('end', resolve);
     });
 
-    await app.close();
+    try {
+      expect(connection.status).toBe('ready');
+
+      // A round trip through the container's own queues, not the harness's, so this
+      // exercises the wiring QueuesModule produces.
+      const enqueueService = app.get(EnqueueService);
+      await enqueueService.enqueue(JOB.SWEEP_OUTBOX, {});
+      expect(await enqueueService.queue(QUEUE.MAINTENANCE).getJobCounts('waiting')).toMatchObject({
+        waiting: 1,
+      });
+    } finally {
+      await app.close();
+    }
+
+    // Listener registered before close, and awaited after: ioredis flips `status`
+    // to 'end' on the socket close event, which lands after `quit()` resolves.
     await ended;
 
     // Anything other than the terminal state means the socket outlived the

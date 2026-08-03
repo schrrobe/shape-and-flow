@@ -92,7 +92,7 @@ export class OutboxReconciler {
       this.prisma.outboxEvent.count({ where: stalledWhere(now) }),
       this.prisma.outboxEvent.count({ where: exhaustedWhere }),
       this.prisma.outboxEvent.findFirst({
-        where: { dispatchedAt: null },
+        where: pendingWhere,
         orderBy: { createdAt: 'asc' },
         select: { createdAt: true },
       }),
@@ -116,8 +116,8 @@ export class OutboxReconciler {
     const now = this.clock.now();
     const health = await this.health();
 
-    if (health.stalled > 0) await this.report('stalled', stalledWhere(now));
-    if (health.exhausted > 0) await this.report('exhausted', exhaustedWhere);
+    if (health.stalled > 0) await this.report('stalled', health.stalled, stalledWhere(now));
+    if (health.exhausted > 0) await this.report('exhausted', health.exhausted, exhaustedWhere);
 
     const deleted = await this.prune(now);
 
@@ -131,7 +131,11 @@ export class OutboxReconciler {
   }
 
   /** Name a bounded sample of the offending rows, so the log line is actionable. */
-  private async report(label: string, where: Prisma.OutboxEventWhereInput): Promise<void> {
+  private async report(
+    label: string,
+    total: number,
+    where: Prisma.OutboxEventWhereInput,
+  ): Promise<void> {
     const rows = await this.prisma.outboxEvent.findMany({
       where,
       orderBy: { createdAt: 'asc' },
@@ -146,7 +150,7 @@ export class OutboxReconciler {
       )
       .join(', ');
 
-    this.logger.error(`${String(rows.length)} ${label} outbox rows — ${sample}`);
+    this.logger.error(`${String(total)} ${label} outbox rows — ${sample}`);
   }
 
   /** Delete rows delivered longer ago than the retention window. */

@@ -48,6 +48,7 @@ interface FakeSession {
   chargeId?: string;
   paymentMethodType?: string;
   idempotencyKey?: string | undefined;
+  request: CreateCheckoutSessionInput;
 }
 
 interface FakeRefund {
@@ -55,6 +56,7 @@ interface FakeRefund {
   chargeId: string;
   amount: Money;
   idempotencyKey: string;
+  reason?: string | undefined;
 }
 
 @Injectable()
@@ -139,6 +141,11 @@ export class FakePaymentProvider implements PaymentProvider {
       const existingId = this.sessionsByIdempotencyKey.get(input.idempotencyKey);
       if (existingId !== undefined) {
         const existing = this.requireSession(existingId);
+        if (!sameCheckoutRequest(existing.request, input)) {
+          throw new AppError('IDEMPOTENCY_KEY_REUSED', {
+            message: 'Checkout idempotency key was reused with different parameters.',
+          });
+        }
         return this.resultFor(existing);
       }
     }
@@ -154,6 +161,7 @@ export class FakePaymentProvider implements PaymentProvider {
       clientReferenceId: input.clientReferenceId,
       expiresAt: input.expiresAt,
       idempotencyKey: input.idempotencyKey,
+      request: { ...input, expiresAt: new Date(input.expiresAt) },
     };
 
     this.sessionsById.set(sessionId, session);
@@ -213,6 +221,15 @@ export class FakePaymentProvider implements PaymentProvider {
     // Same key, same refund — which is what stops a retried job refunding twice.
     const existing = this.refunds.find((refund) => refund.idempotencyKey === input.idempotencyKey);
     if (existing) {
+      if (
+        existing.chargeId !== input.chargeId ||
+        !existing.amount.equals(input.amount) ||
+        existing.reason !== input.reason
+      ) {
+        throw new AppError('IDEMPOTENCY_KEY_REUSED', {
+          message: 'Refund idempotency key was reused with different parameters.',
+        });
+      }
       return {
         refundId: existing.refundId,
         status: 'succeeded',
@@ -249,6 +266,7 @@ export class FakePaymentProvider implements PaymentProvider {
       chargeId: input.chargeId,
       amount: input.amount,
       idempotencyKey: input.idempotencyKey,
+      reason: input.reason,
     };
     this.refunds.push(refund);
 
@@ -323,4 +341,22 @@ export class FakePaymentProvider implements PaymentProvider {
       expiresAt: session.expiresAt,
     };
   }
+}
+
+function sameCheckoutRequest(
+  left: CreateCheckoutSessionInput,
+  right: CreateCheckoutSessionInput,
+): boolean {
+  return (
+    left.bookingId === right.bookingId &&
+    left.clientReferenceId === right.clientReferenceId &&
+    left.amount.equals(right.amount) &&
+    left.description === right.description &&
+    left.customerEmail === right.customerEmail &&
+    left.successUrl === right.successUrl &&
+    left.cancelUrl === right.cancelUrl &&
+    left.locale === right.locale &&
+    left.expiresAt.getTime() === right.expiresAt.getTime() &&
+    left.idempotencyKey === right.idempotencyKey
+  );
 }

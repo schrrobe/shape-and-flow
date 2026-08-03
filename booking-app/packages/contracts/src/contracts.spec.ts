@@ -5,7 +5,7 @@ import { ZodObject, z } from 'zod';
 
 import { ERROR_STATUS, errorCodeSchema, isPublicErrorCode } from './errors.js';
 import { cursorPageSchema, cursorQuerySchema } from './pagination.js';
-import { localDateSchema, moneySchema } from './primitives.js';
+import { cuidSchema, localDateSchema, moneySchema } from './primitives.js';
 
 import * as contracts from './index.js';
 
@@ -66,6 +66,14 @@ describe('primitives', () => {
     expect(moneySchema.safeParse({ amountCents: -4500, currency: 'EUR' }).success).toBe(true);
     expect(moneySchema.safeParse({ amountCents: 45.5, currency: 'EUR' }).success).toBe(false);
     expect(moneySchema.safeParse({ amountCents: 4500, currency: 'EURO' }).success).toBe(false);
+    for (const currency of ['eur', 'EU1', '€UR']) {
+      expect(moneySchema.safeParse({ amountCents: 4500, currency }).success, currency).toBe(false);
+    }
+  });
+
+  it('accepts Prisma cuid v1 identifiers and rejects generic alphanumeric strings', () => {
+    expect(cuidSchema.safeParse('cms9gryv30000ja32145w5gke').success).toBe(true);
+    expect(cuidSchema.safeParse('1234567890abcdefghijklmn').success).toBe(false);
   });
 
   it('accepts a real local date and rejects a malformed or impossible one', () => {

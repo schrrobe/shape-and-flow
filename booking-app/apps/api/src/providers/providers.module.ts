@@ -96,11 +96,12 @@ function buildStripeProvider(config: AppConfig, clock: Clock): StripePaymentProv
   return new StripePaymentProvider(stripe, clock, { webhookSecret });
 }
 
-function required(value: string | undefined, name: string): string {
-  if (value === undefined || value.trim() === '') {
+export function required(value: string | undefined, name: string): string {
+  const trimmed = value?.trim();
+  if (trimmed === undefined || trimmed === '') {
     throw new Error(`${name} is required when the matching provider is not "fake".`);
   }
-  return value;
+  return trimmed;
 }
 
 function notImplemented(port: string, choice: string): never {

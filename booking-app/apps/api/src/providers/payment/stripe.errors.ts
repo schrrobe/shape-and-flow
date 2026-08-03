@@ -54,7 +54,7 @@ export function isRetryableStripeError(error: unknown): boolean {
   return false;
 }
 
-/** A short, loggable description that never includes the request payload. */
+/** A short description assembled without serialising Stripe's raw request object. */
 export function describeStripeError(error: unknown): string {
   if (error instanceof Stripe.errors.StripeError) {
     const parts = [error.type, error.code, error.message].filter(

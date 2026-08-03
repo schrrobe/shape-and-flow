@@ -26,6 +26,10 @@ let recorder: InboxRecorder;
 let enqueue: { enqueue: ReturnType<typeof vi.fn> };
 let reconciler: InboxReconciler;
 
+afterAll(async () => {
+  await disconnectRedis();
+});
+
 /** Backdate an event so it falls inside the reconciler's stalled window. */
 async function backdateStripe(stripeEventId: string, ms: number): Promise<void> {
   await prisma.stripeWebhookEvent.updateMany({
@@ -290,6 +294,17 @@ describe('the reconciler', () => {
     expect(enqueue.enqueue).not.toHaveBeenCalled();
   });
 
+  it('returns the total poisoned count when the log sample is bounded', async () => {
+    for (let index = 0; index < 21; index += 1) {
+      await recorder.recordStripe({ id: `evt_poison_${String(index)}`, type: 'x', payload: {} });
+    }
+    await prisma.stripeWebhookEvent.updateMany({
+      data: { attempts: INBOX_MAX_ATTEMPTS, lastError: 'always fails' },
+    });
+
+    expect((await reconciler.runOnce()).poisoned).toBe(21);
+  });
+
   it('re-enqueues messaging events too, with their provider', async () => {
     const recorded = await recorder.recordMessaging('TWILIO', {
       id: 'sms-1',
@@ -365,10 +380,6 @@ describe('the reconciler', () => {
 describe('end to end, through the real queue', () => {
   beforeEach(async () => {
     await resetQueues();
-  });
-
-  afterAll(async () => {
-    await disconnectRedis();
   });
 
   it('re-enqueues a stalled event onto the webhook queue, once', async () => {

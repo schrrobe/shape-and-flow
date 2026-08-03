@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { Money } from '../../domain/money/money.js';
 import { FixedClock } from '../../domain/time/clock.js';
+import { required } from '../providers.module.js';
 
 import {
   STRIPE_API_VERSION,
@@ -217,6 +218,18 @@ describe('createCheckoutSession', () => {
     await provider.createCheckoutSession(context, input({ expiresAt: later }));
 
     expect(lastCallOf(create)[0].expires_at).toBe(Math.ceil(later.getTime() / 1000));
+  });
+
+  it('clamps expires_at to Stripe maximum', async () => {
+    const { provider, create } = build();
+    await provider.createCheckoutSession(
+      context,
+      input({ expiresAt: new Date(NOW.getTime() + 48 * 60 * 60_000) }),
+    );
+
+    expect(lastCallOf(create)[0].expires_at).toBe(
+      Math.ceil((NOW.getTime() + 24 * 60 * 60_000) / 1000),
+    );
   });
 
   it('forwards an idempotency key as a request option', async () => {
@@ -544,6 +557,20 @@ describe('error classification', () => {
 });
 
 describe('narrowing Stripe open unions', () => {
+  it('maps an unrecognised session status to open', async () => {
+    const { provider } = build({
+      retrieve: vi.fn<RetrieveFn>().mockResolvedValue(
+        asSession({
+          id: 'cs_test_1',
+          status: 'paused' as Stripe.Checkout.Session.Status,
+          payment_status: 'unpaid',
+        }),
+      ),
+    });
+
+    expect((await provider.retrieveCheckoutSession(context, 'cs_test_1')).status).toBe('open');
+  });
+
   it('maps the payment statuses it recognises', () => {
     expect(toPaymentStatus('paid')).toBe('paid');
     expect(toPaymentStatus('unpaid')).toBe('unpaid');
@@ -573,5 +600,11 @@ describe('narrowing Stripe open unions', () => {
     for (const value of [null, 'requires_action', 'SUCCEEDED', '']) {
       expect(toRefundStatus(value), String(value)).toBe('pending');
     }
+  });
+});
+
+describe('provider secrets', () => {
+  it('trims a configured secret before passing it to the provider', () => {
+    expect(required('  sk_test_value\n', 'STRIPE_SECRET_KEY')).toBe('sk_test_value');
   });
 });

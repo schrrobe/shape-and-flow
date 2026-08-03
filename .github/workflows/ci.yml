@@ -13,6 +13,12 @@ concurrency:
 permissions:
   contents: read
 
+# Prisma loads its config during the API package's postinstall generate step.
+# Jobs that use a real database override this value below; the remaining jobs only
+# need a syntactically valid URL so dependency installation can finish.
+env:
+  DATABASE_URL: postgresql://booking:booking@localhost:5432/booking?schema=public
+
 # Every job runs the same commands a developer runs locally, in the same order.
 #
 # The pipeline is written once, in full. While a package does not exist yet,
@@ -57,7 +63,7 @@ jobs:
           POSTGRES_USER: booking
           POSTGRES_PASSWORD: booking
           POSTGRES_DB: booking_test
-        ports: ['5432:5432']
+        ports: ["5432:5432"]
         options: >-
           --health-cmd "pg_isready -U booking -d booking_test"
           --health-interval 3s
@@ -65,7 +71,7 @@ jobs:
           --health-retries 15
       redis:
         image: redis:7
-        ports: ['6379:6379']
+        ports: ["6379:6379"]
         options: >-
           --health-cmd "redis-cli ping"
           --health-interval 3s
@@ -93,7 +99,7 @@ jobs:
           POSTGRES_USER: booking
           POSTGRES_PASSWORD: booking
           POSTGRES_DB: booking_test
-        ports: ['5432:5432']
+        ports: ["5432:5432"]
         options: >-
           --health-cmd "pg_isready -U booking -d booking_test"
           --health-interval 3s
@@ -101,7 +107,7 @@ jobs:
           --health-retries 15
       redis:
         image: redis:7
-        ports: ['6379:6379']
+        ports: ["6379:6379"]
         options: >-
           --health-cmd "redis-cli ping"
           --health-interval 3s

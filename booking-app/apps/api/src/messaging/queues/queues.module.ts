@@ -25,7 +25,7 @@ export const DEFAULT_JOB_OPTIONS: JobsOptions = {
   attempts: 8,
   backoff: { type: 'exponential', delay: 5_000 },
   removeOnComplete: { age: 86_400, count: 5_000 },
-  removeOnFail: { age: 604_800 },
+  removeOnFail: { age: 604_800, count: 20_000 },
 };
 
 /**

@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 
 import { AppError } from '../../common/errors/app-error.js';
 
-import { SMS_MAX_LENGTH } from './sms-provider.js';
+import { smsBodyMetrics } from './sms-provider.js';
 
 import type { SmsMessage, SmsProvider, SmsSendResult } from './sms-provider.js';
 
@@ -42,11 +42,12 @@ export class FakeSmsProvider implements SmsProvider {
 
     // Checked before "sending", exactly as the real adapter does, so a test
     // written against the fake proves something about production.
-    if (message.body.length > SMS_MAX_LENGTH) {
+    const metrics = smsBodyMetrics(message.body);
+    if (metrics.units > metrics.limit) {
       throw new AppError('SMS_TOO_LONG', {
         message:
-          `SMS body is ${String(message.body.length)} characters, over the ` +
-          `${String(SMS_MAX_LENGTH)}-character limit.`,
+          `SMS body is ${String(metrics.units)} ${metrics.encoding} units, over the ` +
+          `${String(metrics.limit)}-unit limit.`,
       });
     }
 
