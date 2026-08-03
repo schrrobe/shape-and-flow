@@ -43,6 +43,21 @@ import type { Server } from 'node:http';
  */
 
 export const PUBLIC_WEB_ORIGIN = 'http://localhost:5173';
+export const PUBLIC_API_ORIGIN = 'http://localhost:3000';
+
+/**
+ * The signing secrets the webhook tests have to sign with.
+ *
+ * Exported rather than repeated as literals in each suite: a mismatch between the two shows
+ * up as a signature rejection, which reads like a broken verifier rather than a stale
+ * constant.
+ *
+ * The Resend secret is base64 behind a `whsec_` prefix because that is the shape Svix
+ * actually sends, and the verifier decodes it — a plain string would test a code path
+ * production never takes.
+ */
+export const RESEND_WEBHOOK_SECRET = 'whsec_dGVzdC1yZXNlbmQtc2VjcmV0';
+export const TWILIO_AUTH_TOKEN = 'test-twilio-token';
 
 let currentOrganization: OrganizationWithSettings | null = null;
 let currentClock: FixedClock | null = null;
@@ -60,6 +75,20 @@ function organizationStub(): Partial<OrganizationContextService> {
     getOrganizationId: () => read().id,
     getSettings: () => read().settings,
     getTimezone: () => read().timezone,
+    // Worker paths pass the organization the job names and expect a mismatch to be rejected,
+    // so the stub enforces that rather than waving it through: a test that queued a job for
+    // the wrong tenant should fail here, not somewhere downstream.
+    require: (organizationId: string) => {
+      const organization = read();
+
+      if (organization.id !== organizationId) {
+        throw new Error(
+          `Job for organization ${organizationId} ran with ${organization.id} in context.`,
+        );
+      }
+
+      return organization;
+    },
   };
 }
 
@@ -73,11 +102,12 @@ function organizationStub(): Partial<OrganizationContextService> {
 const testConfig = {
   NODE_ENV: 'test',
   PUBLIC_WEB_ORIGIN,
+  PUBLIC_API_ORIGIN,
   PAYMENT_PROVIDER: 'fake',
   EMAIL_PROVIDER: 'fake',
   SMS_PROVIDER: 'fake',
-  RESEND_WEBHOOK_SECRET: 'test-resend-secret',
-  TWILIO_AUTH_TOKEN: 'test-twilio-token',
+  RESEND_WEBHOOK_SECRET,
+  TWILIO_AUTH_TOKEN,
 } as unknown as AppConfig;
 
 @Global()
@@ -128,7 +158,7 @@ const testConfig = {
 export class BookingTestHarnessModule {}
 
 /** Every job the harness's queues were asked to add, in order. */
-export const enqueued: { name: string; data: unknown; options: unknown }[] = [];
+export const enqueued: { queue: string; name: string; data: unknown; options: unknown }[] = [];
 
 /**
  * A queue registry that records rather than connects.
@@ -138,15 +168,21 @@ export const enqueued: { name: string; data: unknown; options: unknown }[] = [];
  * suite prove something the queue suite already proves against a real server.
  */
 function recordingQueueRegistry(): Record<string, unknown> {
-  const queue = {
-    add: (name: string, data: unknown, options: unknown) => {
-      enqueued.push({ name, data, options });
-      return Promise.resolve({ id: 'recorded' });
-    },
-    name: 'recording',
-  };
-
-  return Object.fromEntries(QUEUES.map((queueName) => [queueName, queue]));
+  // One recorder per queue, each carrying its own name. A single shared object records the
+  // job name but not the queue it went to, so a job enqueued onto the wrong queue would look
+  // identical to a correct one.
+  return Object.fromEntries(
+    QUEUES.map((queueName) => [
+      queueName,
+      {
+        add: (name: string, data: unknown, options: unknown) => {
+          enqueued.push({ queue: queueName, name, data, options });
+          return Promise.resolve({ id: 'recorded' });
+        },
+        name: queueName,
+      },
+    ]),
+  );
 }
 
 export interface BookingTestApp {

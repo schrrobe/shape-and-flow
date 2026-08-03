@@ -83,7 +83,12 @@ beforeEach(async () => {
   bookingId = booking.id;
   reference = booking.reference;
 
-  return testApp.close;
+  // A closure that reads `testApp` when it runs, not `testApp.close` captured now. Tests that
+  // rebuild the app reassign `testApp`, and the bound method would close the instance that was
+  // already discarded — leaking the live one's connections for the rest of the run.
+  return async () => {
+    await testApp.close();
+  };
 });
 
 describe('what the database stores', () => {
@@ -251,11 +256,17 @@ describe('GET /manage/booking', () => {
 
     await get('/manage/booking', token).expect(200);
 
-    // Fire-and-forget, so give the write a moment to land.
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    // `resolve` calls `touch` without awaiting it, so the write lands some time after the
+    // response. Polled rather than slept: a fixed 100 ms passes locally and races on a loaded
+    // CI runner, which is the kind of flake that gets a test deleted rather than fixed.
+    await expect
+      .poll(async () => {
+        const row = await prisma.managementToken.findFirstOrThrow({ where: { bookingId } });
+        return row.lastUsedAt;
+      })
+      .not.toBeNull();
 
     const after = await prisma.managementToken.findFirstOrThrow({ where: { bookingId } });
-    expect(after.lastUsedAt).not.toBeNull();
     expect(after.tokenHash).toBe(before.tokenHash);
   });
 });

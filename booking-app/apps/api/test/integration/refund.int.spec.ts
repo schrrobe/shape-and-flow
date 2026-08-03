@@ -208,17 +208,32 @@ describe('executing a refund', () => {
     expect(refund.settledAt).toEqual(NOW);
   });
 
-  it('is safe under a repeated job: one provider call, one settled row', async () => {
+  it('is safe under a repeated job: the provider key settles one refund, not two', async () => {
     const { refundId } = await service.request({
       bookingId,
       amountCents: 2000,
       reason: 'GOODWILL',
     });
+    const row = await prisma.refund.findUniqueOrThrow({ where: { id: refundId } });
 
     await Promise.all([service.execute(refundId), service.execute(refundId)]);
 
+    // Two invocations, deliberately. The status check before the call is a cheap filter, not a
+    // lock — two workers handed the same job both see PENDING. What makes that safe is the
+    // stored idempotency key: Stripe returns the *first* refund for the second call rather
+    // than creating another, so only one refund exists and only one amount moves.
+    //
+    // Asserted through `callOrder`, which counts invocations. `refundCalls()` would read 1
+    // either way, because the fake records the refund only when it actually creates one.
+    const calls = payments.callOrder().filter((call) => call === 'createRefund');
+    expect(calls).toHaveLength(2);
     expect(payments.refundCalls()).toHaveLength(1);
+    expect(payments.refundCalls()[0]?.idempotencyKey).toBe(row.idempotencyKey);
+
     expect(await prisma.refund.count({ where: { bookingId } })).toBe(1);
+    expect((await prisma.refund.findUniqueOrThrow({ where: { id: refundId } })).status).toBe(
+      'SUCCEEDED',
+    );
   });
 
   it('does nothing for an already settled refund', async () => {

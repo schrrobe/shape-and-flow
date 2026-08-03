@@ -55,6 +55,11 @@ function input(overrides: Partial<ReserveInput> = {}): ReserveInput {
 }
 
 beforeEach(async () => {
+  // Module-level and mutated by tests, so it is cleared here rather than by whichever test
+  // remembered to. A leftover entry makes the *next* test's reference collide, which fails
+  // somewhere unrelated to whatever left it behind.
+  forcedReferences.length = 0;
+
   await resetDatabase();
   ctx = await seedOrganization(prisma);
 
@@ -401,6 +406,5 @@ describe('a reference collision', () => {
     for (let index = 0; index < 6; index += 1) forcedReferences.push(first.booking.reference);
 
     await expect(service.reserve(input())).rejects.toThrow();
-    forcedReferences.length = 0;
   });
 });

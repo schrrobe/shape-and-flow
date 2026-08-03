@@ -5,14 +5,12 @@ import {
   STALE_COMPLETION_AFTER_MS,
 } from '../../src/booking/attendance.service.js';
 import { CancellationService } from '../../src/booking/cancellation.service.js';
-import { ReservationService } from '../../src/booking/reservation.service.js';
 import { FixedClock } from '../../src/domain/time/clock.js';
 import { createBookingTestApp } from '../booking-app.harness.js';
 import { prisma, resetDatabase } from '../database.harness.js';
 import { SLOT_FRIDAY_0900, makeBooking, seedOrganization } from '../factories/index.js';
 import { loadOrganization } from '../public-app.harness.js';
 
-import type { ReserveInput } from '../../src/booking/reservation.service.js';
 import type { BookingStatus } from '../../src/prisma/client.js';
 import type { BookingTestApp } from '../booking-app.harness.js';
 import type { SeedContext } from '../factories/index.js';
@@ -31,7 +29,6 @@ let clock: FixedClock;
 let testApp: BookingTestApp;
 let service: AttendanceService;
 let cancellations: CancellationService;
-let reservations: ReservationService;
 let bookingId: string;
 
 async function confirmedBooking(
@@ -62,16 +59,6 @@ async function confirmedBooking(
   return booking.id;
 }
 
-function sameSlot(): ReserveInput {
-  return {
-    serviceId: ctx.service30.id,
-    employeeId: ctx.employee1.id,
-    startsAt: SLOT_FRIDAY_0900,
-    customer: { email: 'bea@example.com', firstName: 'Bea', lastName: 'Kraus', locale: 'de' },
-    locale: 'de',
-  };
-}
-
 beforeEach(async () => {
   await resetDatabase();
   ctx = await seedOrganization(prisma);
@@ -84,7 +71,6 @@ beforeEach(async () => {
 
   service = testApp.app.get(AttendanceService);
   cancellations = testApp.app.get(CancellationService);
-  reservations = testApp.app.get(ReservationService);
 
   bookingId = await confirmedBooking();
 
@@ -178,14 +164,23 @@ describe('marking a no-show', () => {
     ).toBe(1);
   });
 
-  it('does not free the slot, because the time was consumed', async () => {
+  it('leaves the consumed block on the record rather than rewinding it', async () => {
+    const before = await prisma.booking.findUniqueOrThrow({ where: { id: bookingId } });
+
     await service.markNoShow(bookingId, ctx.owner.id);
 
-    // The employee was there whether or not the customer was. The past is not bookable
-    // either, which is the answer the reservation path gives.
-    await expect(reservations.reserve(sameSlot())).rejects.toMatchObject({
-      code: 'OUTSIDE_BOOKING_WINDOW',
-    });
+    const after = await prisma.booking.findUniqueOrThrow({ where: { id: bookingId } });
+
+    // Asserted on the row, not through the reservation path. The clock is AFTER_APPOINTMENT
+    // here, so a reservation is refused with OUTSIDE_BOOKING_WINDOW whether or not the slot
+    // is still held — a test going through `reserve` could not fail for the reason it claims.
+    //
+    // What this actually guarantees: marking a no-show does not run a release. The block
+    // window still records the time the employee spent waiting, and `expiresAt` stays null
+    // rather than being handed back to the expiry saga.
+    expect(after.blockStartsAt).toEqual(before.blockStartsAt);
+    expect(after.blockEndsAt).toEqual(before.blockEndsAt);
+    expect(after.expiresAt).toBeNull();
   });
 
   it('leaves completedAt null, since nothing was completed', async () => {
@@ -297,10 +292,10 @@ describe('business cancellation', () => {
   it('closes an open cancellation request rather than orphaning it', async () => {
     clock.set(BEFORE_APPOINTMENT);
 
-    await prisma.organizationSettings.updateMany({
-      data: { cancellationFeePolicy: 'PERCENTAGE', cancellationFeePercent: 50 },
-    });
-
+    // No settings change: the request row is created directly below, so the fee policy never
+    // comes into it — and the app caches settings at bootstrap, so an update here would not
+    // have been seen anyway.
+    //
     // A request opened inside the fee window, then overtaken by the business cancelling.
     await prisma.cancellationRequest.create({
       data: {

@@ -83,13 +83,20 @@ async function overdue(startsAt = SLOT_FRIDAY_0900): Promise<Reserved> {
   return booking;
 }
 
-/** The same slot the given booking holds, for proving it is still blocked. */
-function sameSlot(booking: { id: string }): ReserveInput {
-  void booking;
+/**
+ * The same slot the given booking holds, for proving it is still blocked.
+ *
+ * The start time is read off the booking rather than assumed to be `SLOT_FRIDAY_0900`. With
+ * the argument discarded, a future test reserving a different slot and passing that booking
+ * here would assert against an unrelated slot and could pass for the wrong reason.
+ */
+async function sameSlot(booking: { id: string }): Promise<ReserveInput> {
+  const row = await prisma.booking.findUniqueOrThrow({ where: { id: booking.id } });
+
   return {
     serviceId: ctx.service30.id,
     employeeId: ctx.employee1.id,
-    startsAt: SLOT_FRIDAY_0900,
+    startsAt: row.startsAt,
     customer: {
       email: 'bea@example.com',
       firstName: 'Bea',
@@ -133,7 +140,7 @@ describe('phase one', () => {
 
     // The whole point of the intermediate status, proven the only way that matters: a
     // competing reservation still cannot have the slot.
-    await expect(reservations.reserve(sameSlot(booking))).rejects.toMatchObject({
+    await expect(reservations.reserve(await sameSlot(booking))).rejects.toMatchObject({
       code: 'SLOT_UNAVAILABLE',
     });
   });
@@ -206,7 +213,7 @@ describe('phase two', () => {
     expect(after.expiresAt).toBeNull();
 
     // Released for real: the next customer can now have it.
-    await expect(reservations.reserve(sameSlot(booking))).resolves.toBeDefined();
+    await expect(reservations.reserve(await sameSlot(booking))).resolves.toBeDefined();
   });
 
   it('confirms instead when the customer paid inside the window', async () => {
@@ -241,7 +248,7 @@ describe('phase two', () => {
     expect((await prisma.booking.findUniqueOrThrow({ where: { id: booking.id } })).status).toBe(
       'EXPIRING',
     );
-    await expect(reservations.reserve(sameSlot(booking))).rejects.toMatchObject({
+    await expect(reservations.reserve(await sameSlot(booking))).rejects.toMatchObject({
       code: 'SLOT_UNAVAILABLE',
     });
   });

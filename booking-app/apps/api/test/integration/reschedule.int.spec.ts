@@ -274,7 +274,7 @@ describe('approving', () => {
     });
   });
 
-  it('leaves the payment on the original booking, reachable through the lineage', async () => {
+  it('moves the payment to the replacement, and records where it came from', async () => {
     const requestId = await openRequest();
     const { newBookingId } = await service.decide({
       requestId,
@@ -282,16 +282,19 @@ describe('approving', () => {
       decision: 'APPROVED',
     });
 
-    // The money was taken for the original booking; the link is how the replacement
-    // reaches it.
-    expect(await prisma.payment.count({ where: { bookingId } })).toBe(1);
-    expect(await prisma.payment.count({ where: { bookingId: newBookingId ?? '' } })).toBe(0);
+    // The money follows the appointment. Nothing reads payments through
+    // `rescheduledFromBookingId`, so leaving the row on the cancelled original would make the
+    // replacement look unpaid — and cancelling it later would compute a fee against zero and
+    // refund nothing.
+    expect(await prisma.payment.count({ where: { bookingId } })).toBe(0);
+    expect(await prisma.payment.count({ where: { bookingId: newBookingId ?? '' } })).toBe(1);
 
+    // The lineage link stays, as the audit trail it is.
     const created = await prisma.booking.findUniqueOrThrow({
       where: { id: newBookingId ?? '' },
-      include: { rescheduledFrom: { include: { payments: true } } },
+      include: { rescheduledFrom: true },
     });
-    expect(created.rescheduledFrom?.payments).toHaveLength(1);
+    expect(created.rescheduledFrom?.id).toBe(bookingId);
   });
 
   it('queues the notification and re-schedules the reminders', async () => {
