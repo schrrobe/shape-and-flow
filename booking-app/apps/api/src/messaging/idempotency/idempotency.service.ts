@@ -123,6 +123,7 @@ export class IdempotencyService {
         statusCode: true,
         responseSnapshot: true,
         expiresAt: true,
+        bookingId: true,
       },
     });
 
@@ -167,17 +168,22 @@ export class IdempotencyService {
 
     if (row.expiresAt > now) return { outcome: 'IN_PROGRESS' };
 
-    return await this.takeOverExpiredLease(key, now);
+    return await this.takeOverExpiredLease(key, now, row.bookingId !== null);
   }
 
   /**
-   * Take over a key whose holder died without abandoning it.
+   * Take over a key whose lease has run out.
    *
    * Conditional on the row still being an expired in-progress one, so of several
    * retries arriving together exactly one takes it over and the rest are told the
    * attempt is in progress.
+   *
+   * Two different situations reach here and only one is a surprise. A bound key was
+   * released deliberately by `abandon` and the caller is retrying an attempt that
+   * failed after reserving — routine. An unbound one means the process holding it
+   * died without abandoning it, which is worth a warning.
    */
-  private async takeOverExpiredLease(key: string, now: Date): Promise<BeginResult> {
+  private async takeOverExpiredLease(key: string, now: Date, bound: boolean): Promise<BeginResult> {
     const { count } = await this.prisma.idempotencyKey.updateMany({
       where: {
         key,
@@ -190,9 +196,16 @@ export class IdempotencyService {
     if (count === 0) return { outcome: 'IN_PROGRESS' };
 
     const fingerprint = createHash('sha256').update(key, 'utf8').digest('hex').slice(0, 12);
-    this.logger.warn(
-      `idempotency key fingerprint ${fingerprint} taken over from an attempt that never finished`,
-    );
+    if (bound) {
+      this.logger.debug(
+        `idempotency key fingerprint ${fingerprint} retried after an attempt that held a reservation`,
+      );
+    } else {
+      this.logger.warn(
+        `idempotency key fingerprint ${fingerprint} taken over from an attempt that never finished`,
+      );
+    }
+
     return { outcome: 'NEW' };
   }
 
@@ -233,11 +246,26 @@ export class IdempotencyService {
    * Called when the attempt failed. The distinction matters to the client: a stored
    * 500 would replay forever and the retry would never actually retry, so a failed
    * attempt has to leave the key as unused as it found it.
+   *
+   * Unused, though, is not the same as gone. An attempt that got as far as committing
+   * a reservation left something behind, and the key is the only thing that names it:
+   * deleting the row would send the retry off to book the same slot again, where it
+   * would be refused by its own predecessor's hold. So a bound key keeps its row and
+   * only gives up its lease — expired as of now, so the retry is told the attempt is
+   * over rather than still running, and `ReservationService.resume()` can find the
+   * reservation through it. An unbound key has nothing to point at and is deleted, as
+   * before.
    */
   async abandon(key: string): Promise<void> {
-    await this.prisma.idempotencyKey.deleteMany({
-      where: { key, state: IDEMPOTENCY_STATE.IN_PROGRESS },
-    });
+    await this.prisma.$transaction([
+      this.prisma.idempotencyKey.deleteMany({
+        where: { key, state: IDEMPOTENCY_STATE.IN_PROGRESS, bookingId: null },
+      }),
+      this.prisma.idempotencyKey.updateMany({
+        where: { key, state: IDEMPOTENCY_STATE.IN_PROGRESS, bookingId: { not: null } },
+        data: { expiresAt: this.clock.now() },
+      }),
+    ]);
   }
 
   /** Delete keys past their expiry. Runs as the `sweep.idempotency_keys` job. */

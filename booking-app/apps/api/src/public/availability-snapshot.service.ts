@@ -4,7 +4,12 @@ import { AVAILABILITY_MAX_RANGE_DAYS } from '@shape-and-flow/booking-contracts';
 import { BLOCKING_BOOKING_STATUSES } from '../booking/booking-status.machine.js';
 import { AppError } from '../common/errors/app-error.js';
 import { CLOCK } from '../domain/time/clock.js';
-import { addLocalDays, eachLocalDate, instantToLocalDate } from '../domain/time/local-time.js';
+import {
+  addLocalDays,
+  dateColumnToLocalDate,
+  eachLocalDate,
+  instantToLocalDate,
+} from '../domain/time/local-time.js';
 import { OrganizationContextService } from '../organization/organization-context.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
@@ -86,12 +91,12 @@ export class AvailabilitySnapshotService {
       });
     }
 
-    const service = await this.loadService(organizationId, input.serviceId);
-    const employeeIds = await this.loadEmployeeIds(
-      organizationId,
-      input.serviceId,
-      input.employeeId,
-    );
+    // Independent of each other, so they cost one round trip rather than two. This is the
+    // hottest read in the app — every slot-picker render lands here.
+    const [service, employeeIds] = await Promise.all([
+      this.loadService(organizationId, input.serviceId),
+      this.loadEmployeeIds(organizationId, input.serviceId, input.employeeId),
+    ]);
 
     // No employee performs this service, so there is nothing to generate. Returned
     // as an empty snapshot rather than a 404: the service exists and is bookable,
@@ -346,9 +351,7 @@ export class AvailabilitySnapshotService {
     for (const row of exceptionRows) {
       const list = exceptions.get(row.employeeId) ?? [];
       list.push({
-        // A `@db.Date` column comes back as UTC midnight, which is the local date it
-        // was written as — not an instant to convert.
-        date: row.date.toISOString().slice(0, 10),
+        date: dateColumnToLocalDate(row.date),
         kind: row.kind,
         startMinute: row.startMinute,
         endMinute: row.endMinute,
@@ -359,8 +362,8 @@ export class AvailabilitySnapshotService {
     const timeOff = new Map<string, LocalDate[]>();
     for (const row of timeOffRows) {
       const list = timeOff.get(row.employeeId) ?? [];
-      const from = row.startDate.toISOString().slice(0, 10);
-      const to = row.endDate.toISOString().slice(0, 10);
+      const from = dateColumnToLocalDate(row.startDate);
+      const to = dateColumnToLocalDate(row.endDate);
       list.push(...eachLocalDate(from, to, zone));
       timeOff.set(row.employeeId, list);
     }
@@ -435,7 +438,7 @@ export class AvailabilitySnapshotService {
       select: { date: true },
     });
 
-    return rows.map((row) => row.date.toISOString().slice(0, 10));
+    return rows.map((row) => dateColumnToLocalDate(row.date));
   }
 }
 

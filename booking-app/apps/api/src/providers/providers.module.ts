@@ -3,10 +3,12 @@ import Stripe from 'stripe';
 
 import { ENV } from '../config/env.schema.js';
 import { CLOCK } from '../domain/time/clock.js';
+import { REDIS } from '../messaging/queues/redis.provider.js';
 
 import { EMAIL_PROVIDER } from './email/email-provider.js';
 import { FakeEmailProvider } from './email/fake-email.provider.js';
-import { FakePaymentProvider } from './payment/fake-payment.provider.js';
+import { FAKE_PAYMENT_STORE, FakePaymentProvider } from './payment/fake-payment.provider.js';
+import { RedisFakePaymentStore } from './payment/fake-payment.store.js';
 import { PAYMENT_PROVIDER } from './payment/payment-provider.js';
 import { StripePaymentProvider } from './payment/stripe-payment.provider.js';
 import { FakeSmsProvider } from './sms/fake-sms.provider.js';
@@ -18,6 +20,7 @@ import type { PaymentProvider } from './payment/payment-provider.js';
 import type { SmsProvider } from './sms/sms-provider.js';
 import type { Clock } from '../domain/time/clock.js';
 import type { OnApplicationBootstrap } from '@nestjs/common';
+import type { Redis } from 'ioredis';
 
 /**
  * Binds each port to an implementation from configuration.
@@ -35,6 +38,16 @@ import type { OnApplicationBootstrap } from '@nestjs/common';
 @Global()
 @Module({
   providers: [
+    // The API and the worker are two processes talking to one payment service, so
+    // the fake's sessions live where both can see them. Bound unconditionally: with
+    // PAYMENT_PROVIDER=stripe nothing ever reads it, and a store that appears only
+    // in some configurations is a store nobody remembers to wire.
+    {
+      provide: FAKE_PAYMENT_STORE,
+      inject: [ENV, REDIS],
+      useFactory: (config: AppConfig, redis: Redis) =>
+        new RedisFakePaymentStore(redis, config.REDIS_QUEUE_PREFIX),
+    },
     FakePaymentProvider,
     FakeEmailProvider,
     FakeSmsProvider,
@@ -59,7 +72,10 @@ import type { OnApplicationBootstrap } from '@nestjs/common';
         config.SMS_PROVIDER === 'fake' ? fake : notImplemented('SMS_PROVIDER', config.SMS_PROVIDER),
     },
   ],
-  exports: [PAYMENT_PROVIDER, EMAIL_PROVIDER, SMS_PROVIDER],
+  // FakePaymentProvider is exported by its concrete type as well as behind the port,
+  // because the test-support router needs the affordances — marking a session paid,
+  // signing an event — that the port deliberately does not have.
+  exports: [PAYMENT_PROVIDER, EMAIL_PROVIDER, SMS_PROVIDER, FakePaymentProvider],
 })
 export class ProvidersModule implements OnApplicationBootstrap {
   private readonly logger = new Logger('Providers');

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { Money } from '../../domain/money/money.js';
 
 import { FakePaymentProvider } from './fake-payment.provider.js';
+import { InMemoryFakePaymentStore } from './fake-payment.store.js';
 
 import type { CreateCheckoutSessionInput, PaymentAccountContext } from './payment-provider.js';
 
@@ -58,7 +59,7 @@ describe('createCheckoutSession', () => {
     );
 
     expect(second.sessionId).toBe(first.sessionId);
-    expect(provider.sessions()).toHaveLength(1);
+    expect(await provider.sessions()).toHaveLength(1);
   });
 
   it('rejects a checkout key reused with a different amount', async () => {
@@ -91,7 +92,7 @@ describe('createCheckoutSession', () => {
     );
 
     expect(second.sessionId).not.toBe(first.sessionId);
-    expect(provider.sessions()).toHaveLength(2);
+    expect(await provider.sessions()).toHaveLength(2);
   });
 });
 
@@ -109,7 +110,7 @@ describe('expireCheckoutSession — the two branches the saga depends on', () =>
 
   it('ALREADY_COMPLETE for a paid session, which must confirm rather than release', async () => {
     const session = await provider.createCheckoutSession(context, input());
-    provider.markPaid(session.sessionId);
+    await provider.markPaid(session.sessionId);
 
     await expect(provider.expireCheckoutSession(context, session.sessionId)).resolves.toEqual({
       outcome: 'ALREADY_COMPLETE',
@@ -136,7 +137,7 @@ describe('expireCheckoutSession — the two branches the saga depends on', () =>
 describe('markPaid', () => {
   it('produces a payment intent, a charge and a method type', async () => {
     const session = await provider.createCheckoutSession(context, input());
-    provider.markPaid(session.sessionId);
+    await provider.markPaid(session.sessionId);
 
     const retrieved = await provider.retrieveCheckoutSession(context, session.sessionId);
     expect(retrieved.status).toBe('complete');
@@ -148,7 +149,7 @@ describe('markPaid', () => {
 
   it('refuses chargeIdFor on an unpaid session, rather than returning undefined', async () => {
     const session = await provider.createCheckoutSession(context, input());
-    expect(() => provider.chargeIdFor(session.sessionId)).toThrow(/markPaid/);
+    await expect(provider.chargeIdFor(session.sessionId)).rejects.toThrow(/markPaid/);
   });
 });
 
@@ -178,8 +179,8 @@ describe('failNextWith', () => {
 describe('createRefund', () => {
   async function paidSession(): Promise<string> {
     const session = await provider.createCheckoutSession(context, input());
-    provider.markPaid(session.sessionId);
-    return provider.chargeIdFor(session.sessionId);
+    await provider.markPaid(session.sessionId);
+    return await provider.chargeIdFor(session.sessionId);
   }
 
   it('refunds part of a charge', async () => {
@@ -204,7 +205,7 @@ describe('createRefund', () => {
     const second = await provider.createRefund(context, args);
 
     expect(second.refundId).toBe(first.refundId);
-    expect(provider.refundCalls()).toHaveLength(1);
+    expect(await provider.refundCalls()).toHaveLength(1);
   });
 
   it('rejects a refund key reused with a different amount', async () => {
@@ -283,6 +284,48 @@ describe('createRefund', () => {
     ).rejects.toThrow(/exceeds/i);
   });
 
+  it('refunds once when the same key arrives twice at the same moment', async () => {
+    // The outbox is at-least-once, so two attempts at one refund job can genuinely
+    // overlap. A check-then-insert lets both see nothing and both refund real money.
+    const chargeId = await paidSession();
+    const args = { chargeId, amount: Money.fromCents(2000), idempotencyKey: 'rf-1' };
+
+    const [first, second] = await Promise.all([
+      provider.createRefund(context, args),
+      provider.createRefund(context, args),
+    ]);
+
+    expect(second.refundId).toBe(first.refundId);
+    expect(await provider.refundCalls()).toHaveLength(1);
+  });
+
+  it('rejects a concurrent refund that loses the key with different parameters', async () => {
+    const chargeId = await paidSession();
+
+    const results = await Promise.allSettled([
+      provider.createRefund(context, {
+        chargeId,
+        amount: Money.fromCents(2000),
+        idempotencyKey: 'rf-1',
+        reason: 'first reason',
+      }),
+      provider.createRefund(context, {
+        chargeId,
+        amount: Money.fromCents(2100),
+        idempotencyKey: 'rf-1',
+        reason: 'changed reason',
+      }),
+    ]);
+
+    const fulfilled = results.filter((result) => result.status === 'fulfilled');
+    const rejected = results.filter((result) => result.status === 'rejected');
+
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0]?.reason as unknown).toMatchObject({ code: 'IDEMPOTENCY_KEY_REUSED' });
+    expect(await provider.refundCalls()).toHaveLength(1);
+  });
+
   it('refuses a charge that does not exist', async () => {
     await expect(
       provider.createRefund(context, {
@@ -346,10 +389,60 @@ describe('the Connect seam', () => {
   });
 });
 
+describe('a store shared by two processes', () => {
+  it('lets the worker answer for a session the API created', async () => {
+    // The real topology: the API creates the Checkout session, and the expiry job
+    // that asks about it later runs in a different process. With per-instance state
+    // the worker would raise FAKE_PROVIDER_UNKNOWN_SESSION and never release a slot.
+    const store = new InMemoryFakePaymentStore();
+    const api = new FakePaymentProvider(store);
+    const worker = new FakePaymentProvider(store);
+
+    const session = await api.createCheckoutSession(context, input());
+
+    await expect(worker.expireCheckoutSession(context, session.sessionId)).resolves.toEqual({
+      outcome: 'EXPIRED',
+    });
+  });
+
+  it('carries a payment made in one process into the other', async () => {
+    const store = new InMemoryFakePaymentStore();
+    const api = new FakePaymentProvider(store);
+    const worker = new FakePaymentProvider(store);
+
+    const session = await api.createCheckoutSession(context, input());
+    await api.markPaid(session.sessionId);
+
+    // The branch the expiry saga exists for, across the process boundary.
+    await expect(worker.expireCheckoutSession(context, session.sessionId)).resolves.toEqual({
+      outcome: 'ALREADY_COMPLETE',
+      paymentStatus: 'paid',
+    });
+    await expect(
+      worker.createRefund(context, {
+        chargeId: await api.chargeIdFor(session.sessionId),
+        amount: Money.fromCents(1000),
+        idempotencyKey: 'rf-1',
+      }),
+    ).resolves.toMatchObject({ status: 'succeeded' });
+  });
+
+  it('keeps two providers with separate stores apart', async () => {
+    const first = new FakePaymentProvider(new InMemoryFakePaymentStore());
+    const second = new FakePaymentProvider(new InMemoryFakePaymentStore());
+
+    const session = await first.createCheckoutSession(context, input());
+
+    await expect(second.retrieveCheckoutSession(context, session.sessionId)).rejects.toThrow(
+      /No such checkout session/,
+    );
+  });
+});
+
 describe('call recording', () => {
   it('reports method order, so a test can assert a sequence', async () => {
     const session = await provider.createCheckoutSession(context, input());
-    provider.markPaid(session.sessionId);
+    await provider.markPaid(session.sessionId);
     await provider.expireCheckoutSession(context, session.sessionId);
 
     expect(provider.callOrder()).toEqual(['createCheckoutSession', 'expireCheckoutSession']);
@@ -357,9 +450,9 @@ describe('call recording', () => {
 
   it('reset clears everything', async () => {
     await provider.createCheckoutSession(context, input());
-    provider.reset();
+    await provider.reset();
 
-    expect(provider.sessions()).toEqual([]);
+    expect(await provider.sessions()).toEqual([]);
     expect(provider.callOrder()).toEqual([]);
   });
 });

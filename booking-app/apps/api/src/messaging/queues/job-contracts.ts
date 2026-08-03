@@ -129,14 +129,28 @@ export const jobPayloadSchemas = {
     bookingId: cuidSchema,
     managementToken: z.string().optional(),
   }),
+  /**
+   * `customerNotificationAlreadyQueued` is set when the transaction that cancelled the
+   * booking also composed a customer message about it — a decided cancellation request
+   * says everything the generic email does and more. The processor still does the rest
+   * of its work; it only skips the second message.
+   */
   [JOB.BOOKING_CANCELED]: tenantJob({
     bookingId: cuidSchema,
     refundId: cuidSchema.optional(),
+    customerNotificationAlreadyQueued: z.boolean().optional(),
   }),
   [JOB.BOOKING_PAYMENT_FAILED]: tenantJob({ bookingId: cuidSchema }),
+  /**
+   * `managementToken` is the plaintext of the *rotated* token, for the same reason
+   * booking.confirmed carries one: a reschedule revokes the old link, so the
+   * notification has to contain a new one that works. Same trade-off, same redaction.
+   */
   [JOB.BOOKING_RESCHEDULED]: tenantJob({
     bookingId: cuidSchema,
     previousBookingId: cuidSchema,
+    managementToken: z.string().optional(),
+    customerNotificationAlreadyQueued: z.boolean().optional(),
   }),
 
   [JOB.REFUND_REQUESTED]: tenantJob({ refundId: cuidSchema }),

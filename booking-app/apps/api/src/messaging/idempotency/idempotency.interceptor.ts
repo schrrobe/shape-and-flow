@@ -69,10 +69,10 @@ export class IdempotencyInterceptor implements NestInterceptor {
 
     const key = readKey(request);
 
-    // Hashed from the parsed body, before validation has narrowed it. That is the
-    // right input: two identical retries send identical bytes, and the canonical form
-    // already ignores what carries no meaning.
-    const requestHash = canonicalRequestHash(request.body);
+    // Hashed from the parsed body and route target, before validation has narrowed them.
+    // The params matter: canceling two bookings with the same reason is not the same
+    // operation, and one key must never replay the first booking's response for the second.
+    const requestHash = canonicalRequestHash(request.body, request.params);
 
     const begun = await this.idempotency.begin(key, scope, requestHash);
 

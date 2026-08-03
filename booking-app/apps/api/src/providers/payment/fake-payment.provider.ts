@@ -1,19 +1,24 @@
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 
 import { AppError } from '../../common/errors/app-error.js';
 import { Money } from '../../domain/money/money.js';
 
+import { InMemoryFakePaymentStore } from './fake-payment.store.js';
+
+import type {
+  FakePaymentStore,
+  FakeRefundRecord,
+  FakeSessionRecord,
+} from './fake-payment.store.js';
 import type {
   CheckoutSessionResult,
-  CheckoutSessionStatus,
   CreateCheckoutSessionInput,
   CreateRefundInput,
   ExpireResult,
   PaymentAccountContext,
   PaymentProvider,
-  PaymentStatusValue,
   ProviderEvent,
   RefundResult,
   RetrievedSession,
@@ -31,42 +36,43 @@ import type {
  * for a real one in a log or a database row. The environment schema refuses
  * `PAYMENT_PROVIDER=fake` when NODE_ENV is production, so this cannot be reached
  * by a real deployment.
+ *
+ * The sessions and refunds live in an injected store rather than in this instance,
+ * because a deployment runs two processes against one Stripe — see
+ * fake-payment.store.ts for what that cost before it was fixed. What stays local is
+ * genuinely local: the one-shot failure a test arms, and the call log it reads back.
  */
 
 /** Fixed secret: the point is a realistic shape, not secrecy. */
 const FAKE_WEBHOOK_SECRET = 'whsec_fake_test_secret';
 
-interface FakeSession {
-  sessionId: string;
-  status: CheckoutSessionStatus;
-  paymentStatus: PaymentStatusValue;
-  /** Money, not cents: the fake obeys the same arithmetic discipline as the app. */
-  amount: Money;
-  clientReferenceId: string;
-  expiresAt: Date;
-  paymentIntentId?: string;
-  chargeId?: string;
-  paymentMethodType?: string;
-  idempotencyKey?: string | undefined;
-  request: CreateCheckoutSessionInput;
-}
-
-interface FakeRefund {
-  refundId: string;
-  chargeId: string;
-  amount: Money;
-  idempotencyKey: string;
-  reason?: string | undefined;
-}
+/** Binds the shared store. Absent in the test harnesses, which want one process. */
+export const FAKE_PAYMENT_STORE = 'FAKE_PAYMENT_STORE';
 
 @Injectable()
 export class FakePaymentProvider implements PaymentProvider {
-  private readonly sessionsById = new Map<string, FakeSession>();
-  private readonly sessionsByIdempotencyKey = new Map<string, string>();
-  private readonly refunds: FakeRefund[] = [];
+  private readonly store: FakePaymentStore;
   private readonly calls: string[] = [];
   private nextFailure: Error | null = null;
+  private nextCheckoutFailureAfterCreate: Error | null = null;
   private counter = 0;
+
+  /**
+   * Distinguishes one process's ids from another's.
+   *
+   * The counter alone is not enough. `stripe_checkout_session_id` is unique in the
+   * database, and a restarted dev server would begin again at `cs_fake_1` and collide
+   * with a row the previous run created — every booking failing with a 502 until the
+   * counter passed whatever was already stored. Real Stripe ids are globally unique;
+   * this makes the fake's the same, while keeping them recognisable and ordered. With
+   * a shared store it does a second job: two processes minting ids at once cannot
+   * produce the same one.
+   */
+  private readonly instance = randomBytes(4).toString('hex');
+
+  constructor(@Optional() @Inject(FAKE_PAYMENT_STORE) store?: FakePaymentStore) {
+    this.store = store ?? new InMemoryFakePaymentStore();
+  }
 
   // ── test affordances ──────────────────────────────────────────────────────
 
@@ -75,25 +81,42 @@ export class FakePaymentProvider implements PaymentProvider {
     this.nextFailure = error;
   }
 
+  /**
+   * Lose the answer to exactly the next session creation, after it has happened.
+   *
+   * The failure mode `failNextWith` cannot express: the session exists at the
+   * provider and the caller never learns its id. The retry has to find that session
+   * through its idempotency key rather than open a second one the customer could
+   * also pay into, and only a store that already holds the first one can prove it.
+   */
+  failNextCheckoutAfterCreateWith(error: Error): void {
+    this.nextCheckoutFailureAfterCreate = error;
+  }
+
   /** Mark a session paid, as if the customer had completed Checkout. */
-  markPaid(sessionId: string): void {
-    const session = this.requireSession(sessionId);
+  async markPaid(sessionId: string): Promise<void> {
+    const session = await this.requireSession(sessionId);
     this.counter += 1;
-    session.status = 'complete';
-    session.paymentStatus = 'paid';
-    session.paymentIntentId = `pi_fake_${String(this.counter)}`;
-    session.chargeId = `ch_fake_${String(this.counter)}`;
-    session.paymentMethodType = 'card';
+
+    await this.store.putSession({
+      ...session,
+      status: 'complete',
+      paymentStatus: 'paid',
+      paymentIntentId: `pi_fake_${this.instance}_${String(this.counter)}`,
+      chargeId: `ch_fake_${this.instance}_${String(this.counter)}`,
+      paymentMethodType: 'card',
+    });
   }
 
   /** Mark a session expired without going through expireCheckoutSession. */
-  markExpired(sessionId: string): void {
-    this.requireSession(sessionId).status = 'expired';
+  async markExpired(sessionId: string): Promise<void> {
+    const session = await this.requireSession(sessionId);
+    await this.store.putSession({ ...session, status: 'expired' });
   }
 
-  chargeIdFor(sessionId: string): string {
-    const { chargeId } = this.requireSession(sessionId);
-    if (!chargeId) {
+  async chargeIdFor(sessionId: string): Promise<string> {
+    const { chargeId } = await this.requireSession(sessionId);
+    if (chargeId === undefined) {
       throw new AppError('FAKE_PROVIDER_MISUSE', {
         message: `Session ${sessionId} has no charge. Call markPaid first.`,
       });
@@ -101,15 +124,15 @@ export class FakePaymentProvider implements PaymentProvider {
     return chargeId;
   }
 
-  sessions(): FakeSession[] {
-    return [...this.sessionsById.values()];
+  async sessions(): Promise<FakeSessionRecord[]> {
+    return await this.store.allSessions();
   }
 
-  refundCalls(): FakeRefund[] {
-    return [...this.refunds];
+  async refundCalls(): Promise<FakeRefundRecord[]> {
+    return await this.store.allRefunds();
   }
 
-  /** Method names in call order, for asserting a sequence. */
+  /** Method names in call order, for asserting a sequence. Per process, by design. */
   callOrder(): string[] {
     return [...this.calls];
   }
@@ -119,12 +142,11 @@ export class FakePaymentProvider implements PaymentProvider {
     return createHmac('sha256', FAKE_WEBHOOK_SECRET).update(rawBody).digest('hex');
   }
 
-  reset(): void {
-    this.sessionsById.clear();
-    this.sessionsByIdempotencyKey.clear();
-    this.refunds.length = 0;
+  async reset(): Promise<void> {
+    await this.store.clear();
     this.calls.length = 0;
     this.nextFailure = null;
+    this.nextCheckoutFailureAfterCreate = null;
     this.counter = 0;
   }
 
@@ -138,10 +160,10 @@ export class FakePaymentProvider implements PaymentProvider {
 
     // Replay a session for a repeated idempotency key, as Stripe does.
     if (input.idempotencyKey !== undefined) {
-      const existingId = this.sessionsByIdempotencyKey.get(input.idempotencyKey);
+      const existingId = await this.store.sessionIdForKey(input.idempotencyKey);
       if (existingId !== undefined) {
-        const existing = this.requireSession(existingId);
-        if (!sameCheckoutRequest(existing.request, input)) {
+        const existing = await this.requireSession(existingId);
+        if (!sameCheckoutRequest(existing, input)) {
           throw new AppError('IDEMPOTENCY_KEY_REUSED', {
             message: 'Checkout idempotency key was reused with different parameters.',
           });
@@ -151,22 +173,35 @@ export class FakePaymentProvider implements PaymentProvider {
     }
 
     this.counter += 1;
-    const sessionId = `cs_fake_${String(this.counter)}`;
+    const sessionId = `cs_fake_${this.instance}_${String(this.counter)}`;
 
-    const session: FakeSession = {
+    const session: FakeSessionRecord = {
       sessionId,
       status: 'open',
       paymentStatus: 'unpaid',
-      amount: input.amount,
+      amountCents: input.amount.amountCents,
+      currency: input.amount.currency,
+      bookingId: input.bookingId,
       clientReferenceId: input.clientReferenceId,
-      expiresAt: input.expiresAt,
-      idempotencyKey: input.idempotencyKey,
-      request: { ...input, expiresAt: new Date(input.expiresAt) },
+      description: input.description,
+      customerEmail: input.customerEmail,
+      successUrl: input.successUrl,
+      cancelUrl: input.cancelUrl,
+      locale: input.locale,
+      expiresAt: input.expiresAt.toISOString(),
+      ...(input.idempotencyKey === undefined ? {} : { idempotencyKey: input.idempotencyKey }),
     };
 
-    this.sessionsById.set(sessionId, session);
+    await this.store.putSession(session);
     if (input.idempotencyKey !== undefined) {
-      this.sessionsByIdempotencyKey.set(input.idempotencyKey, sessionId);
+      await this.store.rememberKey(input.idempotencyKey, sessionId);
+    }
+
+    // Stored first, then thrown: that ordering is the failure being modelled.
+    if (this.nextCheckoutFailureAfterCreate !== null) {
+      const failure = this.nextCheckoutFailureAfterCreate;
+      this.nextCheckoutFailureAfterCreate = null;
+      throw failure;
     }
 
     return this.resultFor(session);
@@ -178,7 +213,7 @@ export class FakePaymentProvider implements PaymentProvider {
   ): Promise<ExpireResult> {
     this.record('expireCheckoutSession');
 
-    const session = this.requireSession(sessionId);
+    const session = await this.requireSession(sessionId);
 
     // The branch the expiry saga exists for: the customer paid while the job was
     // in flight, so the slot must be kept rather than released.
@@ -187,7 +222,7 @@ export class FakePaymentProvider implements PaymentProvider {
     }
 
     // Expiring an already-expired session is not an error; the job may be retried.
-    session.status = 'expired';
+    await this.store.putSession({ ...session, status: 'expired' });
     return { outcome: 'EXPIRED' };
   }
 
@@ -197,7 +232,7 @@ export class FakePaymentProvider implements PaymentProvider {
   ): Promise<RetrievedSession> {
     this.record('retrieveCheckoutSession');
 
-    const session = this.requireSession(sessionId);
+    const session = await this.requireSession(sessionId);
 
     return {
       sessionId: session.sessionId,
@@ -205,8 +240,8 @@ export class FakePaymentProvider implements PaymentProvider {
       paymentStatus: session.paymentStatus,
       paymentIntentId: session.paymentIntentId,
       chargeId: session.chargeId,
-      amountTotalCents: session.amount.amountCents,
-      currency: session.amount.currency,
+      amountTotalCents: session.amountCents,
+      currency: session.currency,
       paymentMethodType: session.paymentMethodType,
       clientReferenceId: session.clientReferenceId,
     };
@@ -218,12 +253,16 @@ export class FakePaymentProvider implements PaymentProvider {
   ): Promise<RefundResult> {
     this.record('createRefund');
 
-    // Same key, same refund — which is what stops a retried job refunding twice.
-    const existing = this.refunds.find((refund) => refund.idempotencyKey === input.idempotencyKey);
+    const refunds = await this.store.allRefunds();
+
+    // Same key, same refund — which is what stops a retried job refunding twice. The
+    // fast path only; the claim below is what makes it true under concurrency.
+    const existing = refunds.find((refund) => refund.idempotencyKey === input.idempotencyKey);
     if (existing) {
       if (
         existing.chargeId !== input.chargeId ||
-        !existing.amount.equals(input.amount) ||
+        existing.amountCents !== input.amount.amountCents ||
+        existing.currency !== input.amount.currency ||
         existing.reason !== input.reason
       ) {
         throw new AppError('IDEMPOTENCY_KEY_REUSED', {
@@ -233,26 +272,28 @@ export class FakePaymentProvider implements PaymentProvider {
       return {
         refundId: existing.refundId,
         status: 'succeeded',
-        amountCents: existing.amount.amountCents,
+        amountCents: existing.amountCents,
       };
     }
 
-    const charged = this.sessions().find((session) => session.chargeId === input.chargeId);
+    const sessions = await this.store.allSessions();
+    const charged = sessions.find((session) => session.chargeId === input.chargeId);
     if (!charged) {
       throw new AppError('FAKE_PROVIDER_MISUSE', {
         message: `No charge ${input.chargeId}. Call markPaid on a session first.`,
       });
     }
 
+    const chargedAmount = Money.fromCents(charged.amountCents, charged.currency);
     const alreadyRefunded = Money.sum(
-      this.refunds
+      refunds
         .filter((refund) => refund.chargeId === input.chargeId)
-        .map((refund) => refund.amount),
-      charged.amount.currency,
+        .map((refund) => Money.fromCents(refund.amountCents, refund.currency)),
+      chargedAmount.currency,
     );
 
-    if (charged.amount.lessThan(alreadyRefunded.plus(input.amount))) {
-      const remainder = charged.amount.minus(alreadyRefunded);
+    if (chargedAmount.lessThan(alreadyRefunded.plus(input.amount))) {
+      const remainder = chargedAmount.minus(alreadyRefunded);
       throw new AppError('FAKE_PROVIDER_REFUND_TOO_LARGE', {
         message:
           `Refund of ${input.amount.toString()} exceeds the refundable remainder of ` +
@@ -261,20 +302,30 @@ export class FakePaymentProvider implements PaymentProvider {
     }
 
     this.counter += 1;
-    const refund: FakeRefund = {
-      refundId: `re_fake_${String(this.counter)}`,
+    const proposed: FakeRefundRecord = {
+      refundId: `re_fake_${this.instance}_${String(this.counter)}`,
       chargeId: input.chargeId,
-      amount: input.amount,
+      amountCents: input.amount.amountCents,
+      currency: input.amount.currency,
       idempotencyKey: input.idempotencyKey,
       reason: input.reason,
     };
-    this.refunds.push(refund);
 
-    return {
-      refundId: refund.refundId,
-      status: 'succeeded',
-      amountCents: refund.amount.amountCents,
-    };
+    // Whichever refund holds this key afterwards — possibly one a concurrent caller
+    // wrote while this one was checking the remainder.
+    const refund = await this.store.claimRefund(proposed);
+    if (
+      refund.chargeId !== proposed.chargeId ||
+      refund.amountCents !== proposed.amountCents ||
+      refund.currency !== proposed.currency ||
+      refund.reason !== proposed.reason
+    ) {
+      throw new AppError('IDEMPOTENCY_KEY_REUSED', {
+        message: 'Refund idempotency key was reused with different parameters.',
+      });
+    }
+
+    return { refundId: refund.refundId, status: 'succeeded', amountCents: refund.amountCents };
   }
 
   verifyWebhook(rawBody: Buffer, signature: string): ProviderEvent {
@@ -322,8 +373,8 @@ export class FakePaymentProvider implements PaymentProvider {
     }
   }
 
-  private requireSession(sessionId: string): FakeSession {
-    const session = this.sessionsById.get(sessionId);
+  private async requireSession(sessionId: string): Promise<FakeSessionRecord> {
+    const session = await this.store.getSession(sessionId);
     if (!session) {
       // A real provider 404s on an unknown id, so surfacing rather than inventing
       // a session keeps callers honest about handling it.
@@ -334,29 +385,27 @@ export class FakePaymentProvider implements PaymentProvider {
     return session;
   }
 
-  private resultFor(session: FakeSession): CheckoutSessionResult {
+  private resultFor(session: FakeSessionRecord): CheckoutSessionResult {
     return {
       sessionId: session.sessionId,
       url: `https://checkout.fake.local/c/pay/${session.sessionId}`,
-      expiresAt: session.expiresAt,
+      expiresAt: new Date(session.expiresAt),
     };
   }
 }
 
-function sameCheckoutRequest(
-  left: CreateCheckoutSessionInput,
-  right: CreateCheckoutSessionInput,
-): boolean {
+function sameCheckoutRequest(left: FakeSessionRecord, right: CreateCheckoutSessionInput): boolean {
   return (
     left.bookingId === right.bookingId &&
     left.clientReferenceId === right.clientReferenceId &&
-    left.amount.equals(right.amount) &&
+    left.amountCents === right.amount.amountCents &&
+    left.currency === right.amount.currency &&
     left.description === right.description &&
     left.customerEmail === right.customerEmail &&
     left.successUrl === right.successUrl &&
     left.cancelUrl === right.cancelUrl &&
     left.locale === right.locale &&
-    left.expiresAt.getTime() === right.expiresAt.getTime() &&
+    left.expiresAt === right.expiresAt.toISOString() &&
     left.idempotencyKey === right.idempotencyKey
   );
 }

@@ -39,6 +39,30 @@ export interface QueryCounter {
   total: () => number;
 }
 
+/**
+ * Shared counter for suites that inject a counting client into their own harness.
+ * Public test apps use the per-app counter created below and remain isolated.
+ */
+let sharedQueryCount = 0;
+
+export const queryCounter: QueryCounter = {
+  reset: () => {
+    sharedQueryCount = 0;
+  },
+  total: () => sharedQueryCount,
+};
+
+export const countingPrisma = (prisma as unknown as PrismaService).$extends({
+  query: {
+    $allModels: {
+      $allOperations({ args, query }) {
+        sharedQueryCount += 1;
+        return query(args);
+      },
+    },
+  },
+}) as unknown as PrismaService;
+
 function organizationStub(
   organization: OrganizationWithSettings,
 ): Partial<OrganizationContextService> {

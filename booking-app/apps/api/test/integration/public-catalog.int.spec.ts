@@ -12,6 +12,25 @@ import type { Clock } from '../../src/domain/time/clock.js';
 import type { SeedContext } from '../factories/index.js';
 import type { Server } from 'node:http';
 
+/**
+ * A route nobody remembered to think about, which is the case the guard exists for.
+ *
+ * It has to be a route that *exists*: Nest resolves the handler before it runs guards,
+ * so a path matching nothing is a 404 and no guard is consulted. Proving "closed by
+ * default" therefore needs a real endpoint with no `@Public()` on it.
+ */
+@Controller('probe')
+class ForgottenController {
+  @Get('secret')
+  secret(): { leaked: true } {
+    return { leaked: true };
+  }
+}
+
+@Module({ controllers: [ForgottenController] })
+// eslint-disable-next-line @typescript-eslint/no-extraneous-class
+class ForgottenModule {}
+
 const NOW = new Date('2026-08-10T06:00:00.000Z');
 
 let ctx: SeedContext;
@@ -24,7 +43,10 @@ beforeEach(async () => {
   const testApp = await createPublicTestApp({
     organization: await loadOrganization(ctx.organization.id),
     now: NOW,
-    imports: [PublicModule],
+    // ForgottenModule is always present rather than added by a nested beforeEach: two
+    // full Nest applications per test is both wasteful and the kind of setup that
+    // produces order-sensitive flakes.
+    imports: [PublicModule, ForgottenModule],
   });
 
   server = testApp.server;
@@ -244,47 +266,15 @@ describe('GET /public/services/:serviceId/employees', () => {
   });
 });
 
-/**
- * A route nobody remembered to think about, which is the case the guard exists for.
- *
- * It has to be a route that *exists*: Nest resolves the handler before it runs guards,
- * so a path matching nothing is a 404 and no guard is consulted. Proving "closed by
- * default" therefore needs a real endpoint with no `@Public()` on it.
- */
-@Controller('probe')
-class ForgottenController {
-  @Get('secret')
-  secret(): { leaked: true } {
-    return { leaked: true };
-  }
-}
-
-@Module({ controllers: [ForgottenController] })
-// eslint-disable-next-line @typescript-eslint/no-extraneous-class
-class ForgottenModule {}
-
 describe('the global guard', () => {
-  let closedServer: () => Server;
-
-  beforeEach(async () => {
-    const testApp = await createPublicTestApp({
-      organization: await loadOrganization(ctx.organization.id),
-      now: NOW,
-      imports: [PublicModule, ForgottenModule],
-    });
-
-    closedServer = testApp.server;
-    return testApp.close;
-  });
-
   it('closes a route that was never marked public', async () => {
-    const response = await request(closedServer()).get('/probe/secret').expect(401);
+    const response = await request(server()).get('/probe/secret').expect(401);
 
     expect(response.body).toMatchObject({ code: 'UNAUTHENTICATED' });
     expect(JSON.stringify(response.body)).not.toContain('leaked');
   });
 
   it('still lets the public routes through', async () => {
-    await request(closedServer()).get('/public/services').expect(200);
+    await request(server()).get('/public/services').expect(200);
   });
 });

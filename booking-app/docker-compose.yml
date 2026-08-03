@@ -19,6 +19,13 @@ services:
       - '5433:5432'
     volumes:
       - booking-postgres-data:/var/lib/postgresql/data
+      # Runs only on first initialisation of an empty data volume.
+      #
+      # So a machine that already has `booking-postgres-data` will not pick this up, and
+      # `prisma migrate dev` keeps failing with P1003 for the missing shadow database. The
+      # one-time fix is `pnpm db:reset`, which takes the volume down and brings it back
+      # empty so the entrypoint runs this script. It discards local data.
+      - ./docker/postgres-init.sql:/docker-entrypoint-initdb.d/10-shadow-database.sql:ro
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U booking -d booking']
       interval: 3s

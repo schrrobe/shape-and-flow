@@ -1,0 +1,37 @@
+/*
+ * The one stylesheet.
+ *
+ * Order matters: Tailwind first so its preflight lands before anything else, then the tokens
+ * on `:root`, then the theme mapping that turns those tokens into utilities.
+ */
+@import 'tailwindcss';
+@import '@shape-and-flow/booking-ui/tokens.css';
+@import '@shape-and-flow/booking-ui/theme.css';
+
+/* The UI package's components are outside this app's source tree, so Tailwind has to be told
+ * to scan them or every class they use is treated as unused and stripped. */
+@source '../../../../packages/ui/src';
+
+body {
+  background-color: var(--sf-background);
+  color: var(--sf-text-primary);
+  font-family: var(--font-sans);
+  /* A booking flow is read, not skimmed. 16px minimum, because iOS zooms a smaller field on
+   * focus and the zoom breaks the layout. */
+  font-size: 1rem;
+  line-height: 1.5;
+}
+
+/*
+ * Respect a reader who asked for less motion. The spinner and the skeleton pulse are the only
+ * animations in the app, and neither carries information.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

@@ -417,7 +417,7 @@ describe('createRefund', () => {
     expect(result).toEqual({ refundId: 're_test_1', status: 'succeeded', amountCents: 2000 });
   });
 
-  it('omits metadata entirely when no reason is given', async () => {
+  it('always sends the idempotency key as metadata, with or without a reason', async () => {
     const { provider, refundCreate } = build();
     await provider.createRefund(context, {
       chargeId: 'ch_test_1',
@@ -425,7 +425,11 @@ describe('createRefund', () => {
       idempotencyKey: 'rf-1',
     });
 
-    expect('metadata' in lastCallOf(refundCreate)[0]).toBe(false);
+    // Not optional, and not only for the logs: `refund.*` webhooks echo the metadata back,
+    // and it is the only handle settlement has when an event arrives before the response
+    // that stores Stripe's own refund id.
+    expect(lastCallOf(refundCreate)[0]).toMatchObject({ metadata: { idempotencyKey: 'rf-1' } });
+    expect('reason' in (lastCallOf(refundCreate)[0].metadata as object)).toBe(false);
   });
 });
 
