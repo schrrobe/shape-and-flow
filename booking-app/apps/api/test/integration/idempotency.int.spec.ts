@@ -1,8 +1,8 @@
-import { Body, Controller, Global, HttpCode, Module, Post, Put } from '@nestjs/common';
+import { Body, Controller, Global, HttpCode, Logger, Module, Post, Put } from '@nestjs/common';
 import { APP_FILTER, APP_INTERCEPTOR } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { GlobalExceptionFilter } from '../../src/common/errors/global-exception.filter.js';
 import { CLOCK, FixedClock } from '../../src/domain/time/clock.js';
@@ -10,12 +10,14 @@ import { IdempotencyInterceptor } from '../../src/messaging/idempotency/idempote
 import {
   IDEMPOTENCY_LEASE_MS,
   IDEMPOTENCY_STATE,
+  IDEMPOTENCY_SWEEP_BATCH_SIZE,
   IDEMPOTENCY_TTL_MS,
   IdempotencyService,
 } from '../../src/messaging/idempotency/idempotency.service.js';
 import { Idempotent } from '../../src/messaging/idempotency/idempotent.decorator.js';
 import { canonicalRequestHash } from '../../src/messaging/idempotency/request-hash.js';
 import { OrganizationContextService } from '../../src/organization/organization-context.service.js';
+import { Prisma } from '../../src/prisma/client.js';
 import { PrismaService } from '../../src/prisma/prisma.service.js';
 import { prisma, resetDatabase } from '../database.harness.js';
 import { seedOrganization } from '../factories/index.js';
@@ -62,6 +64,22 @@ describe('begin', () => {
       statusCode: 201,
       body: { checkoutUrl: 'https://checkout.example/x' },
     });
+  });
+
+  it('treats a completed key as unused after its replay TTL', async () => {
+    await service.begin(KEY, 'booking.create', 'h1');
+    await service.complete(KEY, 201, { old: true });
+    clock.set(new Date(clock.now().getTime() + IDEMPOTENCY_TTL_MS + 1));
+
+    expect(await service.begin(KEY, 'booking.create', 'h1')).toEqual({ outcome: 'NEW' });
+  });
+
+  it('allows a different request to reuse a completed key after its replay TTL', async () => {
+    await service.begin(KEY, 'booking.create', 'h1');
+    await service.complete(KEY, 201, { old: true });
+    clock.set(new Date(clock.now().getTime() + IDEMPOTENCY_TTL_MS + 1));
+
+    expect(await service.begin(KEY, 'refund.create', 'h2')).toEqual({ outcome: 'NEW' });
   });
 
   it('reports MISMATCH for the same key with a different hash', async () => {
@@ -121,6 +139,19 @@ describe('an attempt that never finished', () => {
 
     const row = await prisma.idempotencyKey.findUniqueOrThrow({ where: { key: KEY } });
     expect(row.expiresAt).toEqual(new Date(clock.now().getTime() + IDEMPOTENCY_LEASE_MS));
+  });
+
+  it('logs a fingerprint instead of the raw key when taking over a lease', async () => {
+    const warn = vi.spyOn(Logger.prototype, 'warn');
+    await service.begin(KEY, 'booking.create', 'h1');
+    clock.set(new Date(clock.now().getTime() + IDEMPOTENCY_LEASE_MS + 1));
+
+    await service.begin(KEY, 'booking.create', 'h1');
+
+    const message = String(warn.mock.calls.at(-1)?.[0]);
+    expect(message).toContain('fingerprint');
+    expect(message).not.toContain(KEY);
+    warn.mockRestore();
   });
 
   it('is taken over by exactly one of several waiting retries', async () => {
@@ -192,6 +223,22 @@ describe('complete', () => {
       statusCode: 204,
       body: null,
     });
+
+    const [stored] = await prisma.$queryRaw<{ jsonType: string | null }[]>(Prisma.sql`
+      SELECT jsonb_typeof(response_snapshot) AS "jsonType"
+      FROM idempotency_keys
+      WHERE key = ${KEY}
+    `);
+    expect(stored?.jsonType).toBe('null');
+  });
+
+  it('logs when completion no longer owns an in-progress row', async () => {
+    const warn = vi.spyOn(Logger.prototype, 'warn');
+
+    await service.complete(KEY, 201, { ok: true });
+
+    expect(String(warn.mock.calls.at(-1)?.[0])).toContain('no longer in progress');
+    warn.mockRestore();
   });
 });
 
@@ -253,6 +300,21 @@ describe('sweep', () => {
 
     expect(await service.sweep()).toBe(0);
     expect(await prisma.idempotencyKey.count()).toBe(1);
+  });
+
+  it('deletes and counts more than one bounded batch', async () => {
+    const expired = new Date(clock.now().getTime() - 1);
+    await prisma.idempotencyKey.createMany({
+      data: Array.from({ length: IDEMPOTENCY_SWEEP_BATCH_SIZE + 1 }, (_, index) => ({
+        key: `expired-${String(index)}`,
+        scope: 'booking.create',
+        requestHash: `hash-${String(index)}`,
+        expiresAt: expired,
+      })),
+    });
+
+    expect(await service.sweep()).toBe(IDEMPOTENCY_SWEEP_BATCH_SIZE + 1);
+    expect(await prisma.idempotencyKey.count()).toBe(0);
   });
 });
 
@@ -388,7 +450,7 @@ describe('the interceptor', () => {
   });
 
   it('returns 409 IDEMPOTENT_REQUEST_IN_PROGRESS while an attempt is running', async () => {
-    await service.begin(KEY, 'booking.create', canonicalRequestHash({ slot: 'a' }));
+    await service.begin(KEY, 'booking.create', canonicalRequestHash({ slot: 'a' }, {}));
 
     const blocked = await post(KEY);
     expect(blocked.status).toBe(409);
@@ -423,6 +485,22 @@ describe('the interceptor', () => {
     const retried = await post(KEY, { fail: false, slot: 'a' });
     expect(retried.status).toBe(201);
     expect(runs.count).toBe(2);
+  });
+
+  it('keeps the lease when storing a successful handler response fails', async () => {
+    const appService = app.get(IdempotencyService);
+    vi.spyOn(appService, 'complete').mockRejectedValueOnce(new Error('snapshot write failed'));
+
+    const failed = await post(KEY);
+    expect(failed.status).toBe(500);
+    expect(runs.count).toBe(1);
+
+    const row = await prisma.idempotencyKey.findUniqueOrThrow({ where: { key: KEY } });
+    expect(row.state).toBe(IDEMPOTENCY_STATE.IN_PROGRESS);
+
+    const retry = await post(KEY);
+    expect(retry.status).toBe(409);
+    expect(runs.count).toBe(1);
   });
 
   it('honours an explicit @HttpCode when replaying', async () => {

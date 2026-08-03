@@ -162,7 +162,13 @@ export class FakePaymentProvider implements PaymentProvider {
     if (input.idempotencyKey !== undefined) {
       const existingId = await this.store.sessionIdForKey(input.idempotencyKey);
       if (existingId !== undefined) {
-        return this.resultFor(await this.requireSession(existingId));
+        const existing = await this.requireSession(existingId);
+        if (!sameCheckoutRequest(existing, input)) {
+          throw new AppError('IDEMPOTENCY_KEY_REUSED', {
+            message: 'Checkout idempotency key was reused with different parameters.',
+          });
+        }
+        return this.resultFor(existing);
       }
     }
 
@@ -175,7 +181,13 @@ export class FakePaymentProvider implements PaymentProvider {
       paymentStatus: 'unpaid',
       amountCents: input.amount.amountCents,
       currency: input.amount.currency,
+      bookingId: input.bookingId,
       clientReferenceId: input.clientReferenceId,
+      description: input.description,
+      customerEmail: input.customerEmail,
+      successUrl: input.successUrl,
+      cancelUrl: input.cancelUrl,
+      locale: input.locale,
       expiresAt: input.expiresAt.toISOString(),
       ...(input.idempotencyKey === undefined ? {} : { idempotencyKey: input.idempotencyKey }),
     };
@@ -247,6 +259,16 @@ export class FakePaymentProvider implements PaymentProvider {
     // fast path only; the claim below is what makes it true under concurrency.
     const existing = refunds.find((refund) => refund.idempotencyKey === input.idempotencyKey);
     if (existing) {
+      if (
+        existing.chargeId !== input.chargeId ||
+        existing.amountCents !== input.amount.amountCents ||
+        existing.currency !== input.amount.currency ||
+        existing.reason !== input.reason
+      ) {
+        throw new AppError('IDEMPOTENCY_KEY_REUSED', {
+          message: 'Refund idempotency key was reused with different parameters.',
+        });
+      }
       return {
         refundId: existing.refundId,
         status: 'succeeded',
@@ -286,11 +308,22 @@ export class FakePaymentProvider implements PaymentProvider {
       amountCents: input.amount.amountCents,
       currency: input.amount.currency,
       idempotencyKey: input.idempotencyKey,
+      reason: input.reason,
     };
 
     // Whichever refund holds this key afterwards — possibly one a concurrent caller
     // wrote while this one was checking the remainder.
     const refund = await this.store.claimRefund(proposed);
+    if (
+      refund.chargeId !== proposed.chargeId ||
+      refund.amountCents !== proposed.amountCents ||
+      refund.currency !== proposed.currency ||
+      refund.reason !== proposed.reason
+    ) {
+      throw new AppError('IDEMPOTENCY_KEY_REUSED', {
+        message: 'Refund idempotency key was reused with different parameters.',
+      });
+    }
 
     return { refundId: refund.refundId, status: 'succeeded', amountCents: refund.amountCents };
   }
@@ -359,4 +392,20 @@ export class FakePaymentProvider implements PaymentProvider {
       expiresAt: new Date(session.expiresAt),
     };
   }
+}
+
+function sameCheckoutRequest(left: FakeSessionRecord, right: CreateCheckoutSessionInput): boolean {
+  return (
+    left.bookingId === right.bookingId &&
+    left.clientReferenceId === right.clientReferenceId &&
+    left.amountCents === right.amount.amountCents &&
+    left.currency === right.amount.currency &&
+    left.description === right.description &&
+    left.customerEmail === right.customerEmail &&
+    left.successUrl === right.successUrl &&
+    left.cancelUrl === right.cancelUrl &&
+    left.locale === right.locale &&
+    left.expiresAt === right.expiresAt.toISOString() &&
+    left.idempotencyKey === right.idempotencyKey
+  );
 }

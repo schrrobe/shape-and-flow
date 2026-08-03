@@ -912,8 +912,11 @@ Each of these would have passed a casual "it works" check.
   schema has no column for.
 - **BullMQ job-id deduplication only holds while the job exists in Redis.**
   Completed jobs are removed after a day, so a crash that leaves an outbox row
-  unmarked for longer than that can enqueue a second time. Every processor has to be
-  idempotent regardless, which is what the inbox and the idempotency key are for.
+  unmarked for longer than that can enqueue a second time. Before side-effecting
+  processors ship in stage 7, each must persist and conditionally claim a durable
+  delivery key derived from the outbox event id (or enforce an equivalent
+  domain-level applied marker) before sending. Inbox and HTTP request idempotency do
+  not protect outgoing delivery after Redis retention expires.
 
 ## Operational notes
 
@@ -931,18 +934,21 @@ Each of these would have passed a casual "it works" check.
   database containing `booking_test`.
 - `test/redis.harness.ts` refuses to run unless `REDIS_QUEUE_PREFIX` starts with
   `test-`, because its reset calls `obliterate` on every queue. The API and its
-  workers must agree on this variable; if they disagree the workers consume
-  nothing and say nothing.
+  workers must agree on this variable. Worker readiness in stage 7 must expose the
+  effective prefix and configured queue names, so a mismatch is visible and marks
+  the deployment unhealthy instead of leaving a silently idle worker.
 - `test/test-config.module.ts` provides `ENV` for integration tests that boot a
   real Nest container. It deliberately does not use the real `ConfigModule`, which
   calls `process.exit` on a missing variable — a poor diagnostic inside a test
   worker, and unrelated to what such a test is checking. Add variables to it as
   modules under test start reading them.
-- Request handlers must never call `EnqueueService` directly. They write an
-  `OutboxEvent` in the same transaction as the state change, and the dispatcher
-  enqueues from there. Legitimate callers: the outbox dispatcher, webhook
-  controllers (which have already recorded the event durably), the reconcilers,
-  and the scheduler.
+- Request handlers must never call `EnqueueService` directly. State-changing
+  handlers write an `OutboxEvent` in the same transaction as the state change, and
+  the post-commit dispatcher enqueues it. Webhook handlers first persist the inbox
+  event, commit, and return; a non-request-handler dispatcher then enqueues it, with
+  the reconciler recovering the persist/commit-to-enqueue crash window. Legitimate
+  direct callers are therefore dispatchers, reconcilers, and the scheduler — not
+  controllers.
 - Lint is normally ~5 seconds for the whole workspace. One run took 6m37s at 2%
   CPU and another was killed as out-of-memory — machine memory pressure, not the
   code; the same command was clean and fast immediately afterwards. If lint

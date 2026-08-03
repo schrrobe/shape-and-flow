@@ -45,7 +45,7 @@ function canonicalise(value: unknown, key?: string): unknown {
 
 /** The canonical JSON form, exported for tests and for diagnosing a mismatch. */
 export function canonicalRequestJson(body: unknown): string {
-  return JSON.stringify(canonicalise(body));
+  return JSON.stringify(canonicalise(body ?? null));
 }
 
 /** SHA-256, hex, of the canonical form. */

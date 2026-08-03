@@ -1,4 +1,8 @@
-import type { CheckoutSessionStatus, PaymentStatusValue } from './payment-provider.js';
+import type {
+  CheckoutSessionStatus,
+  CreateCheckoutSessionInput,
+  PaymentStatusValue,
+} from './payment-provider.js';
 import type { Redis } from 'ioredis';
 
 /**
@@ -28,7 +32,13 @@ export interface FakeSessionRecord {
   paymentStatus: PaymentStatusValue;
   amountCents: number;
   currency: string;
+  bookingId: string;
   clientReferenceId: string;
+  description: string;
+  customerEmail: string;
+  successUrl: string;
+  cancelUrl: string;
+  locale: CreateCheckoutSessionInput['locale'];
   /** ISO 8601. A `Date` does not survive the round trip. */
   expiresAt: string;
   paymentIntentId?: string;
@@ -43,6 +53,7 @@ export interface FakeRefundRecord {
   amountCents: number;
   currency: string;
   idempotencyKey: string;
+  reason?: string | undefined;
 }
 
 export interface FakePaymentStore {

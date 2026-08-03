@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it } from 'vitest';
 
 import { FakeEmailProvider } from './email/fake-email.provider.js';
 import { FakeSmsProvider } from './sms/fake-sms.provider.js';
-import { SMS_MAX_LENGTH } from './sms/sms-provider.js';
 
 import type { EmailMessage } from './email/email-provider.js';
 import type { SmsMessage } from './sms/sms-provider.js';
@@ -98,17 +97,19 @@ describe('FakeSmsProvider', () => {
     expect(provider.to('+4915112345678')).toHaveLength(1);
   });
 
-  it('accepts a body at exactly the segment limit', async () => {
-    await expect(provider.send(sms({ body: 'x'.repeat(SMS_MAX_LENGTH) }))).resolves.toBeDefined();
+  it('accepts 459 GSM-7 septets and rejects 460', async () => {
+    await expect(provider.send(sms({ body: 'x'.repeat(459) }))).resolves.toBeDefined();
+    await expect(provider.send(sms({ body: 'x'.repeat(460) }))).rejects.toThrow(/459/);
   });
 
-  it('refuses a body one character over, before pretending to send it', async () => {
-    // The real adapter checks the same bound, so a template that grows too long
-    // fails in a unit test rather than on the phone bill.
-    await expect(provider.send(sms({ body: 'x'.repeat(SMS_MAX_LENGTH + 1) }))).rejects.toThrow(
-      new RegExp(String(SMS_MAX_LENGTH)),
-    );
-    expect(provider.sent).toHaveLength(0);
+  it('counts GSM-7 extension characters as two septets', async () => {
+    await expect(provider.send(sms({ body: '^'.repeat(229) }))).resolves.toBeDefined();
+    await expect(provider.send(sms({ body: '^'.repeat(230) }))).rejects.toThrow(/459/);
+  });
+
+  it('accepts 201 UCS-2 code units and rejects 202', async () => {
+    await expect(provider.send(sms({ body: '漢'.repeat(201) }))).resolves.toBeDefined();
+    await expect(provider.send(sms({ body: '漢'.repeat(202) }))).rejects.toThrow(/201/);
   });
 
   it('fails exactly the next send', async () => {

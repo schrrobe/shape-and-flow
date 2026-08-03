@@ -1,4 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
+import { AVAILABILITY_MAX_RANGE_DAYS } from '@shape-and-flow/booking-contracts';
 
 import { BLOCKING_BOOKING_STATUSES } from '../booking/booking-status.machine.js';
 import { AppError } from '../common/errors/app-error.js';
@@ -83,6 +84,13 @@ export class AvailabilitySnapshotService {
     const zone = organization.timezone;
     const settings = organization.settings;
 
+    if (eachLocalDate(input.from, input.to, zone).length > AVAILABILITY_MAX_RANGE_DAYS) {
+      throw new AppError('VALIDATION_FAILED', {
+        status: 400,
+        message: `Availability range must not exceed ${String(AVAILABILITY_MAX_RANGE_DAYS)} days.`,
+      });
+    }
+
     // Independent of each other, so they cost one round trip rather than two. This is the
     // hottest read in the app — every slot-picker render lands here.
     const [service, employeeIds] = await Promise.all([
@@ -150,6 +158,7 @@ export class AvailabilitySnapshotService {
     const window = this.window(date, date, zone);
 
     const service = await this.loadService(organizationId, input.serviceId, tx);
+    await this.loadEmployeeIds(organizationId, input.serviceId, input.employeeId, tx);
 
     const [schedules, exceptionsAndTimeOff, busy, closedDates] = await Promise.all([
       this.loadWorkingHours(organizationId, [input.employeeId], tx),
@@ -235,8 +244,9 @@ export class AvailabilitySnapshotService {
     organizationId: string,
     serviceId: string,
     employeeId: string | undefined,
+    tx?: Prisma.TransactionClient,
   ): Promise<string[]> {
-    const links = await this.prisma.employeeService.findMany({
+    const links = await (tx ?? this.prisma).employeeService.findMany({
       where: {
         organizationId,
         serviceId,

@@ -1,11 +1,13 @@
+import { createHash } from 'node:crypto';
+
 import { Inject, Injectable, Logger } from '@nestjs/common';
 
 import { isUniqueViolation } from '../../common/prisma-errors/prisma-errors.js';
 import { CLOCK } from '../../domain/time/clock.js';
+import { Prisma } from '../../prisma/client.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
 
 import type { Clock } from '../../domain/time/clock.js';
-import type { Prisma } from '../../prisma/client.js';
 
 /** `state` is a string column, not an enum, so the two values live here. */
 export const IDEMPOTENCY_STATE = {
@@ -37,6 +39,9 @@ export const IDEMPOTENCY_TTL_MS = 24 * 60 * 60_000;
  * double-booking. See the Phase 1 limitations in the progress document.
  */
 export const IDEMPOTENCY_LEASE_MS = 2 * 60_000;
+
+/** Maximum rows deleted in one statement so sweeping cannot hold an unbounded lock set. */
+export const IDEMPOTENCY_SWEEP_BATCH_SIZE = 500;
 
 export type BeginResult =
   | { outcome: 'NEW' }
@@ -126,6 +131,21 @@ export class IdempotencyService {
     // to let the caller try again rather than invent an outcome.
     if (row === null) return { outcome: 'IN_PROGRESS' };
 
+    // A completed key owns its identity only for the replay window. Once that
+    // window has elapsed, delete it conditionally and let this request claim the
+    // key anew, even when its scope or request body changed.
+    if (row.state === IDEMPOTENCY_STATE.COMPLETED && row.expiresAt <= now) {
+      const { count } = await this.prisma.idempotencyKey.deleteMany({
+        where: {
+          key,
+          state: IDEMPOTENCY_STATE.COMPLETED,
+          expiresAt: { lte: now },
+        },
+      });
+
+      return count === 0 ? { outcome: 'IN_PROGRESS' } : await this.begin(key, scope, requestHash);
+    }
+
     // Checked before anything else: a key reused for a different operation must be
     // refused whatever state it is in. Replaying across scopes would answer a refund
     // request with a booking's Checkout URL.
@@ -175,10 +195,15 @@ export class IdempotencyService {
 
     if (count === 0) return { outcome: 'IN_PROGRESS' };
 
+    const fingerprint = createHash('sha256').update(key, 'utf8').digest('hex').slice(0, 12);
     if (bound) {
-      this.logger.debug(`idempotency key ${key} retried after an attempt that held a reservation`);
+      this.logger.debug(
+        `idempotency key fingerprint ${fingerprint} retried after an attempt that held a reservation`,
+      );
     } else {
-      this.logger.warn(`idempotency key ${key} taken over from an attempt that never finished`);
+      this.logger.warn(
+        `idempotency key fingerprint ${fingerprint} taken over from an attempt that never finished`,
+      );
     }
 
     return { outcome: 'NEW' };
@@ -198,17 +223,21 @@ export class IdempotencyService {
   ): Promise<void> {
     const now = this.clock.now();
 
-    await this.prisma.idempotencyKey.updateMany({
+    const { count } = await this.prisma.idempotencyKey.updateMany({
       where: { key, state: IDEMPOTENCY_STATE.IN_PROGRESS },
       data: {
         state: IDEMPOTENCY_STATE.COMPLETED,
         statusCode,
-        responseSnapshot: (body ?? null) as Prisma.InputJsonValue,
+        responseSnapshot: body ?? Prisma.JsonNull,
         ...(meta.organizationId === undefined ? {} : { organizationId: meta.organizationId }),
         ...(meta.bookingId === undefined ? {} : { bookingId: meta.bookingId }),
         expiresAt: new Date(now.getTime() + IDEMPOTENCY_TTL_MS),
       },
     });
+
+    if (count === 0) {
+      this.logger.warn('idempotency completion skipped because the key is no longer in progress');
+    }
   }
 
   /**
@@ -241,9 +270,25 @@ export class IdempotencyService {
 
   /** Delete keys past their expiry. Runs as the `sweep.idempotency_keys` job. */
   async sweep(): Promise<number> {
-    const { count } = await this.prisma.idempotencyKey.deleteMany({
-      where: { expiresAt: { lt: this.clock.now() } },
-    });
+    const now = this.clock.now();
+    let count = 0;
+
+    let selectedCount: number;
+    do {
+      const rows = await this.prisma.idempotencyKey.findMany({
+        where: { expiresAt: { lt: now } },
+        select: { id: true },
+        take: IDEMPOTENCY_SWEEP_BATCH_SIZE,
+      });
+      selectedCount = rows.length;
+
+      if (selectedCount === 0) break;
+
+      const deleted = await this.prisma.idempotencyKey.deleteMany({
+        where: { id: { in: rows.map(({ id }) => id) }, expiresAt: { lt: now } },
+      });
+      count += deleted.count;
+    } while (selectedCount === IDEMPOTENCY_SWEEP_BATCH_SIZE);
 
     if (count > 0) this.logger.debug(`swept ${String(count)} expired idempotency keys`);
     return count;

@@ -66,7 +66,7 @@ jobs:
           POSTGRES_USER: booking
           POSTGRES_PASSWORD: booking
           POSTGRES_DB: booking_test
-        ports: ['5432:5432']
+        ports: ["5432:5432"]
         options: >-
           --health-cmd "pg_isready -U booking -d booking_test"
           --health-interval 3s
@@ -74,7 +74,7 @@ jobs:
           --health-retries 15
       redis:
         image: redis:7
-        ports: ['6379:6379']
+        ports: ["6379:6379"]
         options: >-
           --health-cmd "redis-cli ping"
           --health-interval 3s
@@ -102,7 +102,7 @@ jobs:
           POSTGRES_USER: booking
           POSTGRES_PASSWORD: booking
           POSTGRES_DB: booking_test
-        ports: ['5432:5432']
+        ports: ["5432:5432"]
         options: >-
           --health-cmd "pg_isready -U booking -d booking_test"
           --health-interval 3s
@@ -110,7 +110,7 @@ jobs:
           --health-retries 15
       redis:
         image: redis:7
-        ports: ['6379:6379']
+        ports: ["6379:6379"]
         options: >-
           --health-cmd "redis-cli ping"
           --health-interval 3s

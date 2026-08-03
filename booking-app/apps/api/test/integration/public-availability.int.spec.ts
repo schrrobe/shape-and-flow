@@ -1,12 +1,15 @@
 import request from 'supertest';
 import { beforeEach, describe, expect, it } from 'vitest';
 
+import { AvailabilitySnapshotService } from '../../src/public/availability-snapshot.service.js';
 import { PublicModule } from '../../src/public/public.module.js';
 import { prisma, resetDatabase } from '../database.harness.js';
 import { BERLIN, SLOT_FRIDAY_0900, makeBooking, seedOrganization } from '../factories/index.js';
-import { createPublicTestApp, loadOrganization, queryCounter } from '../public-app.harness.js';
+import { createPublicTestApp, loadOrganization } from '../public-app.harness.js';
 
 import type { SeedContext } from '../factories/index.js';
+import type { QueryCounter } from '../public-app.harness.js';
+import type { INestApplication } from '@nestjs/common';
 import type { Server } from 'node:http';
 
 /** The seeded schedule's Friday. `SLOT_FRIDAY_0900` is 09:00 Berlin on this date. */
@@ -23,6 +26,8 @@ const NOW = new Date('2026-08-10T06:00:00.000Z');
 
 let ctx: SeedContext;
 let server: () => Server;
+let app: INestApplication;
+let queryCounter: QueryCounter;
 
 /** Availability for a range, as a flat list of ISO start times. */
 async function slotTimes(query: Record<string, string>): Promise<string[]> {
@@ -49,7 +54,40 @@ beforeEach(async () => {
   });
 
   server = testApp.server;
+  app = testApp.app;
+  queryCounter = testApp.queryCounter;
   return testApp.close;
+});
+
+describe('AvailabilitySnapshotService boundaries', () => {
+  it('rejects a range wider than 31 days before querying availability data', async () => {
+    queryCounter.reset();
+
+    await expect(
+      app.get(AvailabilitySnapshotService).load({
+        serviceId: ctx.service30.id,
+        from: '2026-08-01',
+        to: '2026-09-01',
+      }),
+    ).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+    expect(queryCounter.total()).toBe(0);
+  });
+
+  it('rejects loadForSlot when the employee does not perform the service', async () => {
+    await prisma.employeeService.deleteMany({
+      where: { employeeId: ctx.employee2.id, serviceId: ctx.service30.id },
+    });
+
+    await expect(
+      prisma.$transaction((tx) =>
+        app.get(AvailabilitySnapshotService).loadForSlot(tx, {
+          serviceId: ctx.service30.id,
+          employeeId: ctx.employee2.id,
+          startsAt: SLOT_FRIDAY_0900,
+        }),
+      ),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  });
 });
 
 describe('GET /public/availability', () => {
@@ -191,7 +229,7 @@ describe('GET /public/availability', () => {
   });
 
   it('removes a day an employee has approved time off, but not a requested one', async () => {
-    await prisma.timeOff.create({
+    const timeOff = await prisma.timeOff.create({
       data: {
         organizationId: ctx.organization.id,
         employeeId: ctx.employee1.id,
@@ -206,7 +244,10 @@ describe('GET /public/availability', () => {
       (await slotTimes({ from: FRIDAY, to: FRIDAY, employeeId: ctx.employee1.id })).length,
     ).toBeGreaterThan(0);
 
-    await prisma.timeOff.updateMany({ data: { status: 'APPROVED' } });
+    await prisma.timeOff.updateMany({
+      where: { id: timeOff.id },
+      data: { status: 'APPROVED' },
+    });
 
     expect(await slotTimes({ from: FRIDAY, to: FRIDAY, employeeId: ctx.employee1.id })).toEqual([]);
   });

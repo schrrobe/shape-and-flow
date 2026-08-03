@@ -22,6 +22,28 @@ const BOOKING = 'cms9gryvd0002ja32s1nvydb2';
 
 const ALL_JOBS = Object.values(JOB);
 
+const TENANT_JOB_FIXTURES: Partial<Record<JobName, Record<string, unknown>>> = {
+  [JOB.BOOKING_EXPIRY_REQUESTED]: { organizationId: ORG, bookingId: BOOKING },
+  [JOB.BOOKING_CONFIRMED]: { organizationId: ORG, bookingId: BOOKING },
+  [JOB.BOOKING_CANCELED]: { organizationId: ORG, bookingId: BOOKING },
+  [JOB.BOOKING_PAYMENT_FAILED]: { organizationId: ORG, bookingId: BOOKING },
+  [JOB.BOOKING_RESCHEDULED]: {
+    organizationId: ORG,
+    bookingId: BOOKING,
+    previousBookingId: BOOKING,
+  },
+  [JOB.REFUND_REQUESTED]: { organizationId: ORG, refundId: BOOKING },
+  [JOB.REFUND_SUCCEEDED]: { organizationId: ORG, refundId: BOOKING },
+  [JOB.NOTIFICATION_SEND]: { organizationId: ORG, notificationId: BOOKING },
+  [JOB.REMINDER_SCHEDULE]: { organizationId: ORG, bookingId: BOOKING },
+  [JOB.REMINDER_SEND]: {
+    organizationId: ORG,
+    bookingId: BOOKING,
+    offsetMinutes: 1440,
+    expectedStartsAtEpochSeconds: 1_786_000_000,
+  },
+};
+
 describe('the registry is complete', () => {
   it('assigns every job to a declared queue', () => {
     for (const name of ALL_JOBS) {
@@ -63,8 +85,16 @@ describe('tenant scoping', () => {
 
       // Without a tenant a processor cannot scope a single query, so this is not
       // optional for these queues.
-      const result = jobPayloadSchemas[name].safeParse({ bookingId: BOOKING, refundId: BOOKING });
+      const fixture = TENANT_JOB_FIXTURES[name];
+      expect(fixture, `${name} has no valid tenant fixture`).toBeDefined();
+      expect(jobPayloadSchemas[name].safeParse(fixture).success, `${name} fixture is invalid`).toBe(
+        true,
+      );
+
+      const { organizationId: _organizationId, ...missingTenant } = fixture ?? {};
+      const result = jobPayloadSchemas[name].safeParse(missingTenant);
       expect(result.success, `${name} accepted a payload with no organizationId`).toBe(false);
+      if (!result.success) expect(result.error.issues[0]?.path).toEqual(['organizationId']);
     }
   });
 
