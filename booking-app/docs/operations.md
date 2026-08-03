@@ -12,14 +12,18 @@ Every command is run **from the repository root**.
 
 Six containers, one of which exits before the others start.
 
-| Container            | What it is                            | Reachable from                |
-| -------------------- | ------------------------------------- | ----------------------------- |
-| `sf-booking-postgres` | PostgreSQL 17, one named volume       | the compose network only      |
-| `sf-booking-redis`    | Redis 7, append-only                  | the compose network only      |
-| `sf-booking-migrate`  | one-shot `prisma migrate deploy`      | nothing; it exits             |
-| `sf-booking-api`      | the HTTP API                          | `127.0.0.1:3001`              |
-| `sf-booking-worker`   | queues, sweeps and notifications      | nothing; it serves no port    |
-| `sf-booking-web`      | nginx serving the built bundle        | `127.0.0.1:8080`              |
+| Container                        | What it is                       | Reachable from             |
+| -------------------------------- | -------------------------------- | -------------------------- |
+| `sf-booking-postgres-production` | PostgreSQL 17, one named volume  | the compose network only   |
+| `sf-booking-redis-production`    | Redis 7, append-only             | the compose network only   |
+| `sf-booking-migrate-production`  | one-shot `prisma migrate deploy` | nothing; it exits          |
+| `sf-booking-api-production`      | the HTTP API                     | `127.0.0.1:3001`           |
+| `sf-booking-worker-production`   | queues, sweeps and notifications | nothing; it serves no port |
+| `sf-booking-web-production`      | nginx serving the built bundle   | `127.0.0.1:8080`           |
+
+The `-production` suffix is `STACK_SUFFIX`, which defaults to `production`. It is what lets a
+second environment run on the same host; see [More than one environment](#more-than-one-environment).
+Every `docker exec` below assumes the default. For another environment, substitute its suffix.
 
 In front of them, on the host, is nginx: `infrastructure/nginx/booking.conf`. It terminates
 TLS, sends `/api` to the API container and everything else to the web container. It is the
@@ -545,3 +549,47 @@ would otherwise dominate the volume.
 
 The edge nginx logs separately, in `/var/log/nginx/booking.access.log`. A request that appears
 there and not in the API log never reached the API.
+
+---
+
+## More than one environment
+
+The stack is parameterized on a single variable, `STACK_SUFFIX`, which defaults to
+`production` so every command in this document works unchanged. It is substituted into the
+three things that are not otherwise unique per environment:
+
+- the compose **project name**, which is what scopes the named volumes
+- every **`container_name`**. These are global to the Docker daemon, so without the suffix a
+  second stack fails with `container name is already in use`
+- the **`env_file`** each container reads, so a stage deploy cannot be handed production's
+  secrets
+
+Ports are already variables (`API_PUBLISH_PORT`, `WEB_PUBLISH_PORT`), so an environment is one
+more env file plus one variable in it. For a stage environment, `booking-app/.env.stage`:
+
+```
+STACK_SUFFIX=stage
+API_PUBLISH_PORT=3011
+WEB_PUBLISH_PORT=8081
+```
+
+then the usual command against that file:
+
+```bash
+docker compose --env-file booking-app/.env.stage \
+               -f booking-app/docker-compose.prod.yml up -d --wait
+```
+
+`STACK_SUFFIX` has to be written **in the env file**, not only exported in the shell: compose
+resolves `${...}` from `--env-file`.
+
+The port map in use on the server:
+
+| Environment | Suffix       | API    | Web    |
+| ----------- | ------------ | ------ | ------ |
+| production  | `production` | `3001` | `8080` |
+| stage       | `stage`      | `3011` | `8081` |
+| dev         | `dev`        | `3021` | `8082` |
+
+Each environment gets its own Postgres and Redis inside its own project, and its own named
+volumes. `docker compose ... down -v` in one environment cannot reach another's data.
