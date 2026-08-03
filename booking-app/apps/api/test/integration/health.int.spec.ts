@@ -18,7 +18,7 @@ import { correlationMiddleware } from '../../src/common/correlation/correlation.
 import { buildLoggerParams } from '../../src/common/logging/logger.module.js';
 import { InFlightRequests } from '../../src/common/shutdown/inflight.js';
 import { ShutdownService } from '../../src/common/shutdown/shutdown.service.js';
-import { FixedClock } from '../../src/domain/time/clock.js';
+import { CLOCK, FixedClock, SystemClock } from '../../src/domain/time/clock.js';
 import { HealthController } from '../../src/health/health.controller.js';
 import { HealthModule } from '../../src/health/health.module.js';
 import { MigrationIndicator } from '../../src/health/migration.indicator.js';
@@ -515,7 +515,7 @@ describe('SIGTERM', () => {
   async function createListeningApp(): Promise<{ app: INestApplication; port: number }> {
     const moduleRef = await Test.createTestingModule({
       controllers: [SlowController],
-      providers: [InFlightRequests, ShutdownService],
+      providers: [InFlightRequests, ShutdownService, { provide: CLOCK, useClass: SystemClock }],
     }).compile();
 
     const app = moduleRef.createNestApplication();

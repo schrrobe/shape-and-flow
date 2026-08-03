@@ -4,6 +4,8 @@ import { HealthController } from './health.controller.js';
 
 describe('HealthController', () => {
   it('reports process liveness without dependencies', () => {
-    expect(new HealthController().live()).toEqual({ status: 'ok' });
+    const controller = Reflect.construct(HealthController, []) as HealthController;
+
+    expect(controller.live()).toEqual({ status: 'ok' });
   });
 });

@@ -120,30 +120,47 @@ export class RescheduleService {
     await this.assertPlausible(booking, employeeId, input.requestedStartsAt);
 
     try {
-      return await this.prisma.$transaction(async (tx) => {
-        const request = await tx.rescheduleRequest.create({
-          data: {
-            organizationId: booking.organizationId,
-            bookingId: booking.id,
-            requestedStartsAt: input.requestedStartsAt,
-            ...(input.requestedEmployeeId === undefined
-              ? {}
-              : { requestedEmployeeId: input.requestedEmployeeId }),
-            ...(input.reason === undefined ? {} : { reason: input.reason }),
-          },
-          select: { id: true },
-        });
+      return await withSerializationRetry(
+        () =>
+          this.prisma.$transaction(async (tx) => {
+            // The checks above ran outside any transaction. Re-read under the lock, or a
+            // booking cancelled — or started — in between still collects a PENDING
+            // request that blocks the next legitimate one and outlives its booking.
+            const locked = await this.lockBooking(tx, booking.id, booking.organizationId);
 
-        // A real notification row in this transaction, so the confirmation that the
-        // request arrived commits with the request itself.
-        await this.requestNotifications.queueRescheduleReceived(tx, {
-          requestId: request.id,
-          bookingId: booking.id,
-          requestedStartsAt: input.requestedStartsAt,
-        });
+            if (locked.status !== BookingStatus.CONFIRMED) {
+              throw notReschedulable(`A ${locked.status} booking cannot be rescheduled.`);
+            }
 
-        return { requestId: request.id };
-      });
+            if (locked.startsAt <= this.clock.now()) {
+              throw notReschedulable('This appointment has already started.');
+            }
+
+            const request = await tx.rescheduleRequest.create({
+              data: {
+                organizationId: booking.organizationId,
+                bookingId: booking.id,
+                requestedStartsAt: input.requestedStartsAt,
+                ...(input.requestedEmployeeId === undefined
+                  ? {}
+                  : { requestedEmployeeId: input.requestedEmployeeId }),
+                ...(input.reason === undefined ? {} : { reason: input.reason }),
+              },
+              select: { id: true },
+            });
+
+            // A real notification row in this transaction, so the confirmation that the
+            // request arrived commits with the request itself.
+            await this.requestNotifications.queueRescheduleReceived(tx, {
+              requestId: request.id,
+              bookingId: booking.id,
+              requestedStartsAt: input.requestedStartsAt,
+            });
+
+            return { requestId: request.id };
+          }),
+        'open-reschedule-request',
+      );
     } catch (error) {
       // The partial unique index allows one PENDING request per booking.
       if (isUniqueViolation(error, 'reschedule_requests_one_open')) {
@@ -167,8 +184,10 @@ export class RescheduleService {
   private async decideOnce(input: DecideRescheduleInput): Promise<{ newBookingId: string | null }> {
     // Read outside the transaction purely to learn which employees to lock. The values are
     // re-read under the lock before anything is written.
-    const request = await this.prisma.rescheduleRequest.findUnique({
-      where: { id: input.requestId },
+    const organizationId = this.organizations.getOrganizationId();
+
+    const request = await this.prisma.rescheduleRequest.findFirst({
+      where: { id: input.requestId, organizationId },
       select: {
         id: true,
         bookingId: true,
@@ -193,7 +212,7 @@ export class RescheduleService {
           // Both employees, sorted — see the note on withCalendarLock. With one employee
           // the set collapses to one lock.
           await withCalendarLock(tx, employeeIds, async () => {
-            const decision = await this.lockRequest(tx, input.requestId);
+            const decision = await this.lockRequest(tx, input.requestId, organizationId);
 
             if (input.decision === 'REJECTED') {
               await this.writeDecision(tx, input, null);
@@ -235,8 +254,10 @@ export class RescheduleService {
   ): Promise<string> {
     const now = this.clock.now();
 
-    const booking = await tx.booking.findUniqueOrThrow({
-      where: { id: request.bookingId },
+    // Scoped by the request's own organization rather than resolved from the booking id
+    // alone: the request was located by a caller-supplied id, and the two must agree.
+    const booking = await tx.booking.findFirstOrThrow({
+      where: { id: request.bookingId, organizationId: request.organizationId },
       select: RESCHEDULABLE,
     });
 
@@ -288,8 +309,8 @@ export class RescheduleService {
         confirmedAt: now,
         ...(booking.customerNote === null ? {} : { customerNote: booking.customerNote }),
         locale: booking.locale,
-        // The lineage link, which is how the payment on the original booking stays
-        // reachable from the replacement.
+        // The lineage link: which appointment this one replaced. An audit trail, not a
+        // lookup path — the payment itself is moved below.
         rescheduledFromBookingId: booking.id,
         // Copied, not chained. After two moves the charge would otherwise be two hops
         // away and every financial read a different length of walk; this keeps the
@@ -298,6 +319,17 @@ export class RescheduleService {
         financialRootBookingId: booking.financialRootBookingId ?? booking.id,
       },
       select: { id: true, endsAt: true },
+    });
+
+    // The money follows the appointment. `rescheduledFromBookingId` records where the
+    // replacement came from, but nothing reads payments through that link — so leaving the
+    // payment on the cancelled original means the replacement looks unpaid, and cancelling
+    // it later would compute a fee against zero and refund nothing. The refund rows stay
+    // where they are: a refund is something that happened to the earlier booking, and the
+    // balance that matters travels with the payment's own `refundedAmountCents`.
+    await tx.payment.updateMany({
+      where: { bookingId: booking.id, organizationId: booking.organizationId },
+      data: { bookingId: created.id },
     });
 
     assertTransition(booking.status, BookingStatus.CANCELED_BY_BUSINESS);
@@ -412,12 +444,42 @@ export class RescheduleService {
     };
   }
 
+  /**
+   * Lock the booking row and return what the decision has to be checked against.
+   *
+   * The organization is part of the predicate rather than checked on the result: a row
+   * belonging to another tenant must not be locked at all, and a `FOR UPDATE` that matches
+   * nothing is the same 404 as a booking that does not exist.
+   */
+  private async lockBooking(
+    tx: Prisma.TransactionClient,
+    bookingId: string,
+    organizationId: string,
+  ): Promise<{ status: BookingStatus; startsAt: Date }> {
+    const rows = await tx.$queryRaw<{ status: BookingStatus; starts_at: Date }[]>(
+      Prisma.sql`SELECT status, starts_at FROM bookings
+                 WHERE id = ${bookingId} AND organization_id = ${organizationId}
+                 FOR UPDATE`,
+    );
+
+    const row = rows[0];
+
+    if (row === undefined) {
+      throw new AppError('NOT_FOUND', { message: 'Booking not found.' });
+    }
+
+    return { status: row.status, startsAt: row.starts_at };
+  }
+
   private async lockRequest(
     tx: Prisma.TransactionClient,
     requestId: string,
+    organizationId: string,
   ): Promise<LockedRequest> {
     const rows = await tx.$queryRaw<{ decision: string }[]>(
-      Prisma.sql`SELECT decision FROM reschedule_requests WHERE id = ${requestId} FOR UPDATE`,
+      Prisma.sql`SELECT decision FROM reschedule_requests
+                 WHERE id = ${requestId} AND organization_id = ${organizationId}
+                 FOR UPDATE`,
     );
 
     if (rows[0] === undefined) {
@@ -430,8 +492,8 @@ export class RescheduleService {
       });
     }
 
-    return await tx.rescheduleRequest.findUniqueOrThrow({
-      where: { id: requestId },
+    return await tx.rescheduleRequest.findFirstOrThrow({
+      where: { id: requestId, organizationId },
       select: {
         id: true,
         organizationId: true,

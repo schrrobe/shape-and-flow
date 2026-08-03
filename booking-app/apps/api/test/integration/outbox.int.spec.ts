@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { FixedClock } from '../../src/domain/time/clock.js';
@@ -37,6 +38,10 @@ let clock: FixedClock;
 let enqueue: { enqueue: ReturnType<typeof vi.fn> };
 let dispatcher: OutboxDispatcher;
 let reconciler: OutboxReconciler;
+
+afterAll(async () => {
+  await disconnectRedis();
+});
 
 /**
  * Bookings for the same employee cannot overlap — `bookings_no_overlap` enforces
@@ -198,7 +203,7 @@ describe('dispatching', () => {
 
   it('leaves availableAt in the future alone, then claims it once it is due', async () => {
     const bookingId = await seedBooking();
-    await record(bookingId, { availableAt: new Date(Date.now() + 60_000) });
+    await record(bookingId, { availableAt: new Date(clock.now().getTime() + 60_000) });
 
     expect(await dispatcher.drainOnce()).toBe(0);
 
@@ -281,7 +286,7 @@ describe('dispatching', () => {
     const earlier = await seedBooking();
 
     await record(later);
-    await record(earlier, { availableAt: new Date(Date.now() - 60_000) });
+    await record(earlier, { availableAt: new Date(clock.now().getTime() - 60_000) });
 
     await dispatcher.drainOnce();
 
@@ -292,7 +297,7 @@ describe('dispatching', () => {
 describe('concurrency', () => {
   it('does not double-dispatch under two concurrent dispatchers', async () => {
     const bookingId = await seedBooking();
-    for (let i = 0; i < 20; i += 1) await record(bookingId);
+    for (let i = 0; i < 2 * OUTBOX_BATCH_SIZE; i += 1) await record(bookingId);
 
     const second = new OutboxDispatcher(db, enqueue as unknown as EnqueueService, clock);
     const [a, b] = await Promise.all([dispatcher.drainOnce(), second.drainOnce()]);
@@ -301,12 +306,12 @@ describe('concurrency', () => {
     // show: it rules out claiming without a lock, which would enqueue 40 times. It
     // cannot tell FOR UPDATE from FOR UPDATE SKIP LOCKED, because a blocking claim
     // would also end at 20 — that distinction is the next test's job.
-    expect(a + b).toBe(20);
-    expect(enqueue.enqueue).toHaveBeenCalledTimes(20);
+    expect(a + b).toBe(2 * OUTBOX_BATCH_SIZE);
+    expect(enqueue.enqueue).toHaveBeenCalledTimes(2 * OUTBOX_BATCH_SIZE);
     expect(await prisma.outboxEvent.count({ where: { dispatchedAt: null } })).toBe(0);
 
     const jobIds = enqueue.enqueue.mock.calls.map((call) => (call[2] as { jobId: string }).jobId);
-    expect(new Set(jobIds).size).toBe(20);
+    expect(new Set(jobIds).size).toBe(2 * OUTBOX_BATCH_SIZE);
   });
 
   it('skips a row another transaction holds, rather than waiting for it', async () => {
@@ -342,7 +347,7 @@ describe('concurrency', () => {
     );
 
     try {
-      await locked;
+      await Promise.race([locked, holder]);
 
       // Only the free row is claimable. If the claim blocked instead of skipping,
       // this would sit here until the drain's own transaction timeout fired.
@@ -411,6 +416,34 @@ describe('reconciling', () => {
     expect(health.stalled).toBe(0);
   });
 
+  it('does not use an exhausted row to calculate the oldest pending age', async () => {
+    const exhausted = await seedBooking();
+    const pending = await seedBooking();
+    await record(exhausted);
+    await record(pending);
+    await prisma.outboxEvent.updateMany({
+      where: { aggregateId: exhausted },
+      data: {
+        attempts: OUTBOX_MAX_ATTEMPTS,
+        createdAt: new Date(clock.now().getTime() - OUTBOX_STALLED_AFTER_MS - 60_000),
+      },
+    });
+
+    expect((await reconciler.health()).oldestPendingAgeSeconds).toBeLessThan(60);
+  });
+
+  it('logs the total stalled count while naming only a bounded sample', async () => {
+    const error = vi.spyOn(Logger.prototype, 'error');
+    const bookingId = await seedBooking();
+    for (let index = 0; index < 21; index += 1) await record(bookingId);
+    clock.set(new Date(clock.now().getTime() + OUTBOX_STALLED_AFTER_MS + 1));
+
+    await reconciler.reconcile();
+
+    expect(String(error.mock.calls.at(-1)?.[0])).toMatch(/^21 stalled outbox rows/);
+    error.mockRestore();
+  });
+
   it('prunes dispatched rows past the retention window and keeps the rest', async () => {
     const old = await seedBooking();
     const recent = await seedBooking();
@@ -458,10 +491,6 @@ describe('end to end, through the real queue', () => {
   // real EnqueueService and the real BullMQ queues.
   beforeEach(async () => {
     await resetQueues();
-  });
-
-  afterAll(async () => {
-    await disconnectRedis();
   });
 
   it('lands a recorded event on the queue its job maps to', async () => {

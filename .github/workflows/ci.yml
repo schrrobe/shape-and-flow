@@ -19,12 +19,23 @@ permissions:
 # pnpm's filter and --if-present semantics make its step a no-op that exits 0
 # rather than a red job, so CI stays green as the stages land and no later task
 # has to come back and edit this file.
+#
+# `pnpm install` runs the API's postinstall `prisma generate`, and prisma.config.ts
+# refuses to load without DATABASE_URL — so every job that installs needs one, even the
+# jobs that never touch a database. This value is deliberately a dead address: it lets
+# the schema resolve and would fail loudly rather than quietly reach something real. The
+# jobs that do use Postgres override it with their service container's URL.
+env:
+  DATABASE_URL: postgresql://ci:ci@127.0.0.1:1/unused?schema=public
+
 jobs:
   lint:
     name: Lint, format, typecheck and dead code
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/setup
       - run: pnpm lint
       - run: pnpm format
@@ -37,12 +48,13 @@ jobs:
     name: Unit tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/setup
-      - run: pnpm test
       - name: Unit tests with coverage
-        run: pnpm api test -- --coverage
-      - uses: actions/upload-artifact@v4
+        run: pnpm api test --coverage
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
           name: coverage
@@ -55,20 +67,20 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:17
+        image: postgres:17@sha256:a426e44bac0b759c95894d68e1a0ac03ecc20b619f498a91aae373bf06d8508d
         env:
           POSTGRES_USER: booking
           POSTGRES_PASSWORD: booking
           POSTGRES_DB: booking_test
-        ports: ['5432:5432']
+        ports: ["5432:5432"]
         options: >-
           --health-cmd "pg_isready -U booking -d booking_test"
           --health-interval 3s
           --health-timeout 3s
           --health-retries 15
       redis:
-        image: redis:7
-        ports: ['6379:6379']
+        image: redis:7@sha256:595cc6f2bb3af6e03347b90deb6123c6aa2c81dea05ce08128de8a174b6ac67b
+        ports: ["6379:6379"]
         options: >-
           --health-cmd "redis-cli ping"
           --health-interval 3s
@@ -77,9 +89,12 @@ jobs:
     env:
       NODE_ENV: test
       DATABASE_URL: postgresql://booking:booking@localhost:5432/booking_test?schema=public
+      TEST_DATABASE_URL: postgresql://booking:booking@localhost:5432/booking_test?schema=public
       REDIS_URL: redis://localhost:6379
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/setup
       - name: Apply migrations
         run: pnpm api prisma:migrate:deploy
@@ -91,20 +106,20 @@ jobs:
     needs: [integration]
     services:
       postgres:
-        image: postgres:17
+        image: postgres:17@sha256:a426e44bac0b759c95894d68e1a0ac03ecc20b619f498a91aae373bf06d8508d
         env:
           POSTGRES_USER: booking
           POSTGRES_PASSWORD: booking
           POSTGRES_DB: booking_test
-        ports: ['5432:5432']
+        ports: ["5432:5432"]
         options: >-
           --health-cmd "pg_isready -U booking -d booking_test"
           --health-interval 3s
           --health-timeout 3s
           --health-retries 15
       redis:
-        image: redis:7
-        ports: ['6379:6379']
+        image: redis:7@sha256:595cc6f2bb3af6e03347b90deb6123c6aa2c81dea05ce08128de8a174b6ac67b
+        ports: ["6379:6379"]
         options: >-
           --health-cmd "redis-cli ping"
           --health-interval 3s
@@ -122,7 +137,9 @@ jobs:
       E2E_DATABASE_URL: postgresql://booking:booking@localhost:5432/booking_test?schema=public
       E2E_REDIS_URL: redis://localhost:6379/1
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/setup
       - name: Install Playwright browsers
         run: pnpm web exec playwright install --with-deps chromium
@@ -130,7 +147,7 @@ jobs:
       # stack serves `dist`, not a dev server. Migrations are applied by the API's own
       # start command, so there is no separate step for them.
       - run: pnpm test:e2e
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: failure()
         with:
           name: playwright-report
@@ -150,7 +167,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: [lint, test]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/setup
       - run: pnpm build
 

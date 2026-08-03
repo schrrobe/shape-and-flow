@@ -52,7 +52,7 @@ COPY booking-app/apps/api booking-app/apps/api
 # tsc runs — not at container start, where a failure would be a crash loop instead of a
 # failed build.
 RUN pnpm --filter @shape-and-flow/booking-api exec prisma generate
-RUN pnpm -r --if-present build
+RUN pnpm --filter @shape-and-flow/booking-api... build
 
 # ── migrate ──────────────────────────────────────────────────────────────────
 #
@@ -107,9 +107,9 @@ COPY --from=build /repo/booking-app/packages/contracts/dist \
 COPY --from=build /repo/booking-app/packages/notification-templates/dist \
                   /repo/booking-app/packages/notification-templates/dist
 COPY --from=build /repo/booking-app/apps/api/dist /repo/booking-app/apps/api/dist
-# Migrations and the schema, so a release job can run `prisma migrate deploy` from the same
-# image that will serve the traffic. The CLI itself is a devDependency and deliberately
-# absent: a running container must not be able to migrate the database.
+# Migrations and the schema stay available for runtime diagnostics. The CLI itself is a
+# devDependency and deliberately absent: deployment migrations use the separate `migrate`
+# target above, while a container serving traffic cannot rewrite its own database.
 COPY --from=build /repo/booking-app/apps/api/prisma /repo/booking-app/apps/api/prisma
 
 WORKDIR /repo/booking-app/apps/api

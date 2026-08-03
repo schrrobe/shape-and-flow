@@ -113,7 +113,11 @@ export class BookingCheckoutService {
    * where it belongs: the hold exists from that moment, so its release has to as well.
    */
   private async attach(booking: Booking, sessionId: string): Promise<void> {
-    const organizationId = this.organizations.getOrganizationId();
+    // From the booking, not from the request context. The two must agree, and nothing here
+    // checks that they do — so if the ambient context ever resolved a different
+    // organization, the payment and outbox rows would land under the wrong tenant while
+    // the booking row stayed under the right one.
+    const { organizationId } = booking;
 
     await withSerializationRetry(
       () =>

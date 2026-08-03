@@ -88,6 +88,23 @@ describe('SfInput', () => {
 });
 
 describe('SfTextarea', () => {
+  it('describes the field with hint, error, and counter in that order', () => {
+    const wrapper = mount(SfTextarea, {
+      props: {
+        modelValue: 'abc',
+        label: 'Notiz',
+        description: 'hint',
+        error: 'wrong',
+        maxlength: 500,
+      },
+    });
+
+    const describedBy = wrapper.get('textarea').attributes('aria-describedby')?.split(' ') ?? [];
+    const ids = wrapper.findAll('p').map((paragraph) => paragraph.attributes('id'));
+
+    expect(describedBy).toEqual(ids);
+  });
+
   it('announces the counter only when the limit is close', () => {
     const far = mount(SfTextarea, {
       props: { modelValue: 'x', label: 'Notiz', maxlength: 500 },
@@ -112,6 +129,23 @@ describe('SfTextarea', () => {
 });
 
 describe('SfSelect', () => {
+  it('describes the field with its hint and its error, in that order', () => {
+    const wrapper = mount(SfSelect, {
+      props: {
+        modelValue: 'a',
+        label: 'Sprache',
+        options: [{ value: 'a', label: 'A' }],
+        description: 'hint',
+        error: 'wrong',
+      },
+    });
+
+    const describedBy = wrapper.get('select').attributes('aria-describedby')?.split(' ') ?? [];
+    const ids = wrapper.findAll('p').map((paragraph) => paragraph.attributes('id'));
+
+    expect(describedBy).toEqual(ids);
+  });
+
   it('links its label and emits the chosen value', async () => {
     const wrapper = mount(SfSelect, {
       props: {
@@ -200,6 +234,23 @@ function dialog(): HTMLElement {
 }
 
 describe('SfModal', () => {
+  it('moves focus inside when mounted already open', async () => {
+    const trigger = document.createElement('button');
+    document.body.append(trigger);
+    trigger.focus();
+
+    const wrapper = mount(SfModal, {
+      props: { open: true, title: 'x' },
+      attachTo: document.body,
+    });
+    await flushPromises();
+
+    expect(dialog().contains(document.activeElement)).toBe(true);
+
+    wrapper.unmount();
+    trigger.remove();
+  });
+
   it('is a labelled modal dialog', () => {
     const wrapper = mount(SfModal, {
       props: { open: true, title: 'Termin stornieren?' },

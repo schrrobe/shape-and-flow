@@ -90,7 +90,7 @@ const PROVIDER_STATUS: Record<RefundStatusValue, RefundStatus> = {
  * Moves money out exactly once.
  *
  * Three separate things can each try to settle the same refund: the API response, a
- * `charge.refunded` webhook that may arrive *before* it, and a later `refund.updated`.
+ * `refund.created` webhook that may arrive *before* it, and a later `refund.updated`.
  * They can arrive in any order and any of them can be repeated. So settlement is written
  * in exactly one place — `applySettlement` — and everything else routes through it.
  *
@@ -275,6 +275,7 @@ export class RefundService {
       where: { id: refundId },
       select: {
         id: true,
+        organizationId: true,
         status: true,
         amountCents: true,
         currency: true,
@@ -308,7 +309,10 @@ export class RefundService {
       return 'FAILED';
     }
 
-    const organization = this.organizations.get();
+    // The refund's own organization, not whatever bootstrap resolved. This runs in a
+    // worker with no request behind it, and the account this call goes to decides whose
+    // money moves.
+    const organization = this.organizations.require(refund.organizationId);
 
     try {
       const result = await this.payments.createRefund(
@@ -353,8 +357,8 @@ export class RefundService {
    * Apply what a webhook says about a refund.
    *
    * Matched by the provider's refund id, falling back to our idempotency key — which is
-   * the only handle available when `charge.refunded` arrives before the API response has
-   * told us the provider's id.
+   * the only handle available when `refund.created` arrives before the API response has
+   * told us the provider's id. The key travels there in the refund's Stripe metadata.
    */
   async applyProviderUpdate(input: ProviderUpdate): Promise<void> {
     const refund = await this.prisma.refund.findFirst({
@@ -397,52 +401,59 @@ export class RefundService {
   }): Promise<void> {
     await withSerializationRetry(
       () =>
-        this.prisma.$transaction(async (tx) => {
-          const locked = await tx.$queryRaw<{ status: RefundStatus }[]>(
-            Prisma.sql`SELECT status FROM refunds WHERE id = ${input.refundId} FOR UPDATE`,
-          );
+        this.prisma.$transaction(
+          async (tx) => {
+            const locked = await tx.$queryRaw<{ status: RefundStatus }[]>(
+              Prisma.sql`SELECT status FROM refunds WHERE id = ${input.refundId} FOR UPDATE`,
+            );
 
-          const current = locked[0]?.status;
-          if (current === undefined) return;
+            const current = locked[0]?.status;
+            if (current === undefined) return;
 
-          if (!OPEN_REFUND_STATUSES.includes(current)) {
-            if (current !== input.status) {
-              this.logger.warn(
-                `refusing to move refund ${input.refundId} from ${current} to ${input.status}`,
-              );
+            if (!OPEN_REFUND_STATUSES.includes(current)) {
+              if (current !== input.status) {
+                this.logger.warn(
+                  `refusing to move refund ${input.refundId} from ${current} to ${input.status}`,
+                );
+              }
+              return;
             }
-            return;
-          }
 
-          const settledAt = input.status === RefundStatus.PENDING ? null : this.clock.now();
+            const settledAt = input.status === RefundStatus.PENDING ? null : this.clock.now();
 
-          const refund = await tx.refund.update({
-            where: { id: input.refundId },
-            data: {
-              status: input.status,
-              ...(input.stripeRefundId === undefined
-                ? {}
-                : { stripeRefundId: input.stripeRefundId }),
-              ...(input.failureReason === undefined
-                ? {}
-                : { failureReason: input.failureReason.slice(0, 1000) }),
-              ...(settledAt === null ? {} : { settledAt }),
-            },
-            select: { id: true, bookingId: true, paymentId: true, organizationId: true },
-          });
-
-          await this.recomputePaymentTotals(tx, refund.paymentId);
-
-          if (input.status === RefundStatus.SUCCEEDED) {
-            await this.outbox.record(tx, {
-              organizationId: refund.organizationId,
-              aggregateType: 'Refund',
-              aggregateId: refund.id,
-              eventType: JOB.REFUND_SUCCEEDED,
-              payload: { organizationId: refund.organizationId, refundId: refund.id },
+            const refund = await tx.refund.update({
+              where: { id: input.refundId },
+              data: {
+                status: input.status,
+                ...(input.stripeRefundId === undefined
+                  ? {}
+                  : { stripeRefundId: input.stripeRefundId }),
+                ...(input.failureReason === undefined
+                  ? {}
+                  : { failureReason: input.failureReason.slice(0, 1000) }),
+                ...(settledAt === null ? {} : { settledAt }),
+              },
+              select: { id: true, bookingId: true, paymentId: true, organizationId: true },
             });
-          }
-        }),
+
+            await this.recomputePaymentTotals(tx, refund.paymentId);
+
+            if (input.status === RefundStatus.SUCCEEDED) {
+              await this.outbox.record(tx, {
+                organizationId: refund.organizationId,
+                aggregateType: 'Refund',
+                aggregateId: refund.id,
+                eventType: JOB.REFUND_SUCCEEDED,
+                payload: { organizationId: refund.organizationId, refundId: refund.id },
+              });
+            }
+          },
+          // Explicit, not Prisma's 5 s timeout and 2 s max wait. This waits on `FOR UPDATE`
+          // and then does an update, an aggregate and an outbox write — and a timeout is not
+          // a serialization failure, so `withSerializationRetry` would not retry it. Under
+          // refund contention the default budget loses the settlement for that delivery.
+          { isolationLevel: 'ReadCommitted', timeout: 15_000, maxWait: 10_000 },
+        ),
       'apply-refund-settlement',
     );
   }
@@ -457,16 +468,18 @@ export class RefundService {
     tx: Prisma.TransactionClient,
     paymentId: string,
   ): Promise<void> {
-    const [payment, sum] = await Promise.all([
-      tx.payment.findUniqueOrThrow({
-        where: { id: paymentId },
-        select: { amountCents: true, status: true },
-      }),
-      tx.refund.aggregate({
-        where: { paymentId, status: RefundStatus.SUCCEEDED },
-        _sum: { amountCents: true },
-      }),
-    ]);
+    // Sequential, not `Promise.all`. Every query on a transaction client runs on the one
+    // connection the transaction holds, so these would be serialised anyway — the parallel
+    // form buys nothing and only reads as though it did.
+    const payment = await tx.payment.findUniqueOrThrow({
+      where: { id: paymentId },
+      select: { amountCents: true, status: true },
+    });
+
+    const sum = await tx.refund.aggregate({
+      where: { paymentId, status: RefundStatus.SUCCEEDED },
+      _sum: { amountCents: true },
+    });
 
     const refunded = sum._sum.amountCents ?? 0;
 

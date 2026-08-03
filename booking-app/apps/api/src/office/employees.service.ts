@@ -98,7 +98,7 @@ export class EmployeesService {
     await this.load(id);
 
     const employee = await this.prisma.employee.update({
-      where: { id },
+      where: { id, organizationId: this.organizationId() },
       data: {
         ...optional('firstName', patch.firstName),
         ...optional('lastName', patch.lastName),
@@ -144,7 +144,7 @@ export class EmployeesService {
 
     return toDto(
       await this.prisma.employee.update({
-        where: { id },
+        where: { id, organizationId: this.organizationId() },
         data: { archivedAt: this.clock.now() },
       }),
     );
@@ -208,18 +208,10 @@ export class EmployeesService {
       return created;
     });
 
-    const conflicts = await this.conflictsAfterScheduleChange(employeeId, {
+    const conflicts = await this.conflictsAfterScheduleChange(
       employeeId,
-      workingHours: body.segments.map((segment) => ({
-        weekday: segment.weekday,
-        startMinute: segment.startMinute,
-        endMinute: segment.endMinute,
-        breaks: segment.breaks,
-      })),
-      exceptions: [],
-      timeOffDates: [],
-      busy: [],
-    });
+      await this.snapshotOf(employeeId),
+    );
 
     return { segments, conflictingBookings: conflicts };
   }

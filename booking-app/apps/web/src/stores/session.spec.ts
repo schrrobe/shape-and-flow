@@ -31,6 +31,14 @@ let calls: string[] = [];
 /** Queued answers, one per request; a missing entry is a test that under-specified. */
 let answers: (() => Response | Promise<Response>)[] = [];
 
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
 beforeEach(() => {
   setActivePinia(createPinia());
   calls = [];
@@ -110,6 +118,34 @@ describe('session store', () => {
 
     // A cached promise that outlived its request would make a sign-out invisible.
     expect(calls).toHaveLength(2);
+  });
+
+  it('does not let an older hydrate undo markExpired', async () => {
+    const pending = deferred<Response>();
+    answers = [() => pending.promise];
+    const store = useSession();
+
+    const hydration = store.hydrate();
+    store.markExpired('/office/bookings');
+    pending.resolve(json({ user: officeUser() }));
+    await hydration;
+
+    expect(store.user).toBeNull();
+    expect(store.expired).toBe(true);
+  });
+
+  it('does not let an older hydrate restore a user after logout', async () => {
+    const pending = deferred<Response>();
+    answers = [() => pending.promise, () => new Response(null, { status: 204 })];
+    const store = useSession();
+
+    const hydration = store.hydrate();
+    await store.logout();
+    pending.resolve(json({ user: officeUser() }));
+    await hydration;
+
+    expect(store.user).toBeNull();
+    expect(store.isAuthenticated).toBe(false);
   });
 
   it('mirrors §10.5 for an admin', () => {

@@ -4,8 +4,9 @@ import { describe, expect, it } from 'vitest';
 import { ZodObject, z } from 'zod';
 
 import { ERROR_STATUS, errorCodeSchema, isPublicErrorCode } from './errors.js';
+import { blockedTimeListQuerySchema, closedDayListQuerySchema } from './office/staff.js';
 import { cursorPageSchema, cursorQuerySchema } from './pagination.js';
-import { localDateSchema, moneySchema } from './primitives.js';
+import { boundedInt, cuidSchema, localDateSchema, moneySchema } from './primitives.js';
 
 import * as contracts from './index.js';
 
@@ -66,6 +67,14 @@ describe('primitives', () => {
     expect(moneySchema.safeParse({ amountCents: -4500, currency: 'EUR' }).success).toBe(true);
     expect(moneySchema.safeParse({ amountCents: 45.5, currency: 'EUR' }).success).toBe(false);
     expect(moneySchema.safeParse({ amountCents: 4500, currency: 'EURO' }).success).toBe(false);
+    for (const currency of ['eur', 'EU1', '€UR']) {
+      expect(moneySchema.safeParse({ amountCents: 4500, currency }).success, currency).toBe(false);
+    }
+  });
+
+  it('accepts Prisma cuid v1 identifiers and rejects generic alphanumeric strings', () => {
+    expect(cuidSchema.safeParse('cms9gryv30000ja32145w5gke').success).toBe(true);
+    expect(cuidSchema.safeParse('1234567890abcdefghijklmn').success).toBe(false);
   });
 
   it('accepts a real local date and rejects a malformed or impossible one', () => {
@@ -85,6 +94,27 @@ describe('primitives', () => {
     expect(contracts.idempotencyKeySchema.safeParse(randomUUID()).success).toBe(true);
     expect(contracts.idempotencyKeySchema.safeParse('anna@example.com').success).toBe(false);
   });
+
+  it('builds a reusable bounded integer schema', () => {
+    const schema = boundedInt({ min: 2, max: 4 });
+
+    expect(schema.safeParse(2).success).toBe(true);
+    expect(schema.safeParse(4).success).toBe(true);
+    expect(schema.safeParse(1).success).toBe(false);
+    expect(schema.safeParse(5).success).toBe(false);
+    expect(schema.safeParse(2.5).success).toBe(false);
+  });
+});
+
+describe('office list ranges', () => {
+  it.each([blockedTimeListQuerySchema, closedDayListQuerySchema])(
+    'rejects inverted and longer-than-calendar ranges',
+    (schema) => {
+      expect(schema.safeParse({ from: '2026-03-02', to: '2026-03-01' }).success).toBe(false);
+      expect(schema.safeParse({ from: '2026-01-01', to: '2026-03-04' }).success).toBe(false);
+      expect(schema.safeParse({ from: '2026-01-01', to: '2026-03-03' }).success).toBe(true);
+    },
+  );
 });
 
 describe('pagination', () => {

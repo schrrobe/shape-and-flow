@@ -13,6 +13,7 @@ import { api } from '../../api/client.js';
 import { useFocusStep } from '../../composables/useFocusStep.js';
 import { addDays } from '../../composables/useLocalDate.js';
 import { dateTime, localDateLabel, today } from '../../office/format.js';
+import { officeMessage } from '../../office/messages.js';
 import { blockingBookingCount, useCrudResource } from '../../office/useCrudResource.js';
 import { useSession } from '../../stores/session.js';
 
@@ -45,6 +46,7 @@ const from = ref(today());
 const to = computed(() => addDays(from.value, RANGE_DAYS));
 
 const employees = ref<OfficeEmployee[]>([]);
+const employeesError = ref<string | null>(null);
 
 const blocked = useCrudResource<BlockedTime>(
   () => api.office.availability.blockedTimes({ from: from.value, to: to.value }),
@@ -81,14 +83,23 @@ function instantOf(date: string, wallClock: string): string {
 }
 
 async function loadEmployees(): Promise<void> {
-  const response = await api.office.employees.list(false);
-  employees.value = response.items;
+  employeesError.value = null;
 
-  const own = session.employeeId;
-  const first = response.items[0]?.id ?? '';
+  try {
+    const response = await api.office.employees.list(false);
+    employees.value = response.items;
 
-  blockForm.value.employeeId = own ?? first;
-  leaveForm.value.employeeId = own ?? first;
+    const own = session.employeeId;
+    const first = response.items[0]?.id ?? '';
+
+    blockForm.value.employeeId = own ?? first;
+    leaveForm.value.employeeId = own ?? first;
+  } catch (caught) {
+    // Reported the way every other screen in this area reports a load failure. Rethrowing
+    // out of `onMounted` would reject a promise nobody awaits, and the three lists below
+    // would stay empty with no explanation on the page at all.
+    employeesError.value = officeMessage(caught);
+  }
 }
 
 async function reloadAll(): Promise<void> {
@@ -139,6 +150,9 @@ const nameOf = (employeeId: string): string =>
   employees.value.find((employee) => employee.id === employeeId)?.displayName ?? employeeId;
 
 onMounted(async () => {
+  // Sequential, and the lists load whatever the employee call did: the picker needs the
+  // names, but the three lists below do not, and a failed picker must not leave the whole
+  // screen blank.
   await loadEmployees();
   await reloadAll();
 });
@@ -153,6 +167,10 @@ onMounted(async () => {
     <p class="text-text-secondary">
       Showing {{ localDateLabel(from) }} to {{ localDateLabel(to) }}.
     </p>
+
+    <SfAlert v-if="employeesError !== null" tone="danger" data-test="employees-error">
+      {{ employeesError }} The lists below still load, but the person pickers are empty.
+    </SfAlert>
 
     <SfCard as="section" aria-labelledby="blocked-heading">
       <h2 id="blocked-heading" class="text-lg font-medium">Blocked time</h2>

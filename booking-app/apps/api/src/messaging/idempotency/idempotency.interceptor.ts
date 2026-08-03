@@ -69,10 +69,10 @@ export class IdempotencyInterceptor implements NestInterceptor {
 
     const key = readKey(request);
 
-    // Hashed from the parsed body, before validation has narrowed it. That is the
-    // right input: two identical retries send identical bytes, and the canonical form
-    // already ignores what carries no meaning.
-    const requestHash = canonicalRequestHash(request.body);
+    // Hashed from the parsed body and route target, before validation has narrowed them.
+    // The params matter: canceling two bookings with the same reason is not the same
+    // operation, and one key must never replay the first booking's response for the second.
+    const requestHash = canonicalRequestHash(request.body, request.params);
 
     const begun = await this.idempotency.begin(key, scope, requestHash);
 
@@ -101,6 +101,11 @@ export class IdempotencyInterceptor implements NestInterceptor {
     const statusCode = this.successStatus(context, request);
 
     return next.handle().pipe(
+      catchError((error: unknown) =>
+        // Nothing is stored when the handler fails. A stored 500 would replay
+        // forever and the client's retry would never actually retry.
+        from(this.idempotency.abandon(key)).pipe(concatMap(() => throwError(() => error))),
+      ),
       // concatMap rather than tap: the snapshot has to be committed before the
       // response is emitted, or a client fast enough to retry could be told the
       // attempt is still in progress after it has actually finished.
@@ -111,11 +116,6 @@ export class IdempotencyInterceptor implements NestInterceptor {
         });
         return body;
       }),
-      catchError((error: unknown) =>
-        // Nothing is stored on failure. A stored 500 would replay forever and the
-        // client's retry would never actually retry.
-        from(this.idempotency.abandon(key)).pipe(concatMap(() => throwError(() => error))),
-      ),
     );
   }
 
@@ -140,6 +140,6 @@ export class IdempotencyInterceptor implements NestInterceptor {
 function bookingIdOf(body: unknown): { bookingId?: string } {
   if (body === null || typeof body !== 'object') return {};
 
-  const candidate = (body as { bookingId?: unknown; id?: unknown }).bookingId;
+  const candidate = (body as { bookingId?: unknown }).bookingId;
   return typeof candidate === 'string' ? { bookingId: candidate } : {};
 }

@@ -1,3 +1,4 @@
+import { AppError } from '../../common/errors/app-error.js';
 import { Money } from '../money/money.js';
 
 /**
@@ -27,5 +28,11 @@ export function resolveEffectivePrice(
   // employee performs free of charge — and `||` would silently fall back to the
   // list price.
   const cents = link?.priceOverrideCents ?? service.priceCents;
+  if (cents < 0) {
+    throw new AppError('INVALID_MONEY', {
+      status: 500,
+      message: `Service prices must be non-negative, received ${String(cents)} cents.`,
+    });
+  }
   return Money.fromCents(cents, service.currency);
 }

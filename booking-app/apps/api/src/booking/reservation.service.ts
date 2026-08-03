@@ -25,7 +25,7 @@ import { AvailabilitySnapshotService } from '../public/availability-snapshot.ser
 import { generateBookingReference } from './booking-reference.js';
 import { BLOCKING_BOOKING_STATUSES, assertTransition } from './booking-status.machine.js';
 import { withCalendarLock } from './calendar-lock.js';
-import { CustomerUpsertService } from './customer-upsert.service.js';
+import { CUSTOMER_EMAIL_CONSTRAINT, CustomerUpsertService } from './customer-upsert.service.js';
 
 import type { CustomerInput } from './customer-upsert.service.js';
 import type { AvailabilitySnapshot } from '../domain/availability/types.js';
@@ -361,7 +361,7 @@ export class ReservationService {
   private async loadEffectiveAssignment(
     tx: Prisma.TransactionClient,
     input: { organizationId: string; serviceId: string; employeeId: string; actor: ReserveActor },
-  ): Promise<{ employee: { id: string; displayName: string }; price: Money }> {
+  ): Promise<{ employee: { id: string; displayName: string }; serviceName: string; price: Money }> {
     const assignment = await tx.employeeService.findFirst({
       where: {
         organizationId: input.organizationId,
@@ -376,7 +376,7 @@ export class ReservationService {
       select: {
         priceOverrideCents: true,
         employee: { select: { id: true, displayName: true } },
-        service: { select: { priceCents: true, currency: true } },
+        service: { select: { name: true, priceCents: true, currency: true } },
       },
     });
 
@@ -386,6 +386,7 @@ export class ReservationService {
 
     return {
       employee: assignment.employee,
+      serviceName: assignment.service.name,
       price: resolveEffectivePrice(assignment.service, assignment),
     };
   }
@@ -462,6 +463,18 @@ export class ReservationService {
           continue;
         }
 
+        // Two first-time bookings for the same new email address, at the same moment: both
+        // customer upserts read no row and both insert, and one loses. Retried here for the
+        // same reason as a reference collision, and it has to be *here* — the losing
+        // statement has already aborted the transaction, so nothing inside it can re-read
+        // the row the winner committed. The next attempt starts clean and finds it.
+        if (isUniqueViolation(error, CUSTOMER_EMAIL_CONSTRAINT) && attempt < REFERENCE_ATTEMPTS) {
+          this.logger.warn(
+            `concurrent first booking for the same customer; retrying (attempt ${String(attempt)})`,
+          );
+          continue;
+        }
+
         // The constraint fired, which means another transaction won the slot between the
         // re-check and the insert. A 409 is the honest answer; a 500 would be a lie.
         if (isExclusionViolation(error, 'bookings_no_overlap')) {
@@ -507,7 +520,7 @@ export class ReservationService {
             });
           }
 
-          const { employee, price } = await this.loadEffectiveAssignment(tx, {
+          const { employee, serviceName, price } = await this.loadEffectiveAssignment(tx, {
             organizationId,
             serviceId: service.id,
             employeeId,
@@ -547,7 +560,7 @@ export class ReservationService {
               endsAt,
               blockStartsAt,
               blockEndsAt,
-              serviceNameSnapshot: service.name,
+              serviceNameSnapshot: serviceName,
               durationMinutesSnapshot: snapshot.service.durationMinutes,
               prepBufferMinutesSnapshot: snapshot.service.prepBufferMinutes,
               cleanupBufferMinutesSnapshot: snapshot.service.cleanupBufferMinutes,

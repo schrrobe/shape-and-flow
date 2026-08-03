@@ -30,10 +30,10 @@ import { ReservationService } from './reservation.service.js';
  * sits under that path, because everything it calls lives here. The alternative is two
  * mutually dependent modules and a payment provider in every catalog test.
  *
- * NotificationModule is imported for `RequestNotificationService`, and only in this
- * direction: NotificationModule imports nothing, which is what keeps the two from
- * becoming a cycle. Cancelling and rescheduling compose customer-facing messages in
- * the transaction that decides the request, so the message and the decision commit
+ * NotificationModule is imported for `RequestNotificationService`. PaymentModule imports
+ * neither NotificationModule nor BookingModule, which is what keeps these dependencies
+ * from becoming a cycle. Cancelling and rescheduling compose customer-facing messages
+ * in the transaction that decides the request, so the message and the decision commit
  * together.
  */
 @Module({

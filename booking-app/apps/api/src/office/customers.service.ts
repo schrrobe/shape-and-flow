@@ -55,10 +55,12 @@ export class CustomersService {
     const rows = await this.prisma.customer.findMany({
       where: {
         organizationId: this.organizationId(),
-        ...search(query.q),
-        ...(query.cursor === undefined
-          ? {}
-          : keysetWhere('createdAt', 'desc', decodeCursor(query.cursor))),
+        AND: [
+          search(query.q),
+          ...(query.cursor === undefined
+            ? []
+            : [keysetWhere('createdAt', 'desc', decodeCursor(query.cursor))]),
+        ],
       },
       orderBy: keysetOrderBy('createdAt', 'desc'),
       take: query.limit + 1,

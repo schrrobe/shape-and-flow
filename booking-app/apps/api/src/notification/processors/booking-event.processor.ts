@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 
 import { withSerializationRetry } from '../../common/prisma-errors/serialization-retry.js';
 import { Money } from '../../domain/money/money.js';
-import { receivedFrom, refundedFrom } from '../../office/received.js';
+import { receivedFrom } from '../../office/received.js';
 import { OrganizationContextService } from '../../organization/organization-context.service.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import { BookingNotificationData } from '../booking-notification-data.service.js';
@@ -71,8 +71,10 @@ export class BookingEventProcessor {
 
           // SMS only when the business has turned it on and the customer gave a number.
           // Sending to a missing number is a provider error; sending when it is switched
-          // off is a bill the business did not agree to.
-          if (settings.smsRemindersEnabled && booking.customer.phone !== null) {
+          // off is a bill the business did not agree to. Gated on
+          // `smsConfirmationsEnabled` rather than the reminder flag: those are two
+          // decisions, and a business may want either one without the other.
+          if (settings.smsConfirmationsEnabled && booking.customer.phone !== null) {
             await this.notifications.queue(tx, {
               organizationId: booking.organizationId,
               kind: 'BOOKING_CONFIRMATION',
@@ -138,7 +140,7 @@ export class BookingEventProcessor {
     if (booking === null) return;
 
     const byBusiness = booking.status === 'CANCELED_BY_BUSINESS';
-    const refunded = refundedFrom(booking.financials, booking.currency);
+    const refunded = this.promisedRefunds(booking);
 
     await withSerializationRetry(
       () =>
@@ -156,7 +158,9 @@ export class BookingEventProcessor {
               customerId: booking.customer.id,
               data: {
                 ...appointment,
-                reason: 'siehe Nachricht',
+                // A code, resolved by the template in the customer's locale. A German
+                // sentence here would reach an English-speaking customer untranslated.
+                reasonCode: 'SEE_MESSAGE',
                 refundedCents: refunded.amountCents,
               },
             });
@@ -281,7 +285,7 @@ export class BookingEventProcessor {
             customerId: booking.customer.id,
             data: {
               ...this.data.appointmentData(booking),
-              reason: 'Die Zahlung konnte nicht abgeschlossen werden',
+              reasonCode: 'PAYMENT_FAILED',
               refundedCents: 0,
             },
           });
@@ -300,5 +304,15 @@ export class BookingEventProcessor {
    */
   private paidTotal(booking: BookingRow): Money {
     return receivedFrom(booking.financials, booking.currency);
+  }
+
+  /** Money already returned or reserved as part of the cancellation promise. */
+  private promisedRefunds(booking: BookingRow): Money {
+    return Money.sum(
+      booking.financials.refunds
+        .filter((refund) => refund.status === 'PENDING' || refund.status === 'SUCCEEDED')
+        .map((refund) => Money.fromCents(refund.amountCents, booking.currency)),
+      booking.currency,
+    );
   }
 }

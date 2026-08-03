@@ -212,7 +212,7 @@ export function makeBooking(
   overrides: BookingOverrides = {},
 ): Prisma.BookingUncheckedCreateInput {
   const status = overrides.status ?? BookingStatus.PENDING_PAYMENT;
-  const startsAt = overrides.startsAt ?? SLOT_FRIDAY_0900;
+  const startsAt = overrides.startsAt ?? overrides.blockStartsAt ?? SLOT_FRIDAY_0900;
   const durationMs = 30 * 60_000;
   const endsAt = new Date(startsAt.getTime() + durationMs);
 

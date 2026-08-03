@@ -94,6 +94,7 @@
     "cancelReason": "Grund (optional)",
     "canceledTitle": "Termin storniert",
     "canceledBody": "Sie erhalten {amount} zurück. Die Rückzahlung dauert je nach Bank einige Tage.",
+    "canceledBodyRefundPending": "Ihr Termin ist storniert. Sobald die Höhe der Rückzahlung feststeht, melden wir uns per E-Mail.",
     "requestedTitle": "Anfrage eingegangen",
     "requestedBody": "Wir prüfen Ihre Anfrage und melden uns per E-Mail.",
     "rescheduleTitle": "Termin verschieben",

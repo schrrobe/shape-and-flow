@@ -146,7 +146,11 @@ export class ExpiryService {
       return await this.release(bookingId, 'no checkout session');
     }
 
-    const organization = this.organizations.get();
+    // Resolved from the booking's own organization rather than from ambient context. A
+    // worker has no request to resolve a tenant from, and expiring a session against the
+    // wrong Stripe account is not a mistake Stripe can undo.
+    const organization = this.organizations.require(booking.organizationId);
+
     const result = await this.payments.expireCheckoutSession(
       {
         organizationId: organization.id,
@@ -162,7 +166,11 @@ export class ExpiryService {
     // The customer paid while this job was in flight. Modelled as a result rather than
     // an error precisely so this branch is explicit.
     if (result.paymentStatus === 'paid') {
-      return await this.confirmInstead(bookingId, booking.stripeCheckoutSessionId);
+      return await this.confirmInstead(
+        bookingId,
+        booking.stripeCheckoutSessionId,
+        booking.organizationId,
+      );
     }
 
     // Complete but not paid: an asynchronous payment method slipped past the card-only
@@ -227,8 +235,12 @@ export class ExpiryService {
    * Delegated to the same confirmation service the webhook uses, so both paths produce
    * one payment, one management token and one history row no matter which arrives first.
    */
-  private async confirmInstead(bookingId: string, sessionId: string): Promise<'CONFIRMED'> {
-    const organization = this.organizations.get();
+  private async confirmInstead(
+    bookingId: string,
+    sessionId: string,
+    organizationId: string,
+  ): Promise<'CONFIRMED'> {
+    const organization = this.organizations.require(organizationId);
 
     const session = await this.payments.retrieveCheckoutSession(
       {
@@ -251,6 +263,10 @@ export class ExpiryService {
       ...(session.paymentMethodType === undefined
         ? {}
         : { paymentMethodType: session.paymentMethodType }),
+      // Discovery time, not settlement time. A retrieved Checkout Session carries no
+      // timestamp for when the payment cleared — its `created` is when the session was
+      // opened, which is before payment — so there is nothing more accurate to use here.
+      // The webhook path, which does see the event's own timestamp, uses that instead.
       paidAt: this.clock.now(),
       cause: { kind: 'EXPIRY_SAGA', reference: sessionId },
     });

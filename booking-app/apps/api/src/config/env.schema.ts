@@ -1,3 +1,5 @@
+import { writeSync } from 'node:fs';
+
 import { z } from 'zod';
 
 /**
@@ -9,6 +11,28 @@ import { z } from 'zod';
  */
 
 const nonEmpty = z.string().trim().min(1);
+
+const httpOrigin = z
+  .url()
+  .refine(
+    (value) => {
+      try {
+        const url = new URL(value);
+        return (
+          (url.protocol === 'http:' || url.protocol === 'https:') &&
+          url.pathname === '/' &&
+          url.search === '' &&
+          url.hash === '' &&
+          url.username === '' &&
+          url.password === ''
+        );
+      } catch {
+        return false;
+      }
+    },
+    { message: 'must be a bare HTTP(S) origin, for example https://app.example.com' },
+  )
+  .transform((value) => new URL(value).origin);
 
 /** Accepts the strings an env file can hold and yields a real boolean. */
 const booleanFromString = z
@@ -43,6 +67,7 @@ export const envSchema = z
       (value) => value.startsWith('postgresql://') || value.startsWith('postgres://'),
       { message: 'DATABASE_URL must be a postgresql:// connection string' },
     ),
+    DATABASE_POOL_SIZE: z.coerce.number().int().min(1).max(100).default(10),
     REDIS_URL: nonEmpty.refine(
       (value) => value.startsWith('redis://') || value.startsWith('rediss://'),
       { message: 'REDIS_URL must be a redis:// connection string' },
@@ -61,8 +86,8 @@ export const envSchema = z
     DEFAULT_ORGANIZATION_SLUG: nonEmpty,
 
     // ── web origins ──────────────────────────────────────────────────────────
-    PUBLIC_WEB_ORIGIN: z.url(),
-    PUBLIC_API_ORIGIN: z.url(),
+    PUBLIC_WEB_ORIGIN: httpOrigin,
+    PUBLIC_API_ORIGIN: httpOrigin,
 
     // ── payments ─────────────────────────────────────────────────────────────
     PAYMENT_PROVIDER: z.enum(['fake', 'stripe']).default('fake'),
@@ -96,8 +121,18 @@ export const envSchema = z
     WORKER_CONCURRENCY: z.coerce.number().int().min(1).max(64).default(5),
   })
   .superRefine((env, ctx) => {
-    const require = (key: keyof typeof env, when: string): void => {
-      if (isPlaceholder(env[key] as string | undefined)) {
+    type CredentialKey =
+      | 'STRIPE_SECRET_KEY'
+      | 'STRIPE_WEBHOOK_SECRET'
+      | 'RESEND_API_KEY'
+      | 'RESEND_WEBHOOK_SECRET'
+      | 'TWILIO_ACCOUNT_SID'
+      | 'TWILIO_AUTH_TOKEN'
+      | 'TWILIO_FROM_NUMBER'
+      | 'TWILIO_STATUS_CALLBACK_URL';
+
+    const requireCredential = (key: CredentialKey, when: string): void => {
+      if (isPlaceholder(env[key])) {
         ctx.addIssue({
           code: 'custom',
           path: [key],
@@ -107,20 +142,29 @@ export const envSchema = z
     };
 
     if (env.PAYMENT_PROVIDER === 'stripe') {
-      require('STRIPE_SECRET_KEY', 'PAYMENT_PROVIDER is "stripe"');
-      require('STRIPE_WEBHOOK_SECRET', 'PAYMENT_PROVIDER is "stripe"');
+      requireCredential('STRIPE_SECRET_KEY', 'PAYMENT_PROVIDER is "stripe"');
+      requireCredential('STRIPE_WEBHOOK_SECRET', 'PAYMENT_PROVIDER is "stripe"');
     }
 
     if (env.EMAIL_PROVIDER === 'resend') {
-      require('RESEND_API_KEY', 'EMAIL_PROVIDER is "resend"');
-      require('RESEND_WEBHOOK_SECRET', 'EMAIL_PROVIDER is "resend"');
+      requireCredential('RESEND_API_KEY', 'EMAIL_PROVIDER is "resend"');
+      requireCredential('RESEND_WEBHOOK_SECRET', 'EMAIL_PROVIDER is "resend"');
     }
 
     if (env.SMS_PROVIDER === 'twilio') {
-      require('TWILIO_ACCOUNT_SID', 'SMS_PROVIDER is "twilio"');
-      require('TWILIO_AUTH_TOKEN', 'SMS_PROVIDER is "twilio"');
-      require('TWILIO_FROM_NUMBER', 'SMS_PROVIDER is "twilio"');
-      require('TWILIO_STATUS_CALLBACK_URL', 'SMS_PROVIDER is "twilio"');
+      requireCredential('TWILIO_ACCOUNT_SID', 'SMS_PROVIDER is "twilio"');
+      requireCredential('TWILIO_AUTH_TOKEN', 'SMS_PROVIDER is "twilio"');
+      requireCredential('TWILIO_FROM_NUMBER', 'SMS_PROVIDER is "twilio"');
+      requireCredential('TWILIO_STATUS_CALLBACK_URL', 'SMS_PROVIDER is "twilio"');
+    }
+
+    if (env.SESSION_ABSOLUTE_TTL_MINUTES < env.SESSION_IDLE_TTL_MINUTES) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['SESSION_ABSOLUTE_TTL_MINUTES'],
+        message:
+          'SESSION_ABSOLUTE_TTL_MINUTES must be greater than or equal to SESSION_IDLE_TTL_MINUTES',
+      });
     }
 
     // A production deployment must never quietly run on in-memory fakes or
@@ -150,9 +194,51 @@ export type AppConfig = z.infer<typeof envSchema>;
 /** Injection token for the parsed configuration. */
 export const ENV = 'ENV_CONFIG';
 
+interface FatalIo {
+  write(message: string): void;
+  exit(code: number): never;
+}
+
+const PROCESS_FATAL_IO: FatalIo = {
+  write: (message) => {
+    writeSync(process.stderr.fd, message);
+  },
+  exit: (code) => process.exit(code),
+};
+
+/** Write a fatal startup diagnostic completely before terminating the process. */
+export function failFast(message: string, io: FatalIo = PROCESS_FATAL_IO): never {
+  io.write(message);
+  return io.exit(1);
+}
+
 /** Pure wrapper so tests can exercise validation without touching the process. */
 export function parseConfig(raw: Record<string, string | undefined>) {
   return envSchema.safeParse(raw);
+}
+
+/** Guard destructive integration-test resets against near-miss database names. */
+export function assertTestDatabaseUrl(value: string | undefined): string {
+  if (value === undefined) {
+    throw new Error(
+      'Integration tests require the database name "booking_test"; received "(missing)".',
+    );
+  }
+
+  let databaseName: string;
+  try {
+    databaseName = decodeURIComponent(new URL(value).pathname.slice(1)) || '(missing)';
+  } catch {
+    databaseName = '(invalid URL)';
+  }
+
+  if (databaseName !== 'booking_test') {
+    throw new Error(
+      `Integration tests require the database name "booking_test"; received "${databaseName}".`,
+    );
+  }
+
+  return value;
 }
 
 let cached: AppConfig | undefined;
@@ -175,11 +261,10 @@ export function loadConfig(): AppConfig {
       const key = issue.path.join('.') || '(root)';
       return `  ${key}: ${issue.message}`;
     });
-    process.stderr.write(
+    failFast(
       `Invalid configuration — ${String(lines.length)} problem(s):\n${lines.join('\n')}\n` +
         'See booking-app/.env.example for the expected variables.\n',
     );
-    process.exit(1);
   }
 
   cached = result.data;
@@ -196,9 +281,8 @@ export function loadConfig(): AppConfig {
 export function assertAppRole(config: AppConfig, expected: AppConfig['APP_ROLE']): void {
   if (config.APP_ROLE === expected) return;
 
-  process.stderr.write(
+  failFast(
     `APP_ROLE is "${config.APP_ROLE}" but this is the "${expected}" entrypoint.\n` +
       `Start it with APP_ROLE=${expected}, or run the ${config.APP_ROLE} entrypoint instead.\n`,
   );
-  process.exit(1);
 }

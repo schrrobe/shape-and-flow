@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import { computed, useId } from 'vue';
-
+import { useFieldIds } from './field-ids.js';
 import { useFieldTestId } from './field-test-id.js';
 
 /**
@@ -41,18 +40,7 @@ const props = withDefaults(
 
 defineEmits<{ 'update:modelValue': [string] }>();
 
-const id = useId();
-const descriptionId = `${id}-description`;
-const errorId = `${id}-error`;
-
-const describedBy = computed(() => {
-  const ids = [
-    props.description === null ? null : descriptionId,
-    props.error === null ? null : errorId,
-  ].filter((value): value is string => value !== null);
-
-  return ids.length === 0 ? undefined : ids.join(' ');
-});
+const { describedBy, descriptionId, errorId, id } = useFieldIds(props);
 
 // The test id belongs on the control, not on the block around it.
 defineOptions({ inheritAttrs: false });

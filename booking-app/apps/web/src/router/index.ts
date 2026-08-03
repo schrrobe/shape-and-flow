@@ -184,14 +184,21 @@ const routes: RouteRecordRaw[] = [
 ];
 
 /**
- * A fragment on these routes is a credential, not an anchor.
+ * The routes whose fragment is a credential rather than an anchor.
  *
- * `{ el: to.hash }` hands the fragment to `document.querySelector`, and a token is not a
- * valid CSS selector the moment it starts with a digit — which throws rather than missing.
- * Both routes that receive a token this way are listed, so scrolling stays on for the
- * anchors it is actually for.
+ * The management link carries its token in the hash, deliberately — a fragment is not sent to
+ * the server and stays out of access logs. That makes it the wrong thing to hand to a selector
+ * lookup: no element matches, so the router logs a development warning *containing the token*,
+ * and a token that is not a valid CSS id can make the lookup throw mid-navigation.
+ *
+ * Matched on the route name, not on the shape of the hash: a rule that guesses which fragments
+ * look like secrets would be wrong the first time the token alphabet changes.
  */
-const CREDENTIAL_IN_FRAGMENT: readonly string[] = ['/manage', '/office/reset-password'];
+const HASH_IS_A_CREDENTIAL: ReadonlySet<string> = new Set([
+  'manage',
+  'manage-reschedule',
+  'office-reset-password',
+]);
 
 export const router = createRouter({
   history: createWebHistory(),
@@ -200,7 +207,10 @@ export const router = createRouter({
     // Restore on back, jump to the top otherwise: a wizard step that opens halfway down the
     // previous step's scroll position looks broken.
     if (savedPosition !== null) return savedPosition;
-    if (to.hash !== '' && !CREDENTIAL_IN_FRAGMENT.includes(to.path)) return { el: to.hash };
+
+    const credential = typeof to.name === 'string' && HASH_IS_A_CREDENTIAL.has(to.name);
+    if (to.hash !== '' && !credential) return { el: to.hash };
+
     return { top: 0 };
   },
 });

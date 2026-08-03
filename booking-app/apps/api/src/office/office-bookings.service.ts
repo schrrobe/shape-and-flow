@@ -155,10 +155,12 @@ export class OfficeBookingsService {
         ...(query.serviceId === undefined ? {} : { serviceId: query.serviceId }),
         ...(query.customerId === undefined ? {} : { customerId: query.customerId }),
         ...this.dateRange(query.from, query.to, zone),
-        ...search(query.q),
-        ...(query.cursor === undefined
-          ? {}
-          : keysetWhere(field, direction, decodeCursor(query.cursor))),
+        AND: [
+          search(query.q),
+          ...(query.cursor === undefined
+            ? []
+            : [keysetWhere(field, direction, decodeCursor(query.cursor))]),
+        ],
       },
       select: LIST_FIELDS,
       orderBy: keysetOrderBy(field, direction),

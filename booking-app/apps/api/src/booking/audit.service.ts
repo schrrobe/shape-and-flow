@@ -6,11 +6,22 @@ import { REDACT_PATHS } from '../common/logging/redaction.js';
 import type { AuditAction, Prisma } from '../prisma/client.js';
 
 /** Field names the audit trail must not store, derived from the log redaction list. */
-const REDACTED_FIELDS = new Set(
-  REDACT_PATHS.map((path) => path.split('.').pop() ?? path).map((field) =>
-    field.replace(/\["?|"?\]/g, ''),
-  ),
-);
+const REDACTED_FIELDS = new Set(REDACT_PATHS.map(lastField));
+
+/**
+ * The field a redaction path ends in.
+ *
+ * Bracket keys are parsed rather than had their punctuation stripped. Removing the brackets
+ * from `req.headers["idempotency-key"]` and then taking the last dotted segment produced
+ * `headersidempotency-key` — a name no object has — so the value that path exists to protect
+ * was written to the audit trail in the clear. The bracket contents *are* the field name.
+ */
+function lastField(path: string): string {
+  const bracketed = /\[\s*"?([^"\]]+)"?\s*\]\s*$/.exec(path);
+  if (bracketed?.[1] !== undefined) return bracketed[1];
+
+  return path.split('.').pop() ?? path;
+}
 
 /** What the censored value is replaced with, matching the logger. */
 const CENSOR = '[Redacted]';
@@ -64,6 +75,11 @@ export class AuditService {
 /** Replace sensitive values, recursively, leaving structure intact. */
 function redact(value: unknown): Prisma.InputJsonValue {
   if (Array.isArray(value)) return value.map(redact);
+
+  // Before the object branch, because `typeof new Date() === 'object'` and
+  // `Object.entries(new Date())` is empty — a Date would be stored as `{}`. No caller passes
+  // one today; this service is a shared helper and the next one will, silently.
+  if (value instanceof Date) return value.toISOString();
 
   if (value === null || typeof value !== 'object') {
     return (value ?? null) as Prisma.InputJsonValue;

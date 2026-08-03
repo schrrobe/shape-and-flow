@@ -15,12 +15,7 @@ import { OrganizationContextService } from '../organization/organization-context
 import { PrismaService } from '../prisma/prisma.service.js';
 
 import { CsrfHeaderGuard } from './csrf-header.guard.js';
-import {
-  CurrentUser,
-  OfficeRoute,
-  OfficeSessionGuard,
-  readCookie,
-} from './office-session.guard.js';
+import { CurrentUser, OfficeRoute, readCookie } from './office-session.guard.js';
 import { PasswordResetService } from './password-reset.service.js';
 import { PasswordService } from './password.service.js';
 import { SessionStore } from './session.store.js';
@@ -90,6 +85,7 @@ export class AuthController {
 
   /** `POST /auth/login`. */
   @Public()
+  @UseGuards(CsrfHeaderGuard)
   @Throttle(LOGIN_LIMIT)
   @Post('login')
   @HttpCode(200)
@@ -188,7 +184,6 @@ export class AuthController {
    * see their old name until they sign in again.
    */
   @OfficeRoute()
-  @UseGuards(OfficeSessionGuard)
   @Get('me')
   async me(@CurrentUser() session: OfficeSession): Promise<LoginResponse> {
     const user = await this.prisma.officeUser.findFirst({
@@ -237,8 +232,8 @@ export class AuthController {
    * think somebody else has it, and it would be a poor answer to sign that person's
    * browser out of nothing while signing yourself out too.
    */
+  @UseGuards(CsrfHeaderGuard)
   @OfficeRoute()
-  @UseGuards(OfficeSessionGuard, CsrfHeaderGuard)
   @Post('password')
   @HttpCode(204)
   async changePassword(
@@ -304,10 +299,7 @@ export class AuthController {
    * HTTP and a Secure cookie there would simply never arrive.
    */
   private cookieOptions(): CookieOptions {
-    return {
-      ...this.clearOptions(),
-      maxAge: this.sessions.idleTtlSeconds * 1000,
-    };
+    return this.clearOptions();
   }
 
   private clearOptions(): CookieOptions {

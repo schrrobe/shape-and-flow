@@ -20,7 +20,7 @@ export const BLOCKING_BOOKING_STATUSES = [
 ] as const;
 
 /** No transition leaves a terminal status. */
-const TERMINAL_BOOKING_STATUSES = [
+export const TERMINAL_BOOKING_STATUSES = [
   BookingStatus.EXPIRED,
   BookingStatus.PAYMENT_FAILED,
   BookingStatus.CANCELED_BY_CUSTOMER,
@@ -70,7 +70,7 @@ export function isTerminal(status: BookingStatus): boolean {
   return (TERMINAL_BOOKING_STATUSES as readonly BookingStatus[]).includes(status);
 }
 
-function canTransition(from: BookingStatus | null, to: BookingStatus): boolean {
+export function canTransition(from: BookingStatus | null, to: BookingStatus): boolean {
   if (from === null) return (CREATABLE as readonly BookingStatus[]).includes(to);
   return TRANSITIONS[from].includes(to);
 }

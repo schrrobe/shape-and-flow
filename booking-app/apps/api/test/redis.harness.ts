@@ -22,9 +22,13 @@ if (prefix?.startsWith('test-') !== true) {
 
 export const QUEUE_PREFIX = prefix;
 
-export const redis: Redis = createRedisConnection(
-  process.env.REDIS_URL ?? 'redis://localhost:6381',
-);
+const redisUrl = process.env.REDIS_URL;
+
+if (redisUrl === undefined || redisUrl === '') {
+  throw new Error('REDIS_URL is required for integration tests.');
+}
+
+export const redis: Redis = createRedisConnection(redisUrl);
 
 /**
  * Queues built exactly the way QueuesModule builds them.

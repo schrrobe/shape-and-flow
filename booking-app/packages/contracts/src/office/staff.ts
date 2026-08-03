@@ -9,6 +9,8 @@ import {
   minuteOfDaySchema,
 } from '../primitives.js';
 
+import { MAX_CALENDAR_RANGE_DAYS, inclusiveDaySpan } from './calendar.js';
+
 /**
  * Staff and the shape of their availability.
  *
@@ -381,11 +383,20 @@ export const createBlockedTimeSchema = z
 
 export type CreateBlockedTimeRequest = z.infer<typeof createBlockedTimeSchema>;
 
-export const blockedTimeListQuerySchema = z.object({
-  employeeId: cuidSchema.optional(),
-  from: localDateSchema,
-  to: localDateSchema,
-});
+export const blockedTimeListQuerySchema = z
+  .object({
+    employeeId: cuidSchema.optional(),
+    from: localDateSchema,
+    to: localDateSchema,
+  })
+  .refine((query) => query.from <= query.to, {
+    message: 'from must not be after to',
+    path: ['from'],
+  })
+  .refine((query) => inclusiveDaySpan(query.from, query.to) <= MAX_CALENDAR_RANGE_DAYS, {
+    message: `the range must not exceed ${String(MAX_CALENDAR_RANGE_DAYS)} days`,
+    path: ['to'],
+  });
 
 export type BlockedTimeListQuery = z.infer<typeof blockedTimeListQuerySchema>;
 export type BlockedTime = z.infer<typeof blockedTimeSchema>;
@@ -408,10 +419,19 @@ export const createClosedDaySchema = z.object({
 
 export type CreateClosedDayRequest = z.infer<typeof createClosedDaySchema>;
 
-export const closedDayListQuerySchema = z.object({
-  from: localDateSchema,
-  to: localDateSchema,
-});
+export const closedDayListQuerySchema = z
+  .object({
+    from: localDateSchema,
+    to: localDateSchema,
+  })
+  .refine((query) => query.from <= query.to, {
+    message: 'from must not be after to',
+    path: ['from'],
+  })
+  .refine((query) => inclusiveDaySpan(query.from, query.to) <= MAX_CALENDAR_RANGE_DAYS, {
+    message: `the range must not exceed ${String(MAX_CALENDAR_RANGE_DAYS)} days`,
+    path: ['to'],
+  });
 
 export type ClosedDayListQuery = z.infer<typeof closedDayListQuerySchema>;
 export type ClosedDay = z.infer<typeof closedDaySchema>;

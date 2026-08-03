@@ -85,9 +85,22 @@ export class MigrationIndicator {
 
   async isHealthy(key = 'migrations'): Promise<HealthIndicatorResult> {
     const indicator = this.health.check(key);
-    const shipped = shippedMigrationNames();
 
+    let shipped: string[];
     let applied: string[];
+
+    try {
+      shipped = shippedMigrationNames();
+    } catch (error) {
+      // Same shape as the query failure below. A missing `prisma/migrations/` beside the
+      // compiled output would otherwise escape as a plain `ENOENT`, which the controller
+      // rethrows into a 500 — a generic server fault where the probe should have been
+      // told which named indicator is down.
+      this.logger.error(
+        `could not read the migrations directory: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return indicator.down({ message: 'The shipped migrations could not be read.' });
+    }
 
     try {
       applied = await this.appliedMigrationNames();

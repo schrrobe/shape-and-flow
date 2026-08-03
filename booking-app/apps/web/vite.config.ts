@@ -1,3 +1,5 @@
+import { fileURLToPath, URL } from 'node:url';
+
 import tailwindcss from '@tailwindcss/vite';
 import vue from '@vitejs/plugin-vue';
 import { defineConfig } from 'vite';
@@ -13,6 +15,9 @@ const API_TARGET = process.env.VITE_API_TARGET ?? 'http://localhost:3000';
 
 export default defineConfig({
   plugins: [vue(), tailwindcss()],
+  resolve: {
+    alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
+  },
   build: {
     target: 'es2022',
     rollupOptions: {

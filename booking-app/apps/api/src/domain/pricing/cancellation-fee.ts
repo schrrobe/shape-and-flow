@@ -36,6 +36,14 @@ export interface CancellationFeeOutcome {
   /** True when the appointment is close enough that a fee may be retained. */
   feeApplies: boolean;
   hoursUntilStart: number;
+  /**
+   * The instant free cancellation ends.
+   *
+   * Returned rather than left to callers so the countdown a customer sees and the fee they
+   * are actually charged come from the same rule. Two copies of `startsAt - hours` would
+   * agree today and disagree the moment the policy changes.
+   */
+  freeUntil: Date;
   suggestedRetained: Money;
   /** Both amounts are returned so no caller has to subtract by hand. */
   suggestedRefund: Money;
@@ -58,6 +66,8 @@ export function computeSuggestedRetainedAmount(
   return {
     feeApplies,
     hoursUntilStart,
+    // The same boundary `feeApplies` is decided by, expressed as an instant.
+    freeUntil: new Date(startsAt.getTime() - settings.freeCancellationHours * 3_600_000),
     suggestedRetained: retained,
     suggestedRefund: paid.minus(retained),
   };
@@ -75,7 +85,10 @@ function retainedFor(paid: Money, settings: CancellationFeeSettings): Money {
 
     case 'FIXED_AMOUNT':
       // Capped: a fee larger than the amount paid cannot be retained.
-      return Money.fromCents(settings.cancellationFeeAmountCents, paid.currency).cappedAt(paid);
+      return Money.fromCents(
+        Math.max(0, settings.cancellationFeeAmountCents),
+        paid.currency,
+      ).cappedAt(paid);
 
     case 'PERCENTAGE':
       // Money.percent truncates, so the fractional cent stays with the customer.

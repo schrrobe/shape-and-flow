@@ -9,11 +9,10 @@ import { z } from 'zod';
  */
 
 /** A cuid, as generated for every primary key. Opaque to clients. */
-export const cuidSchema = z
-  .string()
-  .min(20)
-  .max(40)
-  .regex(/^[a-z0-9]+$/, 'must be a cuid');
+// Prisma still generates CUID v1; accepting CUID2 here would make the wire contract
+// disagree with every persisted identifier.
+// eslint-disable-next-line @typescript-eslint/no-deprecated
+export const cuidSchema = z.cuid();
 
 /** ISO-8601 UTC with milliseconds, which is how every instant is serialised. */
 export const isoInstantSchema = z.iso.datetime({ offset: false });
@@ -38,7 +37,7 @@ export const localDateSchema = z
  */
 export const moneySchema = z.object({
   amountCents: z.number().int(),
-  currency: z.string().length(3),
+  currency: z.string().regex(/^[A-Z]{3}$/, 'must be an ISO 4217 currency code'),
 });
 
 export type MoneyDto = z.infer<typeof moneySchema>;
@@ -67,6 +66,10 @@ export const booleanQuery = (fallback: boolean) =>
     .enum(['true', 'false'])
     .default(fallback ? 'true' : 'false')
     .transform((value) => value === 'true');
+
+/** A database-backed integer range, shared by settings and catalog contracts. */
+export const boundedInt = (bounds: { min: number; max: number }) =>
+  z.number().int().min(bounds.min).max(bounds.max);
 
 /** A customer-facing locale. Lowercase, because it appears in URLs and paths. */
 export const localeSchema = z.enum(['de', 'en']);

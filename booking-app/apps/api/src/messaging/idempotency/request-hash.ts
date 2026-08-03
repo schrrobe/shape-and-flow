@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 
 /**
- * A fingerprint of a request body, stable across encodings of the same request.
+ * A fingerprint of a request body and, when present, its route target.
  *
  * The point is to tell "the client retried the same request" from "the client
  * reused a key for a different request". The first must replay the stored response;
@@ -57,10 +57,11 @@ function canonicalise(value: unknown, key?: string): unknown {
 
 /** The canonical JSON form, exported for tests and for diagnosing a mismatch. */
 export function canonicalRequestJson(body: unknown): string {
-  return JSON.stringify(canonicalise(body));
+  return JSON.stringify(canonicalise(body ?? null));
 }
 
 /** SHA-256, hex, of the canonical form. */
-export function canonicalRequestHash(body: unknown): string {
-  return createHash('sha256').update(canonicalRequestJson(body), 'utf8').digest('hex');
+export function canonicalRequestHash(body: unknown, routeParams?: unknown): string {
+  const request = routeParams === undefined ? body : { body, routeParams };
+  return createHash('sha256').update(canonicalRequestJson(request), 'utf8').digest('hex');
 }

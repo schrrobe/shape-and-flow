@@ -13,7 +13,7 @@ import type { Request, RequestHandler } from 'express';
  * The parser below is mounted on the webhook route before Nest registers its global
  * JSON and form parsers, so the limit is enforced while the bytes are buffered.
  */
-const WEBHOOK_BODY_LIMIT = '1mb';
+export const WEBHOOK_BODY_LIMIT = '1mb';
 
 const parseWebhookBody = raw({
   limit: WEBHOOK_BODY_LIMIT,

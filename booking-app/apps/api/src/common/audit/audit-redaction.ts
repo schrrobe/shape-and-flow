@@ -30,14 +30,17 @@ function lastSegment(path: string): string {
  * what makes an audit row readable a year later: `{ email: "[Redacted]" }` says an email
  * changed, while a dropped key says nothing happened.
  *
- * Anything that is not JSON — a Date, a Map, a class instance — is stringified by the
- * caller's `JSON.stringify` on the way into the JSONB column; this only walks plain
- * objects and arrays, which is all a response body or a Prisma row ever is.
+ * Anything that is not JSON — a Date, a Decimal, a Map — is handed back as the instance it
+ * came in as, so the caller's `JSON.stringify` can still reach its `toJSON`. Rebuilding one
+ * from its own enumerable properties would replace a Prisma `startsAt` with `{}`: a `Date`
+ * has none, and once the instance is gone there is no `toJSON` left to call.
  */
 export function redactForAudit(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(redactForAudit);
 
   if (value === null || typeof value !== 'object') return value;
+
+  if (!isPlainObject(value)) return value;
 
   return Object.fromEntries(
     Object.entries(value as Record<string, unknown>).map(([key, entry]) => [
@@ -45,4 +48,18 @@ export function redactForAudit(value: unknown): unknown {
       AUDIT_REDACTED_KEYS.has(key.toLowerCase()) ? REDACT_CENSOR : redactForAudit(entry),
     ]),
   );
+}
+
+/**
+ * Whether a value is an object literal rather than an instance of something.
+ *
+ * A `null` prototype counts, because that is what `Object.fromEntries` and a parsed JSON
+ * body with `__proto__` produce. Everything else is left whole — which does mean a class
+ * instance carrying a redacted field would pass through unredacted, and is safe here
+ * because the interceptor is only ever handed Prisma rows and response DTOs, whose
+ * non-plain values are timestamps and numbers.
+ */
+function isPlainObject(value: object): boolean {
+  const prototype = Object.getPrototypeOf(value) as object | null;
+  return prototype === Object.prototype || prototype === null;
 }

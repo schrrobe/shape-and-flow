@@ -8,7 +8,7 @@ import {
 } from '@shape-and-flow/booking-contracts';
 
 import { CsrfHeaderGuard } from '../auth/csrf-header.guard.js';
-import { CurrentUser, OfficeRoute, OfficeSessionGuard } from '../auth/office-session.guard.js';
+import { CurrentUser, OfficeRoute } from '../auth/office-session.guard.js';
 import {
   RefundCapabilityGuard,
   RequiresRefundCapability,
@@ -42,13 +42,14 @@ import type {
  * `ReservationService` through the office service. What is left in this file is the
  * decision about *who may* — which is the controller's actual job.
  *
- * The three money routes carry `@Idempotent`. A retried request at a busy desk is not a
+ * Every route that creates a booking or moves money carries `@Idempotent`. A retried
+ * request at a busy desk is not a
  * hypothetical, and each of these has a failure mode that costs real money: two
  * bookings, two recorded payments, two refunds.
  */
 @Controller('office/bookings')
+@UseGuards(CsrfHeaderGuard, RolesGuard, RefundCapabilityGuard)
 @OfficeRoute()
-@UseGuards(OfficeSessionGuard, CsrfHeaderGuard, RolesGuard, RefundCapabilityGuard)
 export class OfficeBookingsController {
   constructor(
     private readonly bookings: OfficeBookingsService,
@@ -101,6 +102,7 @@ export class OfficeBookingsController {
    */
   @Post(':id/cancel')
   @Roles('OWNER', 'ADMIN')
+  @Idempotent('booking.cancel')
   // No `@Audited`: CancellationService writes its row inside the transaction that
   // cancels the booking. A second, after-the-fact row here made every business
   // cancellation appear twice in the log, with a summary that said less.
@@ -120,6 +122,7 @@ export class OfficeBookingsController {
       bookingId: id,
       officeUserId: session.officeUserId,
       reason: input.reason,
+      mayIssueRefunds: session.role === 'OWNER' || session.canIssueRefunds,
       ...(input.refund === undefined ? {} : { refundAmountCents: input.refund.amountCents }),
     });
 

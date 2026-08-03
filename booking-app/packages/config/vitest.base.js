@@ -22,6 +22,11 @@ export const COVERAGE_EXCLUDE = [
   '**/worker.main.ts',
   '**/*.module.ts',
   '**/prisma/seed.ts',
+  '**/src/generated/**',
+  // Its behavior is exercised against real Prisma/Postgres by the integration
+  // suite; counting it in the isolated unit report would force a second,
+  // mock-based copy of the same security tests.
+  '**/tenant.extension.ts',
 ];
 
 export const baseVitestConfig = {
@@ -37,6 +42,7 @@ export const baseVitestConfig = {
     coverage: {
       provider: 'v8',
       reporter: ['text', 'lcov'],
+      include: ['src/**/*.{ts,tsx,js,jsx}'],
       exclude: COVERAGE_EXCLUDE,
       thresholds: {
         lines: 80,

@@ -4,11 +4,11 @@ import { Inject } from '@nestjs/common';
 import { CLOCK } from '../domain/time/clock.js';
 import { EnqueueService } from '../messaging/queues/enqueue.service.js';
 import { JOB, QUEUE } from '../messaging/queues/job-contracts.js';
-import { BookingStatus, NotificationStatus } from '../prisma/client.js';
+import { BookingStatus } from '../prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
 import { dedupeKey } from './dedupe-key.js';
-import { ReminderService, reminderJobId } from './reminder.service.js';
+import { ReminderService, reminderJobId, startsAtEpochSeconds } from './reminder.service.js';
 
 import type { Clock } from '../domain/time/clock.js';
 
@@ -53,68 +53,76 @@ export class ReminderReconciler {
     const now = this.clock.now();
     const horizon = new Date(now.getTime() + REMINDER_HORIZON_MS);
 
-    const bookings = await this.prisma.booking.findMany({
-      where: {
-        status: BookingStatus.CONFIRMED,
-        startsAt: { gt: now, lte: horizon },
-      },
-      orderBy: { startsAt: 'asc' },
-      take: BATCH,
-      select: { id: true, organizationId: true, startsAt: true },
-    });
-
-    if (bookings.length === 0) return 0;
-
     const queue = this.enqueue.queue(QUEUE.NOTIFICATION);
     const offsets = this.reminders.offsets();
-
-    // One query for the whole batch. A per-booking round trip would make the nightly sweep
-    // scale with the number of appointments rather than with the number of gaps.
-    const alreadySent = new Set(
-      (
-        await this.prisma.notification.findMany({
-          where: {
-            bookingId: { in: bookings.map((booking) => booking.id) },
-            kind: 'REMINDER_24H',
-            status: { not: NotificationStatus.PENDING },
-          },
-          select: { dedupeKey: true },
-        })
-      ).map((row) => row.dedupeKey),
-    );
-
     let requeued = 0;
+    let cursor: string | undefined;
 
-    for (const booking of bookings) {
-      for (const offsetMinutes of offsets) {
-        const delay = booking.startsAt.getTime() - offsetMinutes * 60_000 - now.getTime();
-        if (delay <= 0) continue;
+    while (requeued < BATCH) {
+      const bookings = await this.prisma.booking.findMany({
+        where: {
+          status: BookingStatus.CONFIRMED,
+          startsAt: { gt: now, lte: horizon },
+        },
+        orderBy: [{ startsAt: 'asc' }, { id: 'asc' }],
+        take: BATCH,
+        ...(cursor === undefined ? {} : { cursor: { id: cursor }, skip: 1 }),
+        select: { id: true, organizationId: true, startsAt: true },
+      });
 
-        const sentKey = dedupeKey(
-          'REMINDER_24H',
-          'EMAIL',
-          booking.id,
-          this.reminders.reminderDedupeDiscriminator(offsetMinutes, booking.startsAt),
-        );
+      if (bookings.length === 0) break;
 
-        if (alreadySent.has(sentKey)) continue;
+      // Any reminder row means this job already reached durable notification handling.
+      // PENDING/SENDING rows are re-driven by SWEEP_NOTIFICATIONS, not by minting a fresh
+      // token and trying the reminder job again.
+      const alreadyHandled = new Set(
+        (
+          await this.prisma.notification.findMany({
+            where: {
+              bookingId: { in: bookings.map((booking) => booking.id) },
+              kind: 'REMINDER_24H',
+            },
+            select: { dedupeKey: true },
+          })
+        ).map((row) => row.dedupeKey),
+      );
 
-        const jobId = reminderJobId(offsetMinutes, booking.id, booking.startsAt);
-        if ((await queue.getJob(jobId)) !== undefined) continue;
+      for (const booking of bookings) {
+        for (const offsetMinutes of offsets) {
+          if (requeued >= BATCH) break;
 
-        await this.enqueue.enqueue(
-          JOB.REMINDER_SEND,
-          {
-            organizationId: booking.organizationId,
-            bookingId: booking.id,
-            offsetMinutes,
-            expectedStartsAtEpochSeconds: Math.floor(booking.startsAt.getTime() / 1000),
-          },
-          { jobId, delay },
-        );
+          const delay = booking.startsAt.getTime() - offsetMinutes * 60_000 - now.getTime();
+          if (delay <= 0) continue;
 
-        requeued += 1;
+          const sentKey = dedupeKey(
+            'REMINDER_24H',
+            'EMAIL',
+            booking.id,
+            this.reminders.reminderDedupeDiscriminator(offsetMinutes, booking.startsAt),
+          );
+
+          if (alreadyHandled.has(sentKey)) continue;
+
+          const jobId = reminderJobId(offsetMinutes, booking.id, booking.startsAt);
+          if ((await queue.getJob(jobId)) !== undefined) continue;
+
+          await this.enqueue.enqueue(
+            JOB.REMINDER_SEND,
+            {
+              organizationId: booking.organizationId,
+              bookingId: booking.id,
+              offsetMinutes,
+              expectedStartsAtEpochSeconds: startsAtEpochSeconds(booking.startsAt),
+            },
+            { jobId, delay },
+          );
+
+          requeued += 1;
+        }
       }
+
+      cursor = bookings.at(-1)?.id;
+      if (bookings.length < BATCH || cursor === undefined) break;
     }
 
     if (requeued > 0) {

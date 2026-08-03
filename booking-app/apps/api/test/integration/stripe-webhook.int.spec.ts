@@ -404,10 +404,17 @@ describe('failed payments', () => {
     expect(booking.expiresAt).toBeNull();
   });
 
-  it('records the failure reason on the payment', async () => {
+  it('records the failure reason, resolving the booking through the payment intent', async () => {
+    // `payment_intent.payment_failed` carries a PaymentIntent, so `object.id` is a `pi_…` and
+    // no booking is keyed on it. The intent id on the payment row is the handle that resolves.
+    await prisma.payment.updateMany({
+      where: { bookingId },
+      data: { stripePaymentIntentId: 'pi_declined_1' },
+    });
+
     await seedEvent(
       'payment_intent.payment_failed',
-      { id: sessionId, last_payment_error: { code: 'card_declined', message: 'Declined' } },
+      { id: 'pi_declined_1', last_payment_error: { code: 'card_declined', message: 'Declined' } },
       'evt_declined',
     );
 
@@ -419,6 +426,26 @@ describe('failed payments', () => {
       failureCode: 'card_declined',
       failureMessage: 'Declined',
     });
+  });
+
+  it('falls back to client_reference_id when no payment names the intent', async () => {
+    // The intent failed before any payment row recorded its id. Stripe was given the booking
+    // id as `client_reference_id` at session creation, which is the remaining handle.
+    await seedEvent(
+      'payment_intent.payment_failed',
+      {
+        id: 'pi_declined_2',
+        client_reference_id: bookingId,
+        last_payment_error: { code: 'card_declined', message: 'Declined' },
+      },
+      'evt_declined_2',
+    );
+
+    await processor.handle({ stripeEventId: 'evt_declined_2' });
+
+    expect((await prisma.booking.findUniqueOrThrow({ where: { id: bookingId } })).status).toBe(
+      'PAYMENT_FAILED',
+    );
   });
 
   it('leaves a confirmed booking alone when a late failure arrives', async () => {

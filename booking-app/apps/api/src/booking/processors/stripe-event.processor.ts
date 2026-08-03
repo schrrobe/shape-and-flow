@@ -30,9 +30,12 @@ const HANDLED = {
 
 /** The subset of a Stripe event payload this reads. Narrowed rather than trusted. */
 interface StripeEventShape {
+  /** Unix seconds. When Stripe generated the event, which is close to when money moved. */
+  created?: unknown;
   data?: {
     object?: {
       id?: unknown;
+      object?: unknown;
       client_reference_id?: unknown;
       payment_status?: unknown;
       amount_total?: unknown;
@@ -47,6 +50,13 @@ interface StripeEventShape {
 
 function readString(value: unknown): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+/** Stripe's `created`, in unix seconds, as an instant. Undefined when the field is absent. */
+function eventTime(created: unknown): Date | undefined {
+  return typeof created === 'number' && Number.isFinite(created)
+    ? new Date(created * 1000)
+    : undefined;
 }
 
 /**
@@ -107,7 +117,8 @@ export class StripeEventProcessor {
   }
 
   private async dispatch(type: string, rawPayload: unknown, eventId: string): Promise<void> {
-    const object = (rawPayload as StripeEventShape).data?.object ?? {};
+    const event = rawPayload as StripeEventShape;
+    const object = event.data?.object ?? {};
 
     // Refund events are a separate concern: this class decides which booking an event is
     // about, and that one decides what a refund event means.
@@ -119,13 +130,19 @@ export class StripeEventProcessor {
     switch (type) {
       case HANDLED.COMPLETED:
       case HANDLED.ASYNC_SUCCEEDED:
-        await this.confirmIfPaid(object, eventId);
+        await this.confirmIfPaid(object, eventId, eventTime(event.created));
         return;
 
       case HANDLED.EXPIRED:
       case HANDLED.ASYNC_FAILED:
-      case HANDLED.INTENT_FAILED:
         await this.fail(object, eventId);
+        return;
+
+      // A PaymentIntent, not a Checkout Session: `object.id` is a `pi_…`, which no booking
+      // or payment row is keyed on by session id. Resolved through the stored payment
+      // instead, which is where the intent id was recorded on confirmation.
+      case HANDLED.INTENT_FAILED:
+        await this.failByPaymentIntent(object, eventId);
         return;
 
       default:
@@ -143,6 +160,7 @@ export class StripeEventProcessor {
   private async confirmIfPaid(
     object: NonNullable<NonNullable<StripeEventShape['data']>['object']>,
     eventId: string,
+    eventCreatedAt: Date | undefined,
   ): Promise<void> {
     const sessionId = readString(object.id);
     if (sessionId === undefined) {
@@ -156,9 +174,20 @@ export class StripeEventProcessor {
       return;
     }
 
+    // A paid Checkout Session always carries `amount_total`. Its absence is a broken
+    // assumption, not a zero: `upsertPayment` would write `amountCents = 0`, and a payment
+    // row worth nothing makes every later refund unrefundable while reporting the booking
+    // as fully refunded. Throwing puts the job on BullMQ's retry and, eventually, in front
+    // of an operator.
+    if (typeof object.amount_total !== 'number') {
+      throw new AppError('INTERNAL_ERROR', {
+        message: `Paid session ${sessionId} carries no amount_total.`,
+      });
+    }
+
     const booking = await this.resolveBooking(sessionId, object.client_reference_id);
 
-    await this.confirmations.confirmPaid({
+    const outcome = await this.confirmations.confirmPaid({
       bookingId: booking.id,
       sessionId,
       ...(readString(object.payment_intent) === undefined
@@ -167,13 +196,24 @@ export class StripeEventProcessor {
       ...(readString(object.latest_charge) === undefined
         ? {}
         : { chargeId: readString(object.latest_charge) }),
-      amountTotalCents: typeof object.amount_total === 'number' ? object.amount_total : 0,
+      amountTotalCents: object.amount_total,
       ...(readPaymentMethod(object.payment_method_types) === undefined
         ? {}
         : { paymentMethodType: readPaymentMethod(object.payment_method_types) }),
-      paidAt: this.clock.now(),
+      // Stripe's own timestamp for the event, which is when the money moved. The local
+      // clock is a fallback for a payload without one, and is by definition later.
+      paidAt: eventCreatedAt ?? this.clock.now(),
       cause: { kind: 'WEBHOOK', reference: eventId },
     });
+
+    if (outcome === 'PAID_AFTER_TERMINAL') {
+      // Money for an appointment that no longer exists. There is no booking to confirm and
+      // no customer-facing action that makes sense, so this is escalated rather than
+      // handled: the office decides whether to refund or to re-book.
+      this.logger.error(
+        `payment.needs_manual_refund booking=${booking.id} session=${sessionId} event=${eventId}`,
+      );
+    }
   }
 
   private async fail(
@@ -194,6 +234,48 @@ export class StripeEventProcessor {
 
     await this.confirmations.markPaymentFailed({
       bookingId: booking.id,
+      ...(readString(object.last_payment_error?.code) === undefined
+        ? {}
+        : { failureCode: readString(object.last_payment_error?.code) }),
+      ...(readString(object.last_payment_error?.message) === undefined
+        ? {}
+        : { failureMessage: readString(object.last_payment_error?.message) }),
+      cause: { kind: 'WEBHOOK', reference: eventId },
+    });
+  }
+
+  /**
+   * Fail the booking behind a PaymentIntent.
+   *
+   * `payment_intent.payment_failed` carries a PaymentIntent, so `object.id` is a `pi_…`.
+   * Treating it as a Checkout Session id — as the shared `fail` path does — looks up
+   * `stripeCheckoutSessionId = pi_…`, finds nothing, and silently leaves the booking
+   * waiting for a payment that already failed until the expiry saga releases it. The intent
+   * id is recorded on the `Payment` row, which is the handle that does resolve.
+   */
+  private async failByPaymentIntent(
+    object: NonNullable<NonNullable<StripeEventShape['data']>['object']>,
+    eventId: string,
+  ): Promise<void> {
+    const paymentIntentId = readString(object.id);
+    if (paymentIntentId === undefined) return;
+
+    const payment = await this.prisma.payment.findUnique({
+      where: { stripePaymentIntentId: paymentIntentId },
+      select: { bookingId: true },
+    });
+
+    // Falls back to the booking id Stripe was given at session creation, for the case where
+    // the intent failed before any payment row named it.
+    const bookingId = payment?.bookingId ?? readString(object.client_reference_id);
+
+    if (bookingId === undefined) {
+      this.logger.debug(`no booking for payment intent ${paymentIntentId}; nothing to fail`);
+      return;
+    }
+
+    await this.confirmations.markPaymentFailed({
+      bookingId,
       ...(readString(object.last_payment_error?.code) === undefined
         ? {}
         : { failureCode: readString(object.last_payment_error?.code) }),

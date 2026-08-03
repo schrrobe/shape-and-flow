@@ -25,6 +25,12 @@ const OWNER: OfficeUserDto = {
 /** 09:00 and 09:15 Berlin on the same day, both free, with different people free at each. */
 const NINE = '2026-08-14T07:00:00.000Z';
 const QUARTER_PAST = '2026-08-14T07:15:00.000Z';
+const SERVICE_ID = 'cms9gryv30000ja32145w5gke';
+const OFFLINE_SERVICE_ID = 'cms9gryv30001ja32145w5gke';
+const EMPLOYEE_ONE_ID = 'cms9gryv30002ja32145w5gke';
+const EMPLOYEE_TWO_ID = 'cms9gryv30003ja32145w5gke';
+const CUSTOMER_ID = 'cms9gryv30004ja32145w5gke';
+const BOOKING_ID = 'cms9gryv30005ja32145w5gke';
 
 interface Call {
   url: string;
@@ -51,7 +57,7 @@ beforeEach(() => {
   calls = [];
   availabilityCalls = 0;
   createResponse = () =>
-    json({ bookingId: 'bkg00000000000000000001', reference: 'SF-ABC123', status: 'CONFIRMED' });
+    json({ bookingId: BOOKING_ID, reference: 'SF-ABC123', status: 'CONFIRMED' });
 
   vi.stubGlobal('fetch', (url: string, init?: RequestInit) => {
     const raw = init?.body;
@@ -72,7 +78,7 @@ beforeEach(() => {
         json({
           items: [
             {
-              id: 'svc00000000000000000001',
+              id: SERVICE_ID,
               serviceCategoryId: null,
               name: 'Facial Massage 30',
               description: null,
@@ -85,7 +91,7 @@ beforeEach(() => {
               archivedAt: null,
             },
             {
-              id: 'svc00000000000000000002',
+              id: OFFLINE_SERVICE_ID,
               serviceCategoryId: null,
               name: 'Not sold online',
               description: null,
@@ -105,8 +111,8 @@ beforeEach(() => {
       return Promise.resolve(
         json({
           items: [
-            { id: 'emp00000000000000000001', displayName: 'Mara Vogt' },
-            { id: 'emp00000000000000000002', displayName: 'Jonas Reit' },
+            { id: EMPLOYEE_ONE_ID, displayName: 'Mara Vogt' },
+            { id: EMPLOYEE_TWO_ID, displayName: 'Jonas Reit' },
           ],
         }),
       );
@@ -116,7 +122,7 @@ beforeEach(() => {
 
       return Promise.resolve(
         json({
-          serviceId: 'svc00000000000000000001',
+          serviceId: SERVICE_ID,
           timezone: 'Europe/Berlin',
           days: [
             {
@@ -125,12 +131,12 @@ beforeEach(() => {
                 {
                   startsAt: NINE,
                   endsAt: '2026-08-14T07:30:00.000Z',
-                  employeeIds: ['emp00000000000000000001', 'emp00000000000000000002'],
+                  employeeIds: [EMPLOYEE_ONE_ID, EMPLOYEE_TWO_ID],
                 },
                 {
                   startsAt: QUARTER_PAST,
                   endsAt: '2026-08-14T07:45:00.000Z',
-                  employeeIds: ['emp00000000000000000002'],
+                  employeeIds: [EMPLOYEE_TWO_ID],
                 },
               ],
             },
@@ -143,7 +149,7 @@ beforeEach(() => {
         json({
           items: [
             {
-              id: 'cus00000000000000000001',
+              id: CUSTOMER_ID,
               firstName: 'Anna',
               lastName: 'Becker',
               email: 'anna@example.com',
@@ -191,7 +197,7 @@ async function chooseServiceAndSlot(
   wrapper: Awaited<ReturnType<typeof mountPage>>,
   startsAt = NINE,
 ): Promise<void> {
-  await wrapper.get('[data-test=service]').setValue('svc00000000000000000001');
+  await wrapper.get('[data-test=service]').setValue(SERVICE_ID);
   await flushPromises();
 
   await wrapper.get(`[data-test=slot][data-start="${startsAt}"]`).trigger('click');
@@ -206,7 +212,7 @@ function lastWrite(): Call {
 
 describe('NewBooking', () => {
   it('offers nothing to a role that may not create bookings', async () => {
-    const wrapper = await mountPage({ role: 'EMPLOYEE', employeeId: 'emp00000000000000000001' });
+    const wrapper = await mountPage({ role: 'EMPLOYEE', employeeId: EMPLOYEE_ONE_ID });
 
     expect(wrapper.find('[data-test=forbidden]').exists()).toBe(true);
     expect(wrapper.find('[data-test=create]').exists()).toBe(false);
@@ -228,7 +234,7 @@ describe('NewBooking', () => {
 
   it('takes its times from the office route, not the public one', async () => {
     const wrapper = await mountPage();
-    await wrapper.get('[data-test=service]').setValue('svc00000000000000000001');
+    await wrapper.get('[data-test=service]').setValue(SERVICE_ID);
     await flushPromises();
 
     expect(calls.some((call) => call.url.includes('/public/availability'))).toBe(false);
@@ -242,7 +248,7 @@ describe('NewBooking', () => {
     // 09:15 has one candidate, so it is chosen rather than asked about.
     await chooseServiceAndSlot(wrapper, QUARTER_PAST);
     expect((wrapper.get('[data-test=employee]').element as HTMLSelectElement).value).toBe(
-      'emp00000000000000000002',
+      EMPLOYEE_TWO_ID,
     );
 
     const names = wrapper
@@ -257,7 +263,7 @@ describe('NewBooking', () => {
     const wrapper = await mountPage();
 
     await chooseServiceAndSlot(wrapper);
-    await wrapper.get('[data-test=employee]').setValue('emp00000000000000000001');
+    await wrapper.get('[data-test=employee]').setValue(EMPLOYEE_ONE_ID);
     await fillNewCustomer(wrapper);
     await wrapper.get('[data-test=note]').setValue('Allergic to lavender');
 
@@ -265,8 +271,8 @@ describe('NewBooking', () => {
     await flushPromises();
 
     expect(lastWrite().body).toMatchObject({
-      serviceId: 'svc00000000000000000001',
-      employeeId: 'emp00000000000000000001',
+      serviceId: SERVICE_ID,
+      employeeId: EMPLOYEE_ONE_ID,
       startsAt: NINE,
       customer: { email: 'anna@example.com', firstName: 'Anna', lastName: 'Becker', locale: 'de' },
       customerNote: 'Allergic to lavender',
@@ -275,7 +281,7 @@ describe('NewBooking', () => {
     await vi.waitFor(() => {
       expect(router.currentRoute.value.name).toBe('office-booking');
     });
-    expect(router.currentRoute.value.params.id).toBe('bkg00000000000000000001');
+    expect(router.currentRoute.value.params.id).toBe(BOOKING_ID);
   });
 
   it('books an existing customer by id once one is chosen', async () => {
@@ -287,12 +293,12 @@ describe('NewBooking', () => {
 
     await wrapper.get('[data-test=pick-customer]').trigger('click');
     await chooseServiceAndSlot(wrapper);
-    await wrapper.get('[data-test=employee]').setValue('emp00000000000000000001');
+    await wrapper.get('[data-test=employee]').setValue(EMPLOYEE_ONE_ID);
 
     await wrapper.get('[data-test=create]').trigger('click');
     await flushPromises();
 
-    expect(lastWrite().body).toMatchObject({ customer: { customerId: 'cus00000000000000000001' } });
+    expect(lastWrite().body).toMatchObject({ customer: { customerId: CUSTOMER_ID } });
   });
 
   it('keeps one idempotency key across a retry of the same booking', async () => {
@@ -300,7 +306,7 @@ describe('NewBooking', () => {
 
     const wrapper = await mountPage();
     await chooseServiceAndSlot(wrapper);
-    await wrapper.get('[data-test=employee]').setValue('emp00000000000000000001');
+    await wrapper.get('[data-test=employee]').setValue(EMPLOYEE_ONE_ID);
     await fillNewCustomer(wrapper);
 
     await wrapper.get('[data-test=create]').trigger('click');
@@ -319,7 +325,7 @@ describe('NewBooking', () => {
 
     const wrapper = await mountPage();
     await chooseServiceAndSlot(wrapper);
-    await wrapper.get('[data-test=employee]').setValue('emp00000000000000000001');
+    await wrapper.get('[data-test=employee]').setValue(EMPLOYEE_ONE_ID);
     await fillNewCustomer(wrapper);
 
     await wrapper.get('[data-test=create]').trigger('click');
@@ -340,7 +346,7 @@ describe('NewBooking', () => {
 
     const wrapper = await mountPage();
     await chooseServiceAndSlot(wrapper);
-    await wrapper.get('[data-test=employee]').setValue('emp00000000000000000001');
+    await wrapper.get('[data-test=employee]').setValue(EMPLOYEE_ONE_ID);
     await fillNewCustomer(wrapper);
 
     const before = availabilityCalls;

@@ -6,6 +6,7 @@ import {
   hasDstTransition,
   instantToLocalDate,
   instantToMinuteOfDay,
+  localDateToDateColumn,
   wallClockToInstant,
   wallClockToInstantOrThrow,
   weekdayOf,
@@ -116,6 +117,22 @@ describe('wallClockToInstant across the fall-back repeat', () => {
       reason: 'NONEXISTENT',
     });
   });
+
+  it('detects a 30-minute repeated interval', () => {
+    expect(wallClockToInstant('2026-04-05', 1 * 60 + 45, 'Australia/Lord_Howe')).toEqual({
+      ok: false,
+      reason: 'AMBIGUOUS',
+    });
+  });
+});
+
+describe('wallClockToInstant at midnight transitions', () => {
+  it('reports a skipped next midnight instead of silently moving to another date', () => {
+    expect(wallClockToInstant('2011-12-29', 1440, 'Pacific/Apia')).toEqual({
+      ok: false,
+      reason: 'NONEXISTENT',
+    });
+  });
 });
 
 describe('wallClockToInstantOrThrow', () => {
@@ -162,6 +179,7 @@ describe('validation', () => {
 
   it('rejects a date that does not exist', () => {
     expect(() => wallClockToInstant('2026-02-30', 0, BERLIN)).toThrow(/Invalid local date/);
+    expect(() => localDateToDateColumn('2026-02-30')).toThrow(/Invalid local date/);
   });
 
   it('rejects an unknown timezone', () => {

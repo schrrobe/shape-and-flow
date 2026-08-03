@@ -14,8 +14,7 @@
  * attribution is carried in the generated file.
  */
 import { readFileSync, writeFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { resolve } from 'node:path';
 
 /** name in our code → `<style>/<file>` in the Font Awesome package. */
 export const WANTED: Record<string, string> = {
@@ -36,11 +35,11 @@ export interface IconData {
   path: string;
 }
 
-const packageDir = dirname(fileURLToPath(import.meta.url));
+const packageDir = process.cwd();
 
 /** Where the package keeps its SVGs. Resolved through the module graph, not guessed. */
 function svgPath(file: string): string {
-  const root = resolve(packageDir, '../node_modules/@fortawesome/fontawesome-free/svgs');
+  const root = resolve(packageDir, 'node_modules/@fortawesome/fontawesome-free/svgs');
 
   return resolve(root, `${file}.svg`);
 }
@@ -98,8 +97,11 @@ export type IconName = keyof typeof ICON_PATHS;
 `;
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const target = resolve(packageDir, '../src/icon-paths.ts');
+if (
+  process.argv[1] !== undefined &&
+  resolve(process.argv[1]) === resolve(packageDir, 'scripts/extract-icons.ts')
+) {
+  const target = resolve(packageDir, 'src/icon-paths.ts');
   writeFileSync(target, render(buildAll()), 'utf8');
   process.stdout.write(`wrote ${String(Object.keys(WANTED).length)} icons to ${target}\n`);
 }

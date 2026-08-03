@@ -29,6 +29,13 @@ KEEP_MINIMUM="${KEEP_MINIMUM:-7}"
 
 require_environment
 
+# The dump is a full copy of the customer table — names, addresses, phone numbers. Set
+# before the directory and the file exist, so neither is ever readable by anybody else:
+# a `chmod` after the verification would leave the archive world-readable for as long as
+# `pg_restore --list` takes to read it back, and would never run at all for a dump that
+# fails verification.
+umask 077
+
 mkdir -p "$BACKUP_DIR"
 
 # UTC, and sortable. A backup named in local time reorders itself twice a year, which is

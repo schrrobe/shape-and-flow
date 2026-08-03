@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 import { cancellationFeePolicySchema } from '../enums.js';
-import { cuidSchema, localeSchema } from '../primitives.js';
+import { boundedInt, cuidSchema, localeSchema } from '../primitives.js';
 
 /**
  * Organization identity and every configurable policy.
@@ -28,9 +28,6 @@ export const SETTINGS_BOUNDS = {
   dataRetentionDays: { min: 30, max: 3650 },
 } as const;
 
-const bounded = (bounds: { min: number; max: number }) =>
-  z.number().int().min(bounds.min).max(bounds.max);
-
 /**
  * The settings fields, flat.
  *
@@ -45,13 +42,13 @@ const settingsShape = {
       (value) => (SETTINGS_BOUNDS.schedulingIntervalMinutes as readonly number[]).includes(value),
       `must be one of ${SETTINGS_BOUNDS.schedulingIntervalMinutes.join(', ')}`,
     ),
-  bookingHorizonDays: bounded(SETTINGS_BOUNDS.bookingHorizonDays),
-  minimumNoticeHours: bounded(SETTINGS_BOUNDS.minimumNoticeHours),
-  reservationTtlMinutes: bounded(SETTINGS_BOUNDS.reservationTtlMinutes),
-  freeCancellationHours: bounded(SETTINGS_BOUNDS.freeCancellationHours),
+  bookingHorizonDays: boundedInt(SETTINGS_BOUNDS.bookingHorizonDays),
+  minimumNoticeHours: boundedInt(SETTINGS_BOUNDS.minimumNoticeHours),
+  reservationTtlMinutes: boundedInt(SETTINGS_BOUNDS.reservationTtlMinutes),
+  freeCancellationHours: boundedInt(SETTINGS_BOUNDS.freeCancellationHours),
   cancellationFeePolicy: cancellationFeePolicySchema,
   cancellationFeeAmountCents: z.number().int().min(0).max(10_000_000),
-  cancellationFeePercent: bounded(SETTINGS_BOUNDS.cancellationFeePercent),
+  cancellationFeePercent: boundedInt(SETTINGS_BOUNDS.cancellationFeePercent),
   /**
    * How long before an appointment each reminder goes out, in minutes.
    *
@@ -61,7 +58,7 @@ const settingsShape = {
   reminderOffsetsMinutes: z.array(z.number().int().min(5).max(43_200)).max(5),
   smsRemindersEnabled: z.boolean(),
   customerNoteEnabled: z.boolean(),
-  dataRetentionDays: bounded(SETTINGS_BOUNDS.dataRetentionDays),
+  dataRetentionDays: boundedInt(SETTINGS_BOUNDS.dataRetentionDays),
   officeNotificationEmail: z.email().max(320),
 } as const;
 

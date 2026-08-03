@@ -1,19 +1,20 @@
-import { createHmac, timingSafeEqual } from 'node:crypto';
-
 import { Controller, Headers, HttpCode, Inject, Logger, Post, Req } from '@nestjs/common';
 import { SkipThrottle } from '@nestjs/throttler';
 
 import { AppError } from '../common/errors/app-error.js';
 import { Public } from '../common/guards/public.decorator.js';
 import { ENV } from '../config/env.schema.js';
+import { CLOCK } from '../domain/time/clock.js';
 import { inboxJobId } from '../messaging/inbox/inbox.reconciler.js';
 import { InboxRecorder } from '../messaging/inbox/inbox.recorder.js';
 import { EnqueueService } from '../messaging/queues/enqueue.service.js';
 import { JOB } from '../messaging/queues/job-contracts.js';
 
+import { verifySvix, verifyTwilio } from './messaging-signatures.js';
 import { rawBodyOf } from './raw-body.js';
 
 import type { AppConfig } from '../config/env.schema.js';
+import type { Clock } from '../domain/time/clock.js';
 import type { WebhookProvider } from '../prisma/client.js';
 import type { RawBodyRequest } from '@nestjs/common';
 import type { Request } from 'express';
@@ -38,6 +39,7 @@ export class MessagingWebhookController {
     private readonly inbox: InboxRecorder,
     private readonly enqueue: EnqueueService,
     @Inject(ENV) private readonly config: AppConfig,
+    @Inject(CLOCK) private readonly clock: Clock,
   ) {}
 
   @Post('resend')
@@ -56,11 +58,21 @@ export class MessagingWebhookController {
       throw invalidSignature();
     }
 
-    this.verify(
-      this.config.RESEND_WEBHOOK_SECRET,
-      `${svixId}.${timestamp}.${rawBody.toString('utf8')}`,
-      signature,
-    );
+    const secret = this.requireSecret(this.config.RESEND_WEBHOOK_SECRET);
+
+    if (
+      !verifySvix({
+        secret,
+        svixId,
+        timestamp,
+        body: rawBody.toString('utf8'),
+        signatureHeader: signature,
+        now: this.clock.now(),
+      })
+    ) {
+      this.logger.warn('rejected a Resend webhook with an invalid signature');
+      throw invalidSignature();
+    }
 
     const event = JSON.parse(rawBody.toString('utf8')) as { type?: unknown };
 
@@ -77,10 +89,28 @@ export class MessagingWebhookController {
 
     if (signature === undefined) throw invalidSignature();
 
-    this.verify(this.config.TWILIO_AUTH_TOKEN, rawBody.toString('utf8'), signature);
+    const authToken = this.requireSecret(this.config.TWILIO_AUTH_TOKEN);
 
-    // Twilio posts form-encoded, so the body is parsed here rather than as JSON.
+    // Twilio posts form-encoded, so the body is parsed here rather than as JSON — and the
+    // parsed parameters are what the signature covers.
     const form = new URLSearchParams(rawBody.toString('utf8'));
+
+    if (
+      !verifyTwilio({
+        authToken,
+        // The URL Twilio was configured with, which is what it signed. Rebuilt from the
+        // configured public origin rather than read from the request: `Host` and the
+        // forwarded-proto headers are attacker-controlled, and a signature verified against
+        // a URL the client chose verifies nothing.
+        url: `${this.config.PUBLIC_API_ORIGIN}/api/webhooks/twilio`,
+        params: Object.fromEntries(form.entries()),
+        signature,
+      })
+    ) {
+      this.logger.warn('rejected a Twilio webhook with an invalid signature');
+      throw invalidSignature();
+    }
+
     const messageSid = form.get('MessageSid');
 
     if (messageSid === null) throw invalidSignature();
@@ -98,27 +128,19 @@ export class MessagingWebhookController {
   }
 
   /**
-   * Verify an HMAC over the raw bytes.
+   * The configured signing secret, or a 500.
    *
-   * Constant-time, and length-checked first because `timingSafeEqual` throws on a
-   * mismatch. A missing secret is a configuration error rather than a reason to accept the
-   * request — an endpoint that verifies nothing is worse than one that is switched off.
+   * A missing secret is a configuration error rather than a reason to accept the request —
+   * an endpoint that verifies nothing is worse than one that is switched off.
    */
-  private verify(secret: string | undefined, signedPayload: string, provided: string): void {
+  private requireSecret(secret: string | undefined): string {
     if (secret === undefined || secret.length === 0) {
       throw new AppError('INTERNAL_ERROR', {
         message: 'A messaging webhook arrived but no signing secret is configured.',
       });
     }
 
-    const expected = createHmac('sha256', secret).update(signedPayload, 'utf8').digest('hex');
-    const left = Buffer.from(expected, 'utf8');
-    const right = Buffer.from(extractHex(provided), 'utf8');
-
-    if (left.length !== right.length || !timingSafeEqual(left, right)) {
-      this.logger.warn('rejected a messaging webhook with an invalid signature');
-      throw invalidSignature();
-    }
+    return secret;
   }
 
   /**
@@ -162,18 +184,6 @@ export class MessagingWebhookController {
 
     return { received: true };
   }
-}
-
-/**
- * Pull the hex digest out of whatever the provider wrapped it in.
- *
- * Svix sends `v1,<base64>` and may send several space-separated versions; Twilio sends a
- * bare digest. Taking the last comma-separated field handles both without a per-provider
- * branch at the comparison site.
- */
-function extractHex(signature: string): string {
-  const first = signature.split(' ')[0] ?? signature;
-  return first.split(',').at(-1) ?? first;
 }
 
 function readType(value: unknown): string {

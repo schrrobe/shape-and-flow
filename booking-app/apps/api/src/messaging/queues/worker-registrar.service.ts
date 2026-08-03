@@ -4,6 +4,7 @@ import { Worker } from 'bullmq';
 import { ExpirySweeper } from '../../booking/expiry.sweeper.js';
 import { ExpiryProcessor } from '../../booking/processors/expiry.processor.js';
 import { StripeEventProcessor } from '../../booking/processors/stripe-event.processor.js';
+import { AuditRetentionService } from '../../common/audit/audit-retention.service.js';
 import {
   correlationId,
   newCorrelationId,
@@ -79,6 +80,7 @@ export class WorkerRegistrarService {
     notifications: NotificationReconciler,
     reminderReconciler: ReminderReconciler,
     idempotency: IdempotencyService,
+    auditRetention: AuditRetentionService,
   ) {
     this.routes = {
       [JOB.BOOKING_EXPIRY_REQUESTED]: (payload) => expiry.handle(payload),
@@ -120,7 +122,12 @@ export class WorkerRegistrarService {
         this.logSweep('reminders rebuilt', await reminderReconciler.runOnce());
       },
       [JOB.SWEEP_RETENTION]: async () => {
-        this.logSweep('notifications redacted', await notifications.redactOld());
+        const [notificationsRedacted, auditRowsDeleted] = await Promise.all([
+          notifications.redactOld(),
+          auditRetention.sweep(),
+        ]);
+        this.logSweep('notifications redacted', notificationsRedacted);
+        this.logSweep('audit rows deleted', auditRowsDeleted);
       },
     };
   }
@@ -213,7 +220,12 @@ export class WorkerRegistrarService {
     fn: () => Promise<T>,
   ): Promise<T> {
     return await runWithCorrelation(payload.correlationId ?? newCorrelationId(), async () => {
-      await this.organizations.refresh();
+      try {
+        await this.organizations.refresh();
+      } catch (error) {
+        const detail = error instanceof Error ? error.stack : String(error);
+        this.logger.error('organization refresh failed; using last known settings', detail);
+      }
       return await fn();
     });
   }
@@ -228,11 +240,21 @@ export class WorkerRegistrarService {
 
   /** Close every worker, waiting for in-flight jobs. Bounded, so shutdown cannot hang. */
   async stop(): Promise<void> {
-    if (this.workers.size === 0) return;
+    if (this.workers.size === 0 && this.connections.length === 0) return;
 
     this.logger.log(`draining ${String(this.workers.size)} workers`);
 
-    const drain = Promise.all([...this.workers.values()].map((worker) => worker.close()));
+    const drain = Promise.allSettled(
+      [...this.workers.values()].map((worker) => worker.close()),
+    ).then((results) => {
+      for (const result of results) {
+        if (result.status === 'rejected') {
+          this.logger.warn(
+            `worker close failed during shutdown: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`,
+          );
+        }
+      }
+    });
 
     await Promise.race([
       drain,
@@ -246,7 +268,14 @@ export class WorkerRegistrarService {
       }),
     ]);
 
-    await Promise.all(this.connections.map((connection) => connection.quit()));
+    const quits = await Promise.allSettled(this.connections.map((connection) => connection.quit()));
+    for (const result of quits) {
+      if (result.status === 'rejected') {
+        this.logger.warn(
+          `Redis quit failed during shutdown: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`,
+        );
+      }
+    }
 
     this.workers.clear();
     this.connections.length = 0;

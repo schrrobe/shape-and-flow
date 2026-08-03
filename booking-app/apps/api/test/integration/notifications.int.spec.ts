@@ -1,9 +1,11 @@
 import { createHmac } from 'node:crypto';
 
 import request from 'supertest';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { FixedClock } from '../../src/domain/time/clock.js';
+import { QUEUE } from '../../src/messaging/queues/job-contracts.js';
+import { BookingNotificationData } from '../../src/notification/booking-notification-data.service.js';
 import { dedupeKey } from '../../src/notification/dedupe-key.js';
 import {
   NOTIFICATION_STALLED_AFTER_MS,
@@ -13,11 +15,20 @@ import {
 import { NotificationService } from '../../src/notification/notification.service.js';
 import { BookingEventProcessor } from '../../src/notification/processors/booking-event.processor.js';
 import { MessagingEventProcessor } from '../../src/notification/processors/messaging-event.processor.js';
+import { ReminderService, reminderJobId } from '../../src/notification/reminder.service.js';
 import { WebhooksModule } from '../../src/webhooks/webhooks.module.js';
-import { PUBLIC_WEB_ORIGIN, createBookingTestApp, enqueued } from '../booking-app.harness.js';
+import {
+  PUBLIC_API_ORIGIN,
+  PUBLIC_WEB_ORIGIN,
+  RESEND_WEBHOOK_SECRET,
+  TWILIO_AUTH_TOKEN,
+  createBookingTestApp,
+  enqueued,
+} from '../booking-app.harness.js';
 import { prisma, resetDatabase } from '../database.harness.js';
 import { SLOT_FRIDAY_0900, makeBooking, seedOrganization } from '../factories/index.js';
 import { loadOrganization } from '../public-app.harness.js';
+import { disconnectRedis, queues, resetQueues } from '../redis.harness.js';
 
 import type { BookingTestApp } from '../booking-app.harness.js';
 import type { SeedContext } from '../factories/index.js';
@@ -106,11 +117,12 @@ async function withSettings(data: Record<string, unknown>): Promise<void> {
   await build();
 }
 
-async function build(): Promise<void> {
+async function build(useRealQueues = false): Promise<void> {
   testApp = await createBookingTestApp({
     organization: await loadOrganization(ctx.organization.id),
     clock,
     extraImports: [WebhooksModule],
+    ...(useRealQueues ? { queues } : {}),
   });
 
   server = testApp.server;
@@ -120,13 +132,23 @@ async function build(): Promise<void> {
   messagingEvents = testApp.app.get(MessagingEventProcessor);
 }
 
-/** A signed Resend webhook, the way Svix signs one. */
+/**
+ * A signed Resend webhook, signed the way Svix actually signs one.
+ *
+ * The secret is base64 behind `whsec_`, and the key is the *decoded* bytes; the digest is
+ * base64, not hex. Signing it any other way here would pass against a verifier that is
+ * wrong in the same way, which is precisely the bug this replaced.
+ *
+ * The timestamp is taken from the test clock because the verifier enforces a tolerance
+ * window against it.
+ */
 function postResend(type: string, data: Record<string, unknown>, svixId = 'msg_1') {
   const body = JSON.stringify({ type, data });
-  const timestamp = '1786000000';
-  const signature = createHmac('sha256', 'test-resend-secret')
+  const timestamp = String(Math.floor(NOW.getTime() / 1000));
+  const key = Buffer.from(RESEND_WEBHOOK_SECRET.replace('whsec_', ''), 'base64');
+  const signature = createHmac('sha256', key)
     .update(`${svixId}.${timestamp}.${body}`, 'utf8')
-    .digest('hex');
+    .digest('base64');
 
   return request(server())
     .post('/webhooks/resend')
@@ -137,10 +159,25 @@ function postResend(type: string, data: Record<string, unknown>, svixId = 'msg_1
     .send(body);
 }
 
-/** A signed Twilio webhook, which is form-encoded. */
+/**
+ * A signed Twilio webhook, which is form-encoded.
+ *
+ * HMAC-SHA1, base64, over the request URL followed by every parameter as `namevalue` sorted
+ * by name — not over the raw body.
+ */
 function postTwilio(fields: Record<string, string>) {
   const body = new URLSearchParams(fields).toString();
-  const signature = createHmac('sha256', 'test-twilio-token').update(body, 'utf8').digest('hex');
+
+  const signedPayload = Object.keys(fields)
+    .sort()
+    .reduce(
+      (accumulator, name) => `${accumulator}${name}${fields[name] ?? ''}`,
+      `${PUBLIC_API_ORIGIN}/api/webhooks/twilio`,
+    );
+
+  const signature = createHmac('sha1', TWILIO_AUTH_TOKEN)
+    .update(signedPayload, 'utf8')
+    .digest('base64');
 
   return (
     request(server())
@@ -166,7 +203,21 @@ beforeEach(async () => {
   };
 });
 
+afterAll(async () => {
+  await disconnectRedis();
+});
+
 describe('queueing', () => {
+  it('does not load booking data from another organization', async () => {
+    const foreign = await seedOrganization(prisma, { slug: 'foreign-studio' });
+    const foreignBooking = await prisma.booking.create({
+      data: makeBooking(foreign, { status: 'CONFIRMED', expiresAt: null }),
+    });
+    const data = testApp.app.get(BookingNotificationData);
+
+    await expect(data.load(foreignBooking.id)).resolves.toBeNull();
+  });
+
   it('creates a PENDING row before sending', async () => {
     const { notificationId } = await queueConfirmation();
 
@@ -386,7 +437,7 @@ describe('one booking.confirmed event', () => {
   });
 
   it('adds an SMS only when enabled and a number exists', async () => {
-    await withSettings({ smsRemindersEnabled: false });
+    await withSettings({ smsConfirmationsEnabled: false });
 
     await bookingEvents.confirmed({
       organizationId: ctx.organization.id,
@@ -396,7 +447,7 @@ describe('one booking.confirmed event', () => {
     expect(await prisma.notification.count({ where: { bookingId, channel: 'SMS' } })).toBe(0);
 
     await prisma.notification.deleteMany({ where: { bookingId } });
-    await withSettings({ smsRemindersEnabled: true });
+    await withSettings({ smsConfirmationsEnabled: true });
 
     await bookingEvents.confirmed({
       organizationId: ctx.organization.id,
@@ -407,7 +458,7 @@ describe('one booking.confirmed event', () => {
   });
 
   it('omits the SMS when the customer gave no number', async () => {
-    await withSettings({ smsRemindersEnabled: true });
+    await withSettings({ smsConfirmationsEnabled: true });
     await prisma.customer.updateMany({ data: { phone: null } });
 
     await bookingEvents.confirmed({
@@ -462,6 +513,31 @@ describe('other booking events', () => {
     expect(testApp.email.sent[0]?.text).toContain('10,00');
   });
 
+  it('includes a pending cancellation refund in the promised amounts', async () => {
+    await prisma.booking.update({
+      where: { id: bookingId },
+      data: { status: 'CANCELED_BY_CUSTOMER', canceledAt: NOW },
+    });
+    const payment = await prisma.payment.findFirstOrThrow({ where: { bookingId } });
+    await prisma.refund.create({
+      data: {
+        organizationId: ctx.organization.id,
+        bookingId,
+        paymentId: payment.id,
+        amountCents: 3500,
+        currency: 'EUR',
+        status: 'PENDING',
+        reason: 'CUSTOMER_CANCELLATION',
+        idempotencyKey: 'test-key-pending-cancellation',
+      },
+    });
+
+    await bookingEvents.canceled({ organizationId: ctx.organization.id, bookingId });
+
+    const row = await prisma.notification.findFirstOrThrow({ where: { bookingId } });
+    expect(row.payload).toMatchObject({ refundedCents: 3500, retainedCents: 1000 });
+  });
+
   it('adds no generic message when the decision already told the customer', async () => {
     await prisma.booking.update({
       where: { id: bookingId },
@@ -478,6 +554,58 @@ describe('other booking events', () => {
     });
 
     expect(await prisma.notification.count({ where: { bookingId } })).toBe(0);
+  });
+
+  it('suppresses a duplicate reschedule message but still replaces reminder jobs', async () => {
+    await testApp.close();
+    await resetQueues();
+    await build(true);
+
+    const reminders = testApp.app.get(ReminderService);
+    const original = await prisma.booking.findUniqueOrThrow({ where: { id: bookingId } });
+    await reminders.schedule(original.id);
+
+    const replacementStartsAt = new Date(original.startsAt.getTime() + 2 * 60 * 60_000);
+    const replacement = await prisma.booking.create({
+      data: {
+        ...makeBooking(ctx, {
+          status: 'CONFIRMED',
+          expiresAt: null,
+          startsAt: replacementStartsAt,
+        }),
+        confirmedAt: NOW,
+        rescheduledFromBookingId: original.id,
+        financialRootBookingId: original.id,
+      },
+    });
+    await prisma.booking.update({
+      where: { id: original.id },
+      data: { status: 'CANCELED_BY_BUSINESS', canceledAt: NOW },
+    });
+
+    await bookingEvents.rescheduled({
+      organizationId: ctx.organization.id,
+      bookingId: replacement.id,
+      previousBookingId: original.id,
+      customerNotificationAlreadyQueued: true,
+    });
+
+    expect(
+      await prisma.notification.count({
+        where: { bookingId: replacement.id, kind: 'BOOKING_RESCHEDULED' },
+      }),
+    ).toBe(0);
+
+    for (const offset of reminders.offsets()) {
+      await expect(
+        queues[QUEUE.NOTIFICATION].getJob(reminderJobId(offset, original.id, original.startsAt)),
+      ).resolves.toBeUndefined();
+      await expect(
+        queues[QUEUE.NOTIFICATION].getJob(
+          reminderJobId(offset, replacement.id, replacement.startsAt),
+        ),
+      ).resolves.toBeDefined();
+    }
   });
 
   it('uses the business template when the business cancelled', async () => {
@@ -653,7 +781,7 @@ describe('POST /webhooks/twilio', () => {
   });
 
   it('marks an undelivered SMS FAILED with the error code', async () => {
-    await withSettings({ smsRemindersEnabled: true });
+    await withSettings({ smsConfirmationsEnabled: true });
     await bookingEvents.confirmed({
       organizationId: ctx.organization.id,
       bookingId,

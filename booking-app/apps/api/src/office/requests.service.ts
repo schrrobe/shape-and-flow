@@ -118,22 +118,15 @@ export class RequestsService {
 
   /**
    * The request is this tenant's and this session may decide it.
-   *
-   * Returns what the customer has paid, which the caller needs in order to know whether
-   * the decision moves money — and therefore whether it needs the refund capability.
    */
-  async assertCancellationReachable(session: OfficeSession, id: string): Promise<number> {
+  async assertCancellationReachable(session: OfficeSession, id: string): Promise<void> {
     const request = await this.prisma.cancellationRequest.findFirst({
       where: { id, organizationId: session.organizationId },
-      select: { booking: { select: { id: true, employeeId: true, currency: true } } },
+      select: { booking: { select: { employeeId: true } } },
     });
 
     if (request === null) throw notFound('Cancellation request not found.');
     this.scope.assertMayAccessEmployee(session, request.booking.employeeId);
-
-    const financials = await this.financials.load(request.booking.id);
-
-    return receivedFrom(financials, request.booking.currency).amountCents;
   }
 
   async assertRescheduleReachable(session: OfficeSession, id: string): Promise<void> {

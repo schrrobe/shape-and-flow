@@ -21,7 +21,7 @@ import {
 } from '@shape-and-flow/booking-contracts';
 
 import { CsrfHeaderGuard } from '../auth/csrf-header.guard.js';
-import { OfficeRoute, OfficeSessionGuard } from '../auth/office-session.guard.js';
+import { OfficeRoute } from '../auth/office-session.guard.js';
 import { RefundCapabilityGuard } from '../auth/refund-capability.guard.js';
 import { Roles } from '../auth/roles.decorator.js';
 import { RolesGuard } from '../auth/roles.guard.js';
@@ -48,8 +48,8 @@ import type { Request } from 'express';
  * and "I extended my Friday" is a decision with a customer on the other end of it.
  */
 @Controller('office/employees')
+@UseGuards(CsrfHeaderGuard, RolesGuard, RefundCapabilityGuard)
 @OfficeRoute()
-@UseGuards(OfficeSessionGuard, CsrfHeaderGuard, RolesGuard, RefundCapabilityGuard)
 export class EmployeesController {
   constructor(private readonly employees: EmployeesService) {}
 

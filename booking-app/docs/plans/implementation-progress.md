@@ -1,8 +1,8 @@
 # Phase 1 — Implementation Progress
 
-Companion to `phase-1-implementation-plan.md`. That document is the spec and does
-not change; this one records what is built, what is next, and the decisions taken
-while implementing that the plan could not have known.
+Companion to `phase-1-implementation-plan.md`. That document is the working spec
+and is revised when implementation or review proves a statement wrong; this one
+records what is built, what is next, and why the implementation diverged.
 
 |                   |                                                                                   |
 | ----------------- | --------------------------------------------------------------------------------- |
@@ -10,7 +10,7 @@ while implementing that the plan could not have known.
 | Tasks complete    | 48 of 49 — only Task 3.4 remains; the 11-task review remediation is done          |
 | Unit tests        | 854 passing (489 api + 220 web + 37 contracts + 41 ui + 67 templates)             |
 | Integration tests | 739 passing                                                                       |
-| End-to-end tests  | 40 passing (20 scenarios × desktop and 360-pixel mobile)                           |
+| End-to-end tests  | 40 passing (18 scenarios × 2 projects + 4 desktop-only accessibility scenarios)   |
 | Gates             | `pnpm lint`, `format`, `typecheck`, `test`, `test:integration`, `test:e2e`, `build` all green |
 
 ## Execution order — vertical slice
@@ -178,10 +178,12 @@ closed: `NewBooking.vue` calls `POST /office/bookings`, and the settings card se
   form and its idempotency key alone — throwing those away would turn a retriable failure
   into a re-typed booking, and the key exists precisely so that a second attempt is safe.
 
-**Task 11.1 is complete.** Sixteen scenarios run against a real browser, a real API
+**Task 11.1 is complete.** Twenty-two scenarios run against a real browser, a real API
 process, a real worker process, real Postgres and real Redis, with only the payment, mail
-and SMS providers faked — and the built bundle behind `vite preview`, not a dev server. A
-customer books in German and gets a reference and a management link; the slot they hold
+and SMS providers faked — and the built bundle behind `vite preview`, not a dev server.
+Eighteen scenarios run in both the desktop and 360-pixel mobile projects; four
+accessibility scenarios are desktop-only, for 40 passing project runs in total. A customer
+books in German and gets a reference and a management link; the slot they hold
 vanishes for the next visitor; an English visitor gets English copy and an English email;
 a double-clicked submit produces one booking; an abandoned checkout blocks the slot and
 the expiry job gives it back; paying after the deadline keeps the appointment; cancelling
@@ -218,12 +220,18 @@ exist, the real clients do not).
 
 ## Version drift from the plan, and why
 
+Snapshot as of 2026-08-02. Re-check these constraints when any pinned tool is
+updated: TypeScript support is documented in
+[`typescript-eslint`'s dependency versions](https://typescript-eslint.io/users/dependency-versions/),
+and Vitest's transformer change is covered by its
+[`experimentalOxc` migration note](https://vitest.dev/guide/migration.html#experimental-oxc).
+
 The plan was written against a slightly older ecosystem. Each of these was a
 decision, not a mechanical bump.
 
-- **TypeScript 6.0.3, not 7.** TS 7 is latest, but `typescript-eslint` 8.65 caps
-  at `<6.1.0`. Type-aware linting is load-bearing for several planned rules, so
-  the newest version that keeps it working wins.
+- **TypeScript 6.0.3, not 7.** As of the snapshot date,
+  `typescript-eslint` 8.65 caps support at `<6.1.0`. Type-aware linting is
+  load-bearing for several planned rules, so the newest compatible version wins.
 - **Prisma 7, with a driver adapter.** Prisma 7 removed `url` from the datasource
   block and requires an adapter, so `PrismaService` builds a `PrismaPg` pool from
   validated config. Its ESM-native `prisma-client` generator also removes the
@@ -910,8 +918,11 @@ Each of these would have passed a casual "it works" check.
   schema has no column for.
 - **BullMQ job-id deduplication only holds while the job exists in Redis.**
   Completed jobs are removed after a day, so a crash that leaves an outbox row
-  unmarked for longer than that can enqueue a second time. Every processor has to be
-  idempotent regardless, which is what the inbox and the idempotency key are for.
+  unmarked for longer than that can enqueue a second time. Before side-effecting
+  processors ship in stage 7, each must persist and conditionally claim a durable
+  delivery key derived from the outbox event id (or enforce an equivalent
+  domain-level applied marker) before sending. Inbox and HTTP request idempotency do
+  not protect outgoing delivery after Redis retention expires.
 
 ## Operational notes
 
@@ -925,22 +936,27 @@ Each of these would have passed a casual "it works" check.
   `SEED_STAFF_PASSWORD` to choose them on a fresh database, which is what the e2e stack
   does. The seed's entrypoint is `src/seed.main.ts`, so `node dist/seed.main.js` works in a
   built image; `pnpm db:seed` runs the same code through tsx.
-- `vitest.integration.config.ts` refuses to run unless `DATABASE_URL` names a
-  database containing `booking_test`.
+- `assertTestDatabaseUrl()` in `src/config/env.schema.ts` parses the PostgreSQL
+  URL and requires the decoded database pathname to be exactly `booking_test`.
+  `test/database.harness.ts` invokes this guard before any truncation, so
+  near-misses such as `production_booking_test` are rejected.
 - `test/redis.harness.ts` refuses to run unless `REDIS_QUEUE_PREFIX` starts with
   `test-`, because its reset calls `obliterate` on every queue. The API and its
-  workers must agree on this variable; if they disagree the workers consume
-  nothing and say nothing.
+  workers must agree on this variable. Worker readiness in stage 7 must expose the
+  effective prefix and configured queue names, so a mismatch is visible and marks
+  the deployment unhealthy instead of leaving a silently idle worker.
 - `test/test-config.module.ts` provides `ENV` for integration tests that boot a
   real Nest container. It deliberately does not use the real `ConfigModule`, which
   calls `process.exit` on a missing variable — a poor diagnostic inside a test
   worker, and unrelated to what such a test is checking. Add variables to it as
   modules under test start reading them.
-- Request handlers must never call `EnqueueService` directly. They write an
-  `OutboxEvent` in the same transaction as the state change, and the dispatcher
-  enqueues from there. Legitimate callers: the outbox dispatcher, webhook
-  controllers (which have already recorded the event durably), the reconcilers,
-  and the scheduler.
+- Request handlers must never call `EnqueueService` directly. State-changing
+  handlers write an `OutboxEvent` in the same transaction as the state change, and
+  the post-commit dispatcher enqueues it. Webhook handlers first persist the inbox
+  event, commit, and return; a non-request-handler dispatcher then enqueues it, with
+  the reconciler recovering the persist/commit-to-enqueue crash window. Legitimate
+  direct callers are therefore dispatchers, reconcilers, and the scheduler — not
+  controllers.
 - Lint is normally ~5 seconds for the whole workspace. One run took 6m37s at 2%
   CPU and another was killed as out-of-memory — machine memory pressure, not the
   code; the same command was clean and fast immediately afterwards. If lint

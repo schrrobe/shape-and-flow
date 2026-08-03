@@ -2,7 +2,7 @@ import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { officeCalendarQuerySchema } from '@shape-and-flow/booking-contracts';
 
 import { CsrfHeaderGuard } from '../auth/csrf-header.guard.js';
-import { CurrentUser, OfficeRoute, OfficeSessionGuard } from '../auth/office-session.guard.js';
+import { CurrentUser, OfficeRoute } from '../auth/office-session.guard.js';
 import { RefundCapabilityGuard } from '../auth/refund-capability.guard.js';
 import { Roles } from '../auth/roles.decorator.js';
 import { RolesGuard } from '../auth/roles.guard.js';
@@ -20,8 +20,8 @@ import type { OfficeCalendarResponse } from '@shape-and-flow/booking-contracts';
  * "their own" is a property of the rows rather than of the route.
  */
 @Controller('office')
+@UseGuards(CsrfHeaderGuard, RolesGuard, RefundCapabilityGuard)
 @OfficeRoute()
-@UseGuards(OfficeSessionGuard, CsrfHeaderGuard, RolesGuard, RefundCapabilityGuard)
 export class CalendarController {
   constructor(private readonly calendar: CalendarService) {}
 

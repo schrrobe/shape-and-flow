@@ -8,7 +8,7 @@ import { correlationMiddleware } from './common/correlation/correlation.middlewa
 import { InFlightRequests } from './common/shutdown/inflight.js';
 import { assertAppRole, loadConfig } from './config/env.schema.js';
 import { loadEnvFile } from './config/load-dotenv.js';
-import { webhookBodyParser } from './webhooks/raw-body.js';
+import { WEBHOOK_BODY_LIMIT, webhookBodyParser } from './webhooks/raw-body.js';
 
 import type { NestExpressApplication } from '@nestjs/platform-express';
 
@@ -34,6 +34,19 @@ async function bootstrap(): Promise<void> {
     rawBody: true,
   });
 
+  // Signature verification consumes the exact bytes. Mount this route-specific parser
+  // before the global JSON/form parsers so oversized webhook requests are rejected while
+  // their bytes are buffered and valid requests remain available as a Buffer.
+  app.use('/api/webhooks', webhookBodyParser);
+
+  // `rawBody: true` alone leaves the parser at Express's 100 KB default, so a large webhook
+  // event would be rejected before any handler saw it. Through `useBodyParser` rather than
+  // `app.use(bodyParser…)`: mounting a parser by hand replaces the one Nest instrumented and
+  // silently leaves `request.rawBody` undefined, which is the failure every signature check
+  // here depends on not happening.
+  app.useBodyParser('json', { limit: WEBHOOK_BODY_LIMIT });
+  app.useBodyParser('urlencoded', { limit: WEBHOOK_BODY_LIMIT, extended: true });
+
   // Route Nest's own logs through pino, so everything is one structured stream.
   const logger = app.get(PinoLogger);
   app.useLogger(logger);
@@ -48,10 +61,6 @@ async function bootstrap(): Promise<void> {
   app.use(correlationMiddleware);
 
   app.setGlobalPrefix('api');
-  // Signature verification consumes the exact bytes. This route-specific parser runs
-  // before Nest's global JSON/form parsers and rejects oversized public requests while
-  // they are being buffered.
-  app.use('/api/webhooks', webhookBodyParser);
   app.use(helmet());
   // Rate limits and audit rows must record the real client IP, not the proxy's.
   app.set('trust proxy', 1);

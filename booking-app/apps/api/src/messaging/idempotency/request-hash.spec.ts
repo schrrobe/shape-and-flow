@@ -40,6 +40,12 @@ describe('canonicalRequestHash', () => {
     );
   });
 
+  it('distinguishes the route target when two requests have the same body', () => {
+    expect(canonicalRequestHash({ reason: 'Closed' }, { id: 'booking-1' })).not.toBe(
+      canonicalRequestHash({ reason: 'Closed' }, { id: 'booking-2' }),
+    );
+  });
+
   it('distinguishes null from absent', () => {
     // `{ employeeId: null }` asks for automatic assignment; `{}` may mean the field
     // was never sent. Replaying one for the other would answer a different question.
@@ -68,6 +74,11 @@ describe('canonicalRequestHash', () => {
     expect(canonicalRequestHash(null)).toBe(canonicalRequestHash(null));
     expect(canonicalRequestHash(null)).not.toBe(canonicalRequestHash({}));
     expect(canonicalRequestHash('text')).not.toBe(canonicalRequestHash({ 0: 'text' }));
+  });
+
+  it('normalises an absent top-level body to JSON null', () => {
+    expect(canonicalRequestJson(undefined)).toBe('null');
+    expect(canonicalRequestHash(undefined)).toBe(canonicalRequestHash(null));
   });
 
   it('produces a hex sha256', () => {

@@ -162,6 +162,21 @@ describe('the api client', () => {
     );
   });
 
+  it('keeps dynamic ids inside one encoded path segment', async () => {
+    queue(
+      () => json({ items: [] }),
+      () => json({ reference: 'SF-1' }),
+    );
+
+    await api.public.employeesFor('service/one?active=true');
+    await api.public.bookingBySession('checkout/one?source=test');
+
+    expect(calls.map((call) => call.url)).toEqual([
+      '/api/public/services/service%2Fone%3Factive%3Dtrue/employees',
+      '/api/public/bookings/by-session/checkout%2Fone%3Fsource%3Dtest',
+    ]);
+  });
+
   it('retries a read once on a 5xx and returns the second answer', async () => {
     queue(
       () => json({ code: 'INTERNAL_ERROR', message: 'x' }, 503),

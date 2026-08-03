@@ -5,11 +5,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { AuthModule } from '../../src/auth/auth.module.js';
 import { CsrfHeaderGuard } from '../../src/auth/csrf-header.guard.js';
 import { EmployeeScopeService } from '../../src/auth/employee-scope.service.js';
-import {
-  CurrentUser,
-  OfficeRoute,
-  OfficeSessionGuard,
-} from '../../src/auth/office-session.guard.js';
+import { CurrentUser, OfficeRoute } from '../../src/auth/office-session.guard.js';
 import {
   RefundCapabilityGuard,
   RequiresRefundCapability,
@@ -71,8 +67,8 @@ let scope: EmployeeScopeService;
  * request with no session has no role to check.
  */
 @Controller('office/probe')
+@UseGuards(CsrfHeaderGuard, RolesGuard, RefundCapabilityGuard)
 @OfficeRoute()
-@UseGuards(OfficeSessionGuard, CsrfHeaderGuard, RolesGuard, RefundCapabilityGuard)
 class ProbeOfficeController {
   constructor(private readonly employees: EmployeeScopeService) {}
 

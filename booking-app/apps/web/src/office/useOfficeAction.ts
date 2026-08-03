@@ -24,19 +24,24 @@ export function useOfficeAction(refetch: () => Promise<void>) {
     busy.value = true;
     error.value = null;
 
+    let applied = false;
+
     try {
       await action();
-      await refetch();
-      return true;
+      applied = true;
     } catch (caught) {
       error.value = officeMessage(caught);
-      // Refetched on failure too. A 409 means the server's state moved, and that is
-      // exactly the moment the screen must stop showing what it thought was true.
-      await refetch().catch(() => undefined);
-      return false;
-    } finally {
-      busy.value = false;
     }
+
+    // Refetched either way, and swallowed either way. On failure a 409 means the server's
+    // state moved, and that is exactly the moment the screen must stop showing what it
+    // thought was true. On success the write has already happened, so a refetch that
+    // fails must not turn it into a reported failure — an operator who reads "failed"
+    // after a refund went out is one click away from paying it twice.
+    await refetch().catch(() => undefined);
+
+    busy.value = false;
+    return applied;
   }
 
   function clearError(): void {

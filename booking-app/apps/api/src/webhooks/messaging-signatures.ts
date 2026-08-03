@@ -19,7 +19,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
  * Svix's own tolerance. Checked rather than merely read: without it a captured request stays
  * replayable forever, because the signature over it never stops being valid.
  */
-export const SVIX_TOLERANCE_MS = 5 * 60_000;
+const SVIX_TOLERANCE_MS = 5 * 60_000;
 
 /**
  * Verify a Svix signature, which is what Resend sends.
