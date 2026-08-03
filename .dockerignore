@@ -1,0 +1,24 @@
+# The build context is the repository root, so this file is what keeps it small.
+# `node_modules` alone is hundreds of megabytes and would be re-installed anyway.
+node_modules
+**/node_modules
+
+# Build output: rebuilt inside the image, and a stale local copy shadowing a fresh build is
+# the kind of difference that only shows up in production.
+**/dist
+**/.turbo
+**/coverage
+**/generated/prisma
+
+# Local state and tooling that has no business in an image.
+.git
+.github
+.claude
+.tokensave
+**/.env
+**/.env.*
+!**/.env.example
+**/*.log
+**/.DS_Store
+**/test-results
+**/playwright-report

@@ -6,6 +6,7 @@ import {
   hasDstTransition,
   instantToLocalDate,
   instantToMinuteOfDay,
+  localDateToDateColumn,
   wallClockToInstant,
   wallClockToInstantOrThrow,
   weekdayOf,
@@ -178,6 +179,7 @@ describe('validation', () => {
 
   it('rejects a date that does not exist', () => {
     expect(() => wallClockToInstant('2026-02-30', 0, BERLIN)).toThrow(/Invalid local date/);
+    expect(() => localDateToDateColumn('2026-02-30')).toThrow(/Invalid local date/);
   });
 
   it('rejects an unknown timezone', () => {

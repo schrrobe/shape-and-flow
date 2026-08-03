@@ -1,0 +1,43 @@
+/*
+ * The only place a colour is written down.
+ *
+ * Everything else names a *role* — `background`, `primary`, `danger` — never a hue, so
+ * changing the palette is one edit here and a component cannot quietly introduce a
+ * fourteenth colour. `tokens.spec.ts` fails on a raw hex anywhere else in the UI package or
+ * the web app.
+ *
+ * The palette is beige, black and orange. The orange is darker than a brand orange usually
+ * is (#C2540A rather than something around #E8710A) for one reason: white text on it has to
+ * reach 4.5:1, and a lighter orange does not. A button label nobody can read is not a
+ * design decision.
+ */
+:root {
+  /* Surfaces, warm rather than grey — the beige is the page, not an accent. */
+  --sf-background: #f5efe6;
+  --sf-surface: #ffffff;
+  --sf-surface-muted: #ede4d6;
+
+  /* Text. Near-black rather than pure black: less harsh on a warm background. */
+  --sf-text-primary: #16130f;
+  --sf-text-secondary: #4a423a;
+
+  --sf-border: #d9cdba;
+
+  /* Action. */
+  --sf-primary: #c2540a;
+  --sf-primary-hover: #a34608;
+  --sf-primary-contrast: #ffffff;
+
+  /* Status surfaces. Backgrounds for a message, not text colours — they carry
+   * `--sf-text-primary` on top, which is why they are pale. */
+  --sf-success: #c8e6c9;
+  --sf-warning: #ffe0b2;
+  --sf-danger: #f5c6c6;
+
+  /* The focus ring is near-black rather than the brand orange: it has to be visible on the
+   * orange button too, where an orange ring would disappear. */
+  --sf-focus-ring: #16130f;
+
+  --sf-radius: 0.5rem;
+  --sf-shadow-card: 0 1px 2px rgb(22 19 15 / 8%), 0 4px 12px rgb(22 19 15 / 6%);
+}

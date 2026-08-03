@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 
+import { AppError } from '../common/errors/app-error.js';
 import { ENV } from '../config/env.schema.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
@@ -79,6 +80,31 @@ export class OrganizationContextService implements OnApplicationBootstrap {
       );
     }
     return this.organization;
+  }
+
+  /**
+   * The organization a background job says it is working on.
+   *
+   * A worker has no request to resolve a tenant from, so it would otherwise fall back to
+   * whichever organization bootstrap happened to load. Today that is always the right
+   * one; the day it is not, a refund would be issued from the wrong Stripe account. So
+   * the job's own `organizationId` is checked against the resolved context rather than
+   * ignored, and a mismatch is a loud failure instead of a silent cross-tenant write.
+   */
+  require(organizationId: string): OrganizationWithSettings {
+    const organization = this.get();
+
+    if (organization.id !== organizationId) {
+      throw new AppError('UNSCOPED_TENANT_QUERY', {
+        status: 500,
+        message:
+          `A job for organization ${organizationId} ran with ${organization.id} in context. ` +
+          'Resolve the organization from the job payload before calling tenant-scoped code.',
+        details: { expected: organizationId, resolved: organization.id },
+      });
+    }
+
+    return organization;
   }
 
   getSettings(): OrganizationSettings {

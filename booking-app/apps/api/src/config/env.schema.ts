@@ -52,6 +52,15 @@ export const envSchema = z
     APP_ROLE: z.enum(['api', 'worker']).default('api'),
     PORT: z.coerce.number().int().min(1).max(65535).default(3000),
     LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
+    /**
+     * The share of `GET /public/availability` request lines that are written.
+     *
+     * That one endpoint is hit on every date change a browsing customer makes, and
+     * nothing else comes close to its volume. Defaulting to 1 means a deployment
+     * that has not thought about this is not quietly dropping lines; turning it
+     * down is a decision an operator takes when the log bill says so.
+     */
+    LOG_SAMPLE_RATE: z.coerce.number().min(0).max(1).default(1),
 
     // ── data stores ──────────────────────────────────────────────────────────
     DATABASE_URL: nonEmpty.refine(
@@ -63,6 +72,15 @@ export const envSchema = z
       (value) => value.startsWith('redis://') || value.startsWith('rediss://'),
       { message: 'REDIS_URL must be a redis:// connection string' },
     ),
+    /**
+     * Namespace for every BullMQ key, so one Redis can serve two environments —
+     * and so the integration suite's queue reset provably cannot reach the
+     * queues an application is using. The API and its workers must agree on this
+     * value; if they disagree the workers consume nothing, silently.
+     */
+    REDIS_QUEUE_PREFIX: nonEmpty
+      .regex(/^[a-z0-9:_-]+$/i, 'REDIS_QUEUE_PREFIX must be a simple key-safe token')
+      .default('bull'),
 
     // ── tenancy ──────────────────────────────────────────────────────────────
     DEFAULT_ORGANIZATION_SLUG: nonEmpty,

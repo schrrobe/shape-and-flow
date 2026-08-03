@@ -183,6 +183,26 @@ export function addLocalDays(date: LocalDate, days: number, zone: string): Local
   return parseLocalDate(date, zone).plus({ days }).toISODate();
 }
 
+/**
+ * A local date as the value a Postgres `date` column compares against.
+ *
+ * A `@db.Date` column holds a calendar value, not an instant, and Prisma hands it over as
+ * the `Date` at UTC midnight. So the conversion in both directions is a plain slice — and
+ * that is exactly why it needs a name here: written inline it looks like an instant
+ * conversion, and the next person to touch it reaches for `instantToLocalDate`, which
+ * answers a *different question* and gets the day before for zones east of UTC.
+ */
+export function localDateToDateColumn(date: LocalDate): Date {
+  parseLocalDate(date, 'UTC');
+
+  return new Date(`${date}T00:00:00.000Z`);
+}
+
+/** And back: what a `@db.Date` column read means as a local date. */
+export function dateColumnToLocalDate(value: Date): LocalDate {
+  return value.toISOString().slice(0, 10);
+}
+
 /** True when the local date falls on a day containing a DST transition. */
 export function hasDstTransition(date: LocalDate, zone: string): boolean {
   const startOfDay = parseLocalDate(date, zone);

@@ -46,6 +46,19 @@ export default mergeConfig(
         NODE_ENV: 'test',
         DATABASE_URL: TEST_DATABASE_URL,
         REDIS_URL: TEST_REDIS_URL,
+        // The queue tests obliterate every queue between tests. A prefix of its
+        // own means that reset cannot reach an application's queues even if
+        // REDIS_URL is pointed at the development instance; test/redis.harness.ts
+        // refuses to run without it.
+        REDIS_QUEUE_PREFIX: 'test-bull',
+        // The rest of what `env.schema.ts` requires. Most suites inject a stub config
+        // through the harness, but the worker-bootstrap suite builds the real container
+        // and therefore the real configuration -- which is the point of that suite.
+        DEFAULT_ORGANIZATION_SLUG: 'shape-and-flow',
+        PUBLIC_WEB_ORIGIN: 'http://localhost:3000',
+        PUBLIC_API_ORIGIN: 'http://localhost:3001',
+        EMAIL_FROM_ADDRESS: 'test@shape-and-flow.example',
+        EMAIL_FROM_NAME: 'Shape and Flow (test)',
       },
       coverage: { enabled: false },
     },

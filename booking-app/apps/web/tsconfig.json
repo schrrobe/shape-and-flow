@@ -1,0 +1,10 @@
+{
+  "extends": "@shape-and-flow/booking-config/tsconfig.vue.json",
+  "compilerOptions": {
+    "types": ["vite/client", "node"],
+    "paths": {
+      "@/*": ["./src/*"]
+    }
+  },
+  "include": ["src/**/*.ts", "src/**/*.vue", "e2e/**/*.ts", "*.config.ts"]
+}

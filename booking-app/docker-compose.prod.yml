@@ -1,0 +1,196 @@
+# The production stack: five long-running containers and one that has to finish first.
+#
+#     docker compose --env-file booking-app/.env.production \
+#                    -f booking-app/docker-compose.prod.yml up -d --wait
+#
+# Run it from the repository root — the build contexts are the root, because the lockfile
+# and the workspace manifest live there and an install without them is not the install that
+# was tested.
+#
+# ── `--env-file` is not optional ────────────────────────────────────────────
+#
+# Compose reads `${...}` substitutions from `--env-file`, defaulting to a `.env` beside this
+# file. That default is `booking-app/.env`, which is the *development* configuration —
+# pointing at a Postgres on port 5433 with the password `booking`. Omitting the flag would
+# not fail cleanly; it would quietly deploy with whatever development happens to hold. The
+# `:?` guards below turn that into a refusal instead, naming the variable that was missing.
+#
+# ── Configuration ───────────────────────────────────────────────────────────
+#
+# Everything comes from `booking-app/.env.production`, which is git-ignored and is the only
+# place a secret is written. Nothing below interpolates a secret into this file, so it can
+# be read, diffed and committed without a second thought.
+#
+# ── What is published ───────────────────────────────────────────────────────
+#
+# Only the API and the web bundle, and only on 127.0.0.1. Postgres and Redis are reachable
+# from the compose network and from nowhere else — not even from another process on this
+# host. The edge nginx is what the internet talks to; see infrastructure/nginx/booking.conf.
+name: shape-and-flow-booking-prod
+
+# Anchors, so a change to the log policy or the restart policy is one edit rather than five.
+x-logging: &logging
+  driver: json-file
+  options:
+    # A container that fills the disk takes the database down with it. Ten files of ten
+    # megabytes is a few hours of request logs at a real booking volume, which is long
+    # enough to debug an incident and short enough to bound.
+    max-size: '10m'
+    max-file: '10'
+
+x-hardening: &hardening
+  security_opt:
+    - no-new-privileges:true
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: sf-booking-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - booking-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+    logging: *logging
+    <<: *hardening
+
+  redis:
+    image: redis:7-alpine
+    container_name: sf-booking-redis
+    # Append-only, fsync every second. The queue holds jobs that were already committed to
+    # the outbox, so a lost second of Redis costs a retry rather than a lost notification —
+    # but it is still the difference between a delayed reminder and a missing one.
+    command: ['redis-server', '--appendonly', 'yes', '--appendfsync', 'everysec']
+    volumes:
+      - booking-redis-data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+    restart: unless-stopped
+    logging: *logging
+    <<: *hardening
+
+  # ── The gate ───────────────────────────────────────────────────────────────
+  #
+  # Runs to completion before either application container starts, so no process ever
+  # opens a connection to a database whose schema it was not built against.
+  #
+  # A separate image from the API's, built from the same Dockerfile: the runtime image has
+  # no Prisma CLI on purpose, because a container serving traffic must not be able to
+  # rewrite the schema it is reading.
+  migrate:
+    build:
+      context: ..
+      dockerfile: booking-app/apps/api/Dockerfile
+      target: migrate
+    image: sf-booking-migrate:${IMAGE_TAG:-local}
+    container_name: sf-booking-migrate
+    env_file: [.env.production]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # Never restarted. A migration that failed must be looked at, not retried in a loop
+    # against a database it may have half-changed.
+    restart: 'no'
+    logging: *logging
+    <<: *hardening
+
+  api:
+    build:
+      context: ..
+      dockerfile: booking-app/apps/api/Dockerfile
+      target: api
+    image: sf-booking-api:${IMAGE_TAG:-local}
+    container_name: sf-booking-api
+    env_file: [.env.production]
+    environment:
+      # Declared here, not in the env file, and deliberately: one file configures both
+      # processes, and a stray `APP_ROLE` in it would either stop the worker from starting
+      # or — worse — leave two API processes and no worker, with the queue silently
+      # filling. Compose's `environment` wins over `env_file`, so this cannot be
+      # overridden by accident.
+      APP_ROLE: api
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    # Loopback only. Reaching this from another machine goes through the edge nginx, which
+    # is where TLS, the forwarded headers and the request id come from.
+    ports:
+      - '127.0.0.1:${API_PUBLISH_PORT:-3001}:3001'
+    # The healthcheck is the image's, and it asks `/api/health/ready` — database, Redis and
+    # applied migrations, each reported by name. Repeating it here would be a second copy
+    # to keep in step.
+    read_only: true
+    tmpfs:
+      - /tmp
+    restart: unless-stopped
+    logging: *logging
+    <<: *hardening
+
+  worker:
+    build:
+      context: ..
+      dockerfile: booking-app/apps/api/Dockerfile
+      target: worker
+    image: sf-booking-worker:${IMAGE_TAG:-local}
+    container_name: sf-booking-worker
+    env_file: [.env.production]
+    environment:
+      APP_ROLE: worker
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    # No port and no healthcheck: it serves nothing, and a probe that cannot reach it would
+    # only be able to lie. Its health is the queue depth and the failed-job count that
+    # `/api/health/detail` reports.
+    read_only: true
+    tmpfs:
+      - /tmp
+    restart: unless-stopped
+    logging: *logging
+    <<: *hardening
+
+  web:
+    build:
+      context: ..
+      dockerfile: booking-app/apps/web/Dockerfile
+    image: sf-booking-web:${IMAGE_TAG:-local}
+    container_name: sf-booking-web
+    # No env_file. The bundle is built, not configured: it talks to `/api` on whatever
+    # origin served it, so there is nothing to inject and nothing that can be wrong.
+    ports:
+      - '127.0.0.1:${WEB_PUBLISH_PORT:-8080}:8080'
+    # It does not depend on the API. A static bundle that loads while the API is restarting
+    # shows the application's own error state, which is a better page than a 502 from nginx.
+    read_only: true
+    tmpfs:
+      - /tmp
+    restart: unless-stopped
+    logging: *logging
+    <<: *hardening
+
+volumes:
+  # Named, and named distinctly from the development stack's, so `down -v` in one project
+  # cannot destroy the other's data.
+  booking-postgres-data:
+  booking-redis-data:

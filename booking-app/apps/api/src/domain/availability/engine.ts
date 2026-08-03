@@ -44,7 +44,7 @@ import type { LocalDate, MinuteOfDay } from '../time/local-time.js';
  *    them.
  */
 
-interface Segment {
+export interface Segment {
   startMinute: MinuteOfDay;
   endMinute: MinuteOfDay;
   breaks: { startMinute: MinuteOfDay; endMinute: MinuteOfDay }[];
@@ -56,8 +56,13 @@ interface Segment {
  * A CLOSED exception empties the day. An EXTRA_HOURS exception replaces the
  * recurring hours. Only if there is no exception do the weekday's working hours
  * apply.
+ *
+ * Exported because the office's conflict reporting — "these appointments no longer
+ * fall inside the hours you just saved" — has to ask the same question this asks, and
+ * a second implementation of "which rule applies on this date" would be the one that
+ * disagrees about an EXTRA_HOURS Saturday.
  */
-function segmentsFor(employee: EmployeeSnapshot, date: LocalDate, zone: string): Segment[] {
+export function segmentsFor(employee: EmployeeSnapshot, date: LocalDate, zone: string): Segment[] {
   const exceptions = employee.exceptions.filter((exception) => exception.date === date);
 
   if (exceptions.some((exception) => exception.kind === 'CLOSED')) return [];
