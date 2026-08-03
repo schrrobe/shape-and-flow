@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { SfAlert, SfButton, SfCard } from '@shape-and-flow/booking-ui';
-import { onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRouter } from 'vue-router';
 
@@ -35,15 +35,35 @@ let timer: ReturnType<typeof setTimeout> | undefined;
  */
 const reservation = ref(draft.reservation);
 
-onMounted(() => {
-  const current = reservation.value;
+/**
+ * The Checkout link, and only if it is actually a link to somewhere.
+ *
+ * Checked rather than trusted. The value arrives from the API and travels through the draft
+ * store, and Vue does not sanitize `:href` — a `javascript:` scheme would run on click, and
+ * `location.assign` accepts one too. One scheme check removes the whole class of risk from the
+ * page that hands the customer to a payment provider.
+ */
+const checkoutUrl = computed<string | null>(() => {
+  const candidate = reservation.value?.checkoutUrl;
+  if (candidate === undefined) return null;
 
+  try {
+    return new URL(candidate).protocol === 'https:' ? candidate : null;
+  } catch {
+    return null;
+  }
+});
+
+onMounted(() => {
   // No reservation in memory means a reload landed here — the URL was never meant to be
   // bookmarkable, and the Checkout link is deliberately not persisted.
-  if (current === null) {
+  if (reservation.value === null) {
     void router.replace({ name: 'booking-service' });
     return;
   }
+
+  // Nothing safe to navigate to. The page says so rather than silently sitting on a spinner.
+  if (checkoutUrl.value === null) return;
 
   timer = setTimeout(() => {
     // Re-checked at fire time rather than only when the timer was set. The countdown mounts before
@@ -51,7 +71,8 @@ onMounted(() => {
     // cancel — and cancelling on the event alone would still have redirected.
     if (expired.value) return;
 
-    window.location.assign(current.checkoutUrl);
+    const target = checkoutUrl.value;
+    if (target !== null) window.location.assign(target);
   }, REDIRECT_DELAY_MS);
 });
 
@@ -104,11 +125,15 @@ function onExpired(): void {
       </div>
     </SfAlert>
 
+    <SfAlert v-else-if="checkoutUrl === null" tone="danger">
+      {{ t('errors.INTERNAL_ERROR') }}
+    </SfAlert>
+
     <p v-else>
       <!-- A manual link as well as the redirect: a blocked `location.assign`, an extension, or a
            slow tab must not leave the customer stranded with a live reservation. -->
       <a
-        :href="reservation.checkoutUrl"
+        :href="checkoutUrl"
         class="rounded-sf underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
       >
         {{ t('booking.checkoutManual') }}

@@ -81,7 +81,20 @@ async function poll(): Promise<void> {
   }, delay);
 }
 
+/**
+ * The address the confirmation went to, read before the draft is cleared.
+ *
+ * The confirmed paragraph names it, and that paragraph only renders once polling resolves —
+ * always after this mount. Bound straight to the store it was reliably empty by then, so the
+ * page promised an email to nobody in particular.
+ */
+const email = ref(draft.email);
+
 onMounted(() => {
+  // No session id means there is nothing to resolve — and nothing to clear either: somebody
+  // who opened this page by mistake must not lose a booking they are part-way through.
+  if (sessionId.value === null) return;
+
   void loadOrganization();
   void poll();
 
@@ -110,7 +123,7 @@ onBeforeUnmount(() => {
         </h1>
 
         <p v-if="confirmed" class="mt-2 text-text-secondary">
-          {{ t('success.confirmedBody', { email: draft.email }) }}
+          {{ t('success.confirmedBody', { email }) }}
         </p>
 
         <!-- Three states, and the third never claims failure. A payment that has not been

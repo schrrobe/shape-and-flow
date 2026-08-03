@@ -33,6 +33,14 @@ interface PersistedDraft {
   employeeName: string | null;
   /** `null` means "any available employee", which is a real choice and not an empty one. */
   employeeId: string | null;
+  /**
+   * Persisted rather than derived from `employeeId`.
+   *
+   * "Anyone" is `employeeId: null`, which is indistinguishable from "not asked yet" — so
+   * deriving it meant a reload turned the choice back into an absence, and `enforceReachable`
+   * sent a customer with a slot already picked back to the employee step.
+   */
+  employeeChosen: boolean;
   slotStartsAt: string | null;
   firstName: string;
   lastName: string;
@@ -49,6 +57,7 @@ function emptyDraft(): PersistedDraft {
     servicePriceCents: null,
     employeeName: null,
     employeeId: null,
+    employeeChosen: false,
     slotStartsAt: null,
     firstName: '',
     lastName: '',
@@ -99,8 +108,13 @@ export const useBookingDraft = defineStore('booking-draft', () => {
   const phone = ref(stored.phone);
   const note = ref(stored.note);
 
-  /** True once the customer has picked a specific person rather than "anyone". */
-  const employeeChosen = ref(stored.employeeId !== null);
+  /**
+   * True once the customer has answered the employee step, "anyone" included.
+   *
+   * The `employeeId` fallback is for a draft written before this field existed: an id in
+   * storage was a choice then and still is now.
+   */
+  const employeeChosen = ref(stored.employeeChosen || stored.employeeId !== null);
 
   /**
    * The hosted payment page, and the reservation it belongs to.
@@ -123,6 +137,7 @@ export const useBookingDraft = defineStore('booking-draft', () => {
       servicePriceCents: servicePriceCents.value,
       employeeId: employeeId.value,
       employeeName: employeeName.value,
+      employeeChosen: employeeChosen.value,
       slotStartsAt: slotStartsAt.value,
       firstName: firstName.value,
       lastName: lastName.value,
@@ -146,6 +161,7 @@ export const useBookingDraft = defineStore('booking-draft', () => {
       servicePriceCents,
       employeeId,
       employeeName,
+      employeeChosen,
       slotStartsAt,
       firstName,
       lastName,

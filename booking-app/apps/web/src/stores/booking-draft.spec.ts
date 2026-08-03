@@ -1,5 +1,6 @@
 import { createPinia, setActivePinia } from 'pinia';
 import { beforeEach, describe, expect, it } from 'vitest';
+import { nextTick } from 'vue';
 
 import { DRAFT_STORAGE_KEY, useBookingDraft } from './booking-draft.js';
 
@@ -120,6 +121,40 @@ describe('step reachability', () => {
 
     store.setSlot(new Date('2026-08-14T07:00:00.000Z'));
     expect(store.canReach('details')).toBe(true);
+  });
+
+  it('still opens the slot step after a reload on the "anyone" path', async () => {
+    const first = useBookingDraft();
+    first.setService('s1');
+    first.setEmployee(null);
+    first.setSlot(new Date('2026-08-14T07:00:00.000Z'));
+
+    // The watcher that writes to storage flushes before render, not synchronously. A real
+    // reload is long after that; a test has to wait for it.
+    await nextTick();
+
+    // A fresh store over the same storage is what a page reload produces. "Anyone" is
+    // `employeeId: null`, which looks exactly like "not asked yet" — so a derived
+    // `employeeChosen` sent a customer with a slot already picked back to the employee step.
+    setActivePinia(createPinia());
+    const second = useBookingDraft();
+
+    expect(second.employeeChosen).toBe(true);
+    expect(second.canReach('slot')).toBe(true);
+    expect(second.canReach('details')).toBe(true);
+    expect(second.furthestReachable()).toBe('details');
+  });
+
+  it('treats a draft stored before employeeChosen existed as a choice, if it names an employee', () => {
+    sessionStorage.setItem(
+      DRAFT_STORAGE_KEY,
+      JSON.stringify({ serviceId: 's1', employeeId: 'e1' }),
+    );
+
+    const store = useBookingDraft();
+
+    expect(store.employeeChosen).toBe(true);
+    expect(store.canReach('slot')).toBe(true);
   });
 
   it('reports the furthest reachable step, so a deep link lands somewhere useful', () => {

@@ -73,6 +73,19 @@ const routes: RouteRecordRaw[] = [
   },
 ];
 
+/**
+ * The routes whose fragment is a credential rather than an anchor.
+ *
+ * The management link carries its token in the hash, deliberately — a fragment is not sent to
+ * the server and stays out of access logs. That makes it the wrong thing to hand to a selector
+ * lookup: no element matches, so the router logs a development warning *containing the token*,
+ * and a token that is not a valid CSS id can make the lookup throw mid-navigation.
+ *
+ * Matched on the route name, not on the shape of the hash: a rule that guesses which fragments
+ * look like secrets would be wrong the first time the token alphabet changes.
+ */
+const HASH_IS_A_CREDENTIAL: ReadonlySet<string> = new Set(['manage', 'manage-reschedule']);
+
 export const router = createRouter({
   history: createWebHistory(),
   routes,
@@ -80,7 +93,10 @@ export const router = createRouter({
     // Restore on back, jump to the top otherwise: a wizard step that opens halfway down the
     // previous step's scroll position looks broken.
     if (savedPosition !== null) return savedPosition;
-    if (to.hash !== '') return { el: to.hash };
+
+    const credential = typeof to.name === 'string' && HASH_IS_A_CREDENTIAL.has(to.name);
+    if (to.hash !== '' && !credential) return { el: to.hash };
+
     return { top: 0 };
   },
 });

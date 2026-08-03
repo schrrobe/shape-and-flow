@@ -1,6 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 
-import { EmployeeScopeService } from '../auth/employee-scope.service.js';
+import { ALL_EMPLOYEES, EmployeeScopeService } from '../auth/employee-scope.service.js';
 import { AttendanceService } from '../booking/attendance.service.js';
 import { CLOCK } from '../domain/time/clock.js';
 import {
@@ -13,10 +13,12 @@ import { OutboxReconciler } from '../messaging/outbox/outbox.reconciler.js';
 import { QUEUE_REGISTRY } from '../messaging/queues/enqueue.service.js';
 import { NotificationReconciler } from '../notification/notification.reconciler.js';
 import { OrganizationContextService } from '../organization/organization-context.service.js';
+import { Prisma } from '../prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
 import { deriveDisplayStatus } from './display-status.js';
 
+import type { VisibleEmployees } from '../auth/employee-scope.service.js';
 import type { OfficeSession } from '../auth/session.store.js';
 import type { Clock } from '../domain/time/clock.js';
 import type { QueueRegistry } from '../messaging/queues/enqueue.service.js';
@@ -24,6 +26,17 @@ import type { OfficeDashboardResponse, OperationsHealth } from '@shape-and-flow/
 
 /** Statuses that put an appointment on today's list. */
 const TODAY_STATUSES = ['CONFIRMED', 'COMPLETED', 'NO_SHOW'] as const;
+
+/**
+ * How far back the unpaid count looks.
+ *
+ * Bounded on purpose. Every other figure on this screen is a count over a fixed window, and
+ * an unbounded scan of every confirmed booking a business has ever taken is a query whose
+ * cost grows for a number that fits in a tile. Three months is past the point where an
+ * unpaid appointment is still something the office chases — after that it is a write-off,
+ * not a to-do.
+ */
+const UNPAID_LOOKBACK_DAYS = 90;
 
 const APPOINTMENT_FIELDS = {
   id: true,
@@ -73,13 +86,19 @@ export class DashboardService {
     const organization = this.organizations.get();
     const zone = organization.timezone;
     const organizationId = session.organizationId;
-    const employees = this.scope.employeeFilter(session);
+    const visible = this.scope.visibleEmployeeIds(session);
+    const employees = visible === ALL_EMPLOYEES ? {} : { employeeId: { in: visible } };
 
     const now = this.clock.now();
     const todayDate = instantToLocalDate(now, zone);
     const startOfToday = wallClockToInstantOrThrow(todayDate, 0, zone);
     const startOfTomorrow = wallClockToInstantOrThrow(addLocalDays(todayDate, 1, zone), 0, zone);
     const endOfWeek = wallClockToInstantOrThrow(addLocalDays(todayDate, 8, zone), 0, zone);
+    const unpaidSince = wallClockToInstantOrThrow(
+      addLocalDays(todayDate, -UNPAID_LOOKBACK_DAYS, zone),
+      0,
+      zone,
+    );
 
     const [today, next7DaysCount, pendingCancellations, pendingReschedules, money, operations] =
       await Promise.all([
@@ -107,7 +126,11 @@ export class DashboardService {
         this.prisma.rescheduleRequest.count({
           where: { organizationId, decision: 'PENDING', booking: employees },
         }),
-        this.moneyFigures(organizationId, startOfToday, startOfTomorrow),
+        this.moneyFigures(organizationId, visible, {
+          startOfToday,
+          startOfTomorrow,
+          unpaidSince,
+        }),
         this.operations(),
       ]);
 
@@ -146,34 +169,54 @@ export class DashboardService {
    * The cent arithmetic lives in SQL rather than in a `Money`, which is the one place
    * the domain's ban does not reach. It is a sum of same-currency integer columns, which
    * is the case `Money` exists to protect and not one it can help with here.
+   *
+   * Both figures carry the caller's employee scope, like every other tile on the screen.
+   * Revenue across the whole business is the last thing an EMPLOYEE session should be
+   * handed, and the scope has to reach the payment rows through their booking, because
+   * neither payment table carries an employee column.
    */
   private async moneyFigures(
     organizationId: string,
-    startOfToday: Date,
-    startOfTomorrow: Date,
+    visible: VisibleEmployees,
+    window: { startOfToday: Date; startOfTomorrow: Date; unpaidSince: Date },
   ): Promise<{ todayRevenueCents: number; unpaidConfirmedBookings: number }> {
+    const { startOfToday, startOfTomorrow, unpaidSince } = window;
+
+    // `b` is the bookings row in whichever subquery this is spliced into. Empty for an
+    // unscoped role, so the statement has one shape rather than two.
+    const employees =
+      visible === ALL_EMPLOYEES
+        ? Prisma.empty
+        : Prisma.sql`AND b.employee_id IN (${Prisma.join(visible)})`;
+
     const rows = await this.prisma.$queryRaw<
       { today_revenue_cents: bigint; unpaid_confirmed_bookings: bigint }[]
-    >`
+    >(Prisma.sql`
       SELECT
         (
           COALESCE((
             SELECT SUM(p.amount_cents) FROM payments p
+            JOIN bookings b ON b.id = p.booking_id
             WHERE p.organization_id = ${organizationId}
               AND p.status IN ('SUCCEEDED', 'PARTIALLY_REFUNDED', 'REFUNDED')
               AND p.paid_at >= ${startOfToday} AND p.paid_at < ${startOfTomorrow}
+              ${employees}
           ), 0)
           +
           COALESCE((
             SELECT SUM(m.amount_cents) FROM manual_payments m
+            JOIN bookings b ON b.id = m.booking_id
             WHERE m.organization_id = ${organizationId}
               AND m.paid_at >= ${startOfToday} AND m.paid_at < ${startOfTomorrow}
+              ${employees}
           ), 0)
         ) AS today_revenue_cents,
         (
           SELECT COUNT(*) FROM bookings b
           WHERE b.organization_id = ${organizationId}
             AND b.status = 'CONFIRMED'
+            AND b.starts_at >= ${unpaidSince}
+            ${employees}
             AND (
               COALESCE((
                 SELECT SUM(p.amount_cents) FROM payments p
@@ -186,7 +229,7 @@ export class DashboardService {
               ), 0)
             ) < b.price_cents_snapshot
         ) AS unpaid_confirmed_bookings
-    `;
+    `);
 
     const row = rows[0];
 
