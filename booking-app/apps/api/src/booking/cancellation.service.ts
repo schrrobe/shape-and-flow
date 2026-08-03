@@ -1,6 +1,4 @@
-import { randomUUID } from 'node:crypto';
-
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 
 import { AppError } from '../common/errors/app-error.js';
 import { isUniqueViolation } from '../common/prisma-errors/prisma-errors.js';
@@ -10,14 +8,19 @@ import { computeSuggestedRetainedAmount } from '../domain/pricing/cancellation-f
 import { CLOCK } from '../domain/time/clock.js';
 import { OutboxRecorder } from '../messaging/outbox/outbox.recorder.js';
 import { JOB } from '../messaging/queues/job-contracts.js';
+import { RequestNotificationService } from '../notification/request-notification.service.js';
+import { receivedFrom } from '../office/received.js';
 import { OrganizationContextService } from '../organization/organization-context.service.js';
-import { BookingStatus, PaymentStatus, Prisma, RefundReason } from '../prisma/client.js';
+import { BookingFinancialsService } from '../payment/booking-financials.service.js';
+import { RefundService } from '../payment/refund.service.js';
+import { BookingStatus, Prisma, RefundReason } from '../prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
 import { AuditService } from './audit.service.js';
 import { assertTransition } from './booking-status.machine.js';
 
 import type { Clock } from '../domain/time/clock.js';
+import type { RefundAmount, RefundReservationResult } from '../payment/refund.service.js';
 
 export type CancelByCustomerResult =
   | { outcome: 'CANCELED'; refundId: string | null; refundExpected: Money }
@@ -27,6 +30,7 @@ export interface CancelByBusinessInput {
   bookingId: string;
   officeUserId: string;
   reason: string;
+  mayIssueRefunds: boolean;
   /** Absent means no refund. Zero and absent are different: one is a decision. */
   refundAmountCents?: number | undefined;
 }
@@ -38,9 +42,25 @@ export interface DecideRequestInput {
   /** Absent on approval falls back to the frozen suggestion. */
   retainedAmountCents?: number | undefined;
   note?: string | undefined;
+  /**
+   * Whether this office user may move money.
+   *
+   * Enforced here rather than in the controller, because only the reservation knows
+   * whether this decision actually refunds anything: retention and the paid total are
+   * both read inside the transaction, and comparing them outside it was what made
+   * "accept the suggestion" — an omitted amount — look like a full refund.
+   */
+  mayIssueRefunds: boolean;
 }
 
-/** The columns every cancellation path needs. */
+/**
+ * The columns every cancellation path needs.
+ *
+ * No `payments` relation, deliberately. A rescheduled booking's money sits on the row it
+ * was paid on, so the replacement's own relation is empty and reading it here answered
+ * "nothing was paid" for a booking the customer had paid in full. What was paid comes
+ * from `BookingFinancialsService`, which is the one thing that knows where the money is.
+ */
 const CANCELLABLE = {
   id: true,
   organizationId: true,
@@ -49,9 +69,6 @@ const CANCELLABLE = {
   endsAt: true,
   currency: true,
   priceCentsSnapshot: true,
-  payments: {
-    select: { id: true, status: true, amountCents: true, refundedAmountCents: true },
-  },
 } as const;
 
 /**
@@ -70,13 +87,14 @@ const CANCELLABLE = {
  */
 @Injectable()
 export class CancellationService {
-  private readonly logger = new Logger('Cancellation');
-
   constructor(
     private readonly prisma: PrismaService,
     private readonly organizations: OrganizationContextService,
     private readonly outbox: OutboxRecorder,
     private readonly audit: AuditService,
+    private readonly requestNotifications: RequestNotificationService,
+    private readonly refunds: RefundService,
+    private readonly financials: BookingFinancialsService,
     @Inject(CLOCK) private readonly clock: Clock,
   ) {}
 
@@ -94,7 +112,7 @@ export class CancellationService {
       throw notCancellable('This appointment has already started.');
     }
 
-    const paid = this.paidTotal(booking);
+    const paid = await this.paidTotal(booking);
     const settings = this.organizations.getSettings();
 
     const policy = computeSuggestedRetainedAmount({
@@ -155,11 +173,14 @@ export class CancellationService {
             },
           });
 
-          // What is left to give back, not what arrived. A booking whose payment was
-          // already partly refunded must not have its gross amount refunded again.
-          const refundId = await this.requestRefund(tx, booking, this.refundableTotal(booking), {
-            reason: RefundReason.CUSTOMER_CANCELLATION,
-          });
+          const reserved = await this.reserveRefund(
+            tx,
+            booking,
+            { kind: 'CUMULATIVE_TARGET', targetAmountCents: paid.amountCents },
+            { reason: RefundReason.CUSTOMER_CANCELLATION, mayIssueRefunds: true },
+          );
+
+          const refundId = reserved.refundId;
 
           await this.outbox.record(tx, {
             organizationId: booking.organizationId,
@@ -173,7 +194,14 @@ export class CancellationService {
             },
           });
 
-          return { outcome: 'CANCELED' as const, refundId, refundExpected: paid };
+          return {
+            outcome: 'CANCELED' as const,
+            refundId,
+            // What the reservation actually moves, not what was paid. A booking with an
+            // earlier partial refund, or one settled partly in cash, gives back less than
+            // its paid total — and this number is shown to the customer as a promise.
+            refundExpected: Money.fromCents(reserved.additionalAmountCents, booking.currency),
+          };
         }),
       'cancel-immediately',
     );
@@ -213,13 +241,13 @@ export class CancellationService {
             });
 
             // The office has to be told, and the customer has to be told it is pending.
-            // Both through the outbox, so the notifications commit with the request.
-            await this.outbox.record(tx, {
-              organizationId: booking.organizationId,
-              aggregateType: 'CancellationRequest',
-              aggregateId: request.id,
-              eventType: JOB.NOTIFICATION_SEND,
-              payload: { organizationId: booking.organizationId, notificationId: request.id },
+            // Composed as real notification rows in this transaction, so they commit with
+            // the request.
+            await this.requestNotifications.queueCancellationReceived(tx, {
+              requestId: request.id,
+              bookingId: booking.id,
+              suggestedRetainedCents: suggestedRetained.amountCents,
+              reason: reason ?? null,
             });
 
             return { outcome: 'REQUESTED' as const, requestId: request.id, suggestedRetained };
@@ -297,7 +325,7 @@ export class CancellationService {
             select: CANCELLABLE,
           });
 
-          const paid = this.paidTotal(booking);
+          const paid = await this.paidTotal(booking, tx);
           const retained = this.validateRetained(input, request, paid);
 
           const decided = {
@@ -309,11 +337,20 @@ export class CancellationService {
 
           if (input.decision === 'REJECTED') {
             await tx.cancellationRequest.update({ where: { id: request.id }, data: decided });
+            await this.requestNotifications.queueCancellationDecided(tx, {
+              requestId: request.id,
+              bookingId: booking.id,
+              approved: false,
+              retainedCents: 0,
+              refundedCents: 0,
+              note: input.note ?? null,
+            });
             await this.auditDecision(tx, request, input, null);
             return;
           }
 
-          const refundId = await this.approve(tx, booking, paid, retained, input);
+          const reserved = await this.approve(tx, booking, paid, retained, input);
+          const refundId = reserved.refundId;
 
           await tx.cancellationRequest.update({
             where: { id: request.id },
@@ -322,6 +359,17 @@ export class CancellationService {
               retainedAmountCents: retained.amountCents,
               ...(refundId === null ? {} : { refundId }),
             },
+          });
+
+          await this.requestNotifications.queueCancellationDecided(tx, {
+            requestId: request.id,
+            bookingId: booking.id,
+            approved: true,
+            retainedCents: retained.amountCents,
+            // What the reservation moves, for the same reason the immediate path reports
+            // it: the customer is being told a number they will check against their bank.
+            refundedCents: reserved.additionalAmountCents,
+            note: input.note ?? null,
           });
 
           await this.auditDecision(tx, request, input, retained.amountCents);
@@ -337,7 +385,7 @@ export class CancellationService {
     paid: Money,
     retained: Money,
     input: DecideRequestInput,
-  ): Promise<string | null> {
+  ): Promise<RefundReservationResult> {
     const now = this.clock.now();
     const current = await this.lock(tx, booking.id, booking.organizationId);
 
@@ -370,14 +418,18 @@ export class CancellationService {
       },
     });
 
-    // `paid` is the gross the retained fee was computed against; the refund itself is
-    // bounded by what has not already gone back.
-    const refundId = await this.requestRefund(
+    const reserved = await this.reserveRefund(
       tx,
       booking,
-      paid.minus(retained).cappedAt(this.refundableTotal(booking)),
-      { reason: RefundReason.CUSTOMER_CANCELLATION, officeUserId: input.officeUserId },
+      { kind: 'CUMULATIVE_TARGET', targetAmountCents: paid.minus(retained).amountCents },
+      {
+        reason: RefundReason.CUSTOMER_CANCELLATION,
+        officeUserId: input.officeUserId,
+        mayIssueRefunds: input.mayIssueRefunds,
+      },
     );
+
+    const refundId = reserved.refundId;
 
     await this.outbox.record(tx, {
       organizationId: booking.organizationId,
@@ -388,10 +440,13 @@ export class CancellationService {
         organizationId: booking.organizationId,
         bookingId: booking.id,
         ...(refundId === null ? {} : { refundId }),
+        // The decision message above already tells the customer, and says more than the
+        // generic one would. Without this they get two emails about one cancellation.
+        customerNotificationAlreadyQueued: true,
       },
     });
 
-    return refundId;
+    return reserved;
   }
 
   /**
@@ -443,15 +498,25 @@ export class CancellationService {
             },
           });
 
+          // ADDITIONAL, not a target: an amount the office typed means "refund this much
+          // now", which is a different question from "the customer should end up with
+          // this much back".
           const refundId =
             input.refundAmountCents === undefined
               ? null
-              : await this.requestRefund(
-                  tx,
-                  booking,
-                  Money.fromCents(input.refundAmountCents, booking.currency),
-                  { reason: RefundReason.BUSINESS_CANCELLATION, officeUserId: input.officeUserId },
-                );
+              : (
+                  await this.reserveRefund(
+                    tx,
+                    booking,
+                    { kind: 'ADDITIONAL', amountCents: input.refundAmountCents },
+                    {
+                      reason: RefundReason.BUSINESS_CANCELLATION,
+                      officeUserId: input.officeUserId,
+                      mayIssueRefunds: input.mayIssueRefunds,
+                      ...(input.refundAmountCents > 0 ? { lenient: false } : {}),
+                    },
+                  )
+                ).refundId;
 
           // Any open request is about a decision that has now been overtaken. Closing
           // them here is what stops a request outliving its booking, waiting for an
@@ -520,71 +585,47 @@ export class CancellationService {
   }
 
   /**
-   * Create the refund row, if there is anything to refund.
+   * Reserve the refund a cancellation implies, through the one path that owns the
+   * remaining balance.
    *
-   * A row, not a provider call: the money moves in a worker, driven by the
-   * `refund.requested` outbox event. That is what makes a refund survive a crash between
-   * deciding to refund and Stripe accepting it.
+   * The target is **cumulative**: "the customer should end up with this much back", not
+   * "send this much now". Stated as an instruction, a booking that had already been
+   * partly refunded got the gross amount again — more than the charge, which the
+   * provider then rejected after the office had been told the cancellation went through.
+   *
+   * `lenient` because cancelling an unpaid booking is ordinary, not an error.
    */
-  private async requestRefund(
+  private async reserveRefund(
     tx: Prisma.TransactionClient,
     booking: CancellableBooking,
-    amount: Money,
-    options: { reason: RefundReason; officeUserId?: string },
-  ): Promise<string | null> {
-    if (amount.amountCents <= 0) return null;
+    amount: RefundAmount,
+    options: {
+      reason: RefundReason;
+      mayIssueRefunds: boolean;
+      officeUserId?: string;
+      lenient?: boolean;
+    },
+  ): Promise<RefundReservationResult> {
+    const reserved = await this.refunds.reserveInTransaction(tx, {
+      bookingId: booking.id,
+      amount,
+      reason: options.reason,
+      lenient: options.lenient ?? true,
+      ...(options.officeUserId === undefined ? {} : { officeUserId: options.officeUserId }),
+    });
 
-    // The first settled payment with anything left on it, in a defined order. A refund row
-    // is attached to one payment, so it must not be able to exceed that payment's own
-    // remaining balance — `Refund.amountCents` is what settlement recomputes the payment's
-    // status from.
-    const payment = settledPayments(booking).find((candidate) =>
-      remainingOn(candidate, booking.currency).isPositive(),
-    );
-
-    // An unpaid manual booking cancels with nothing to give back, and so does one whose
-    // payment has already been refunded in full.
-    if (payment === undefined) return null;
-
-    const remaining = remainingOn(payment, booking.currency);
-    const refundable = amount.cappedAt(remaining);
-
-    if (!refundable.equals(amount)) {
-      // Worth a line rather than silence: the caller asked for more than this payment can
-      // give back, which usually means two settled payments on one booking.
-      this.logger.warn(
-        `capped refund on booking ${booking.id} from ${amount.toString()} to ${refundable.toString()}`,
-      );
+    // Checked against what the reservation *actually* moves, not against what the
+    // request asked for. Keeping everything moves nothing and needs no capability;
+    // anything else does, and only the arithmetic above knows which this is.
+    if (reserved.additionalAmountCents > 0 && !options.mayIssueRefunds) {
+      // The same code and wording every other capability refusal uses, so a client
+      // cannot tell a guard-level refusal from this one.
+      throw new AppError('FORBIDDEN_ROLE', {
+        message: 'Your account may not perform this action.',
+      });
     }
 
-    const refund = await tx.refund.create({
-      data: {
-        organizationId: booking.organizationId,
-        bookingId: booking.id,
-        paymentId: payment.id,
-        amountCents: refundable.amountCents,
-        currency: booking.currency,
-        status: 'PENDING',
-        reason: options.reason,
-        // Generated here and stored before any provider call, so a retry after a lost
-        // response cannot refund twice.
-        idempotencyKey: randomUUID(),
-        ...(options.officeUserId === undefined
-          ? {}
-          : { issuedByOfficeUserId: options.officeUserId }),
-      },
-      select: { id: true },
-    });
-
-    await this.outbox.record(tx, {
-      organizationId: booking.organizationId,
-      aggregateType: 'Refund',
-      aggregateId: refund.id,
-      eventType: JOB.REFUND_REQUESTED,
-      payload: { organizationId: booking.organizationId, refundId: refund.id },
-    });
-
-    return refund.id;
+    return reserved;
   }
 
   /** How much the retained amount may be, and what it is when unspecified. */
@@ -660,56 +701,22 @@ export class CancellationService {
     return booking;
   }
 
-  /** What actually settled. A PENDING payment has not been received. */
-  private paidTotal(booking: CancellableBooking): Money {
-    return Money.sum(
-      settledPayments(booking).map((payment) =>
-        Money.fromCents(payment.amountCents, booking.currency),
-      ),
-      booking.currency,
-    );
-  }
-
   /**
-   * What can still be given back, which is not what was paid.
+   * What the customer has actually handed over, card and cash together.
    *
-   * A payment already refunded — in full or in part — has returned that money once.
-   * Basing a cancellation refund on the gross amount would send it a second time, with
-   * Stripe's own rejection as the only thing in the way. So the refunded amount comes off
-   * the balance here, before any refund row is created.
+   * Read through the financial root rather than off the booking's own relation. A
+   * reschedule leaves the payment on the row it arrived on, so a replacement booking
+   * looks unpaid to anything that asks it directly — and a cancellation that believed
+   * that refunded nothing while telling the customer the money was on its way.
    */
-  private refundableTotal(booking: CancellableBooking): Money {
-    return Money.sum(
-      settledPayments(booking).map((payment) => remainingOn(payment, booking.currency)),
-      booking.currency,
-    );
+  private async paidTotal(
+    booking: CancellableBooking,
+    tx?: Prisma.TransactionClient,
+  ): Promise<Money> {
+    const financials = await this.financials.load(booking.id, tx);
+
+    return receivedFrom(financials, booking.currency);
   }
-}
-
-const SETTLED_PAYMENT_STATUSES: PaymentStatus[] = [
-  PaymentStatus.SUCCEEDED,
-  PaymentStatus.PARTIALLY_REFUNDED,
-  PaymentStatus.REFUNDED,
-];
-
-/**
- * Settled payments, in a defined order.
- *
- * Sorted by id because `Payment` is indexed only on `bookingId`, so the order the rows
- * arrive in is whatever PostgreSQL found convenient. A refund that picks "the settled
- * payment" needs that choice to be the same one every time it is recomputed.
- */
-function settledPayments(booking: CancellableBooking): CancellableBooking['payments'] {
-  return booking.payments
-    .filter((payment) => SETTLED_PAYMENT_STATUSES.includes(payment.status))
-    .toSorted((left, right) => left.id.localeCompare(right.id));
-}
-
-/** What is left to refund on one payment. Through Money, so no cents are subtracted by hand. */
-function remainingOn(payment: CancellableBooking['payments'][number], currency: string): Money {
-  return Money.fromCents(payment.amountCents, currency).minus(
-    Money.fromCents(payment.refundedAmountCents, currency),
-  );
 }
 
 interface CancellableBooking {
@@ -720,12 +727,6 @@ interface CancellableBooking {
   endsAt: Date;
   currency: string;
   priceCentsSnapshot: number;
-  payments: {
-    id: string;
-    status: PaymentStatus;
-    amountCents: number;
-    refundedAmountCents: number;
-  }[];
 }
 
 function notCancellable(message: string): AppError {

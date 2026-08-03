@@ -9,6 +9,7 @@ import { instantToLocalDate } from '../domain/time/local-time.js';
 import { ManagementTokenService } from '../manage/management-token.service.js';
 import { OutboxRecorder } from '../messaging/outbox/outbox.recorder.js';
 import { JOB } from '../messaging/queues/job-contracts.js';
+import { RequestNotificationService } from '../notification/request-notification.service.js';
 import { OrganizationContextService } from '../organization/organization-context.service.js';
 import { BookingStatus, Prisma } from '../prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
@@ -57,6 +58,7 @@ const RESCHEDULABLE = {
   customerNote: true,
   locale: true,
   origin: true,
+  financialRootBookingId: true,
 } as const;
 
 /**
@@ -86,6 +88,7 @@ export class RescheduleService {
     private readonly outbox: OutboxRecorder,
     private readonly audit: AuditService,
     private readonly tokens: ManagementTokenService,
+    private readonly requestNotifications: RequestNotificationService,
     @Inject(CLOCK) private readonly clock: Clock,
   ) {}
 
@@ -146,12 +149,12 @@ export class RescheduleService {
               select: { id: true },
             });
 
-            await this.outbox.record(tx, {
-              organizationId: booking.organizationId,
-              aggregateType: 'RescheduleRequest',
-              aggregateId: request.id,
-              eventType: JOB.NOTIFICATION_SEND,
-              payload: { organizationId: booking.organizationId, notificationId: request.id },
+            // A real notification row in this transaction, so the confirmation that the
+            // request arrived commits with the request itself.
+            await this.requestNotifications.queueRescheduleReceived(tx, {
+              requestId: request.id,
+              bookingId: booking.id,
+              requestedStartsAt: input.requestedStartsAt,
             });
 
             return { requestId: request.id };
@@ -213,6 +216,12 @@ export class RescheduleService {
 
             if (input.decision === 'REJECTED') {
               await this.writeDecision(tx, input, null);
+              await this.requestNotifications.queueRescheduleDecided(tx, {
+                requestId: decision.id,
+                bookingId: decision.bookingId,
+                approved: false,
+                note: input.note ?? null,
+              });
               await this.auditDecision(tx, decision.organizationId, input, null);
               return { newBookingId: null };
             }
@@ -303,6 +312,11 @@ export class RescheduleService {
         // The lineage link: which appointment this one replaced. An audit trail, not a
         // lookup path — the payment itself is moved below.
         rescheduledFromBookingId: booking.id,
+        // Copied, not chained. After two moves the charge would otherwise be two hops
+        // away and every financial read a different length of walk; this keeps the
+        // whole chain one lookup from the booking that was actually paid. The payment,
+        // manual payment and refund rows are deliberately left where they are.
+        financialRootBookingId: booking.financialRootBookingId ?? booking.id,
       },
       select: { id: true, endsAt: true },
     });
@@ -377,6 +391,8 @@ export class RescheduleService {
         previousBookingId: booking.id,
         // The rotated token, so the notification can carry a link that works.
         managementToken: token,
+        // The decision message below already tells the customer the appointment moved.
+        customerNotificationAlreadyQueued: true,
       },
     });
 
@@ -387,6 +403,16 @@ export class RescheduleService {
       aggregateId: created.id,
       eventType: JOB.REMINDER_SCHEDULE,
       payload: { organizationId: booking.organizationId, bookingId: created.id },
+    });
+
+    // Against the replacement, which is the appointment the customer now has, and read
+    // through `tx` because it was created a few statements ago and has not committed.
+    await this.requestNotifications.queueRescheduleDecided(tx, {
+      requestId: request.id,
+      bookingId: created.id,
+      approved: true,
+      managementToken: token,
+      note: input.note ?? null,
     });
 
     await this.auditDecision(tx, booking.organizationId, input, created.id);

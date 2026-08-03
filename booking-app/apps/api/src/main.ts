@@ -4,8 +4,8 @@ import { NestFactory } from '@nestjs/core';
 import helmet from 'helmet';
 import { Logger as PinoLogger } from 'nestjs-pino';
 
-import { AppModule } from './app.module.js';
 import { correlationMiddleware } from './common/correlation/correlation.middleware.js';
+import { InFlightRequests } from './common/shutdown/inflight.js';
 import { assertAppRole, loadConfig } from './config/env.schema.js';
 import { loadEnvFile } from './config/load-dotenv.js';
 import { WEBHOOK_BODY_LIMIT } from './webhooks/raw-body.js';
@@ -20,6 +20,12 @@ async function bootstrap(): Promise<void> {
   // exiting. loadConfig is memoised, so the Nest provider reuses this result.
   const config = loadConfig();
   assertAppRole(config, 'api');
+
+  // Imported here rather than at the top of the file, and it has to be: AppModule
+  // decides at decorator-evaluation time whether the test-support router is part of
+  // the container, and a static import is hoisted above `loadEnvFile()` — so it
+  // would read an environment the .env file had not been applied to yet.
+  const { AppModule } = await import('./app.module.js');
 
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     bufferLogs: true,
@@ -40,8 +46,13 @@ async function bootstrap(): Promise<void> {
   const logger = app.get(PinoLogger);
   app.useLogger(logger);
 
-  // First, and before pino's request logger: everything downstream — including
-  // that logger — reads the correlation id from the scope this opens.
+  // Before everything, including the guards: a request rejected by one is still a
+  // request being served, and ending it under the client is what the drain exists
+  // to avoid.
+  app.use(app.get(InFlightRequests).middleware);
+
+  // Then, and before pino's request logger: everything downstream — including that
+  // logger — reads the correlation id from the scope this opens.
   app.use(correlationMiddleware);
 
   app.setGlobalPrefix('api');

@@ -13,6 +13,7 @@ import { InboxRecorder } from '../src/messaging/inbox/inbox.recorder.js';
 import { OutboxRecorder } from '../src/messaging/outbox/outbox.recorder.js';
 import { EnqueueService, QUEUE_REGISTRY } from '../src/messaging/queues/enqueue.service.js';
 import { QUEUES } from '../src/messaging/queues/job-contracts.js';
+import { REDIS } from '../src/messaging/queues/redis.provider.js';
 import { OrganizationContextService } from '../src/organization/organization-context.service.js';
 import { PrismaService } from '../src/prisma/prisma.service.js';
 import { EMAIL_PROVIDER } from '../src/providers/email/email-provider.js';
@@ -24,10 +25,14 @@ import { SMS_PROVIDER } from '../src/providers/sms/sms-provider.js';
 import { PublicModule } from '../src/public/public.module.js';
 
 import { prisma } from './database.harness.js';
+import { countingPrisma, loadOrganization } from './public-app.harness.js';
 
 import type { AppConfig } from '../src/config/env.schema.js';
+import type { QueueRegistry } from '../src/messaging/queues/enqueue.service.js';
 import type { OrganizationWithSettings } from '../src/organization/organization-context.service.js';
 import type { INestApplication } from '@nestjs/common';
+import type { RequestHandler } from 'express';
+import type { Redis } from 'ioredis';
 import type { Server } from 'node:http';
 
 /**
@@ -75,6 +80,17 @@ function organizationStub(): Partial<OrganizationContextService> {
     getOrganizationId: () => read().id,
     getSettings: () => read().settings,
     getTimezone: () => read().timezone,
+    /**
+     * The one method the stub implements for real.
+     *
+     * `PATCH /office/settings` calls it, and the reason it exists in production — the
+     * cached policy must not survive the row that produced it — is exactly what the
+     * settings test asserts. A stub that answered `undefined` here would make that
+     * assertion pass against a service that never refreshed anything.
+     */
+    refresh: async () => {
+      currentOrganization = await loadOrganization(read().id);
+    },
     // Worker paths pass the organization the job names and expect a mismatch to be rejected,
     // so the stub enforces that rather than waving it through: a test that queued a job for
     // the wrong tenant should fail here, not somewhere downstream.
@@ -108,12 +124,17 @@ const testConfig = {
   SMS_PROVIDER: 'fake',
   RESEND_WEBHOOK_SECRET,
   TWILIO_AUTH_TOKEN,
+  SESSION_COOKIE_NAME: 'sf_office_session',
+  // Short enough that a suite can wait one out if it ever needs to, long enough that
+  // no test races the idle expiry by accident.
+  SESSION_IDLE_TTL_MINUTES: 60,
+  SESSION_ABSOLUTE_TTL_MINUTES: 10_080,
 } as unknown as AppConfig;
 
 @Global()
 @Module({
   providers: [
-    { provide: PrismaService, useValue: prisma },
+    { provide: PrismaService, useFactory: () => (countingEnabled ? countingPrisma : prisma) },
     { provide: CLOCK, useFactory: () => currentClock ?? new FixedClock(new Date()) },
     { provide: OrganizationContextService, useFactory: organizationStub },
     { provide: ENV, useValue: testConfig },
@@ -129,8 +150,28 @@ const testConfig = {
     // Queues that record instead of connecting. The webhook path enqueues, and these
     // tests are about what it stores and decides -- not about Redis, which the queue
     // and outbox suites already cover against a real server.
-    { provide: QUEUE_REGISTRY, useFactory: () => recordingQueueRegistry() },
+    {
+      provide: QUEUE_REGISTRY,
+      // Real BullMQ queues when a suite hands some in. Reminders are delayed jobs whose
+      // ids and delays live in Redis, and a recording fake would prove nothing about
+      // either -- including whether BullMQ accepts the id at all, which is exactly where
+      // the last job-id bug was. Passed in rather than imported here, so importing this
+      // harness never opens a Redis connection a suite did not ask for.
+      useFactory: () => currentQueues ?? recordingQueueRegistry(),
+    },
     EnqueueService,
+    // Only a suite that asked for it gets a connection: importing this harness must
+    // never open one on its own. Anything needing REDIS without it fails at injection,
+    // which is the signal to pass `redis` from redis.harness.ts.
+    {
+      provide: REDIS,
+      useFactory: () => {
+        if (currentRedis === undefined) {
+          throw new Error('Pass `redis` from redis.harness.ts when a suite injects REDIS.');
+        }
+        return currentRedis;
+      },
+    },
     { provide: APP_FILTER, useClass: GlobalExceptionFilter },
     { provide: APP_GUARD, useClass: AuthGuard },
     { provide: APP_INTERCEPTOR, useClass: IdempotencyInterceptor },
@@ -151,11 +192,21 @@ const testConfig = {
     IdempotencyService,
     EnqueueService,
     QUEUE_REGISTRY,
+    REDIS,
   ],
 })
 // A Nest module is a declaration carrier with an empty body by design.
 // eslint-disable-next-line @typescript-eslint/no-extraneous-class
 export class BookingTestHarnessModule {}
+
+/** Set per app, by `createBookingTestApp({ queues })`. */
+let currentQueues: QueueRegistry | undefined;
+
+/** Set per app, by `createBookingTestApp({ redis })`. */
+let currentRedis: Redis | undefined;
+
+/** Set per app, by `createBookingTestApp({ countQueries })`. */
+let countingEnabled = false;
 
 /** Every job the harness's queues were asked to add, in order. */
 export const enqueued: { queue: string; name: string; data: unknown; options: unknown }[] = [];
@@ -198,9 +249,41 @@ export async function createBookingTestApp(options: {
   organization: OrganizationWithSettings;
   clock: FixedClock;
   extraImports?: NonNullable<Parameters<typeof Test.createTestingModule>[0]['imports']>;
+  /** Real BullMQ queues — pass `queues` from `redis.harness.ts` — instead of the fake. */
+  queues?: QueueRegistry;
+  /** A real connection, for anything that stores state in Redis rather than queueing. */
+  redis?: Redis;
+  /**
+   * Mount everything under a prefix, the way `main.ts` mounts `api`.
+   *
+   * Off by default so existing suites keep their short paths. The auth suite sets it,
+   * because the session cookie is scoped to `Path=/api` and a supertest agent's cookie
+   * jar honours that path — without the prefix the jar would silently withhold the
+   * cookie, and every authenticated assertion would pass or fail for the wrong reason.
+   */
+  globalPrefix?: string;
+  /**
+   * Express handlers to mount before the application initialises.
+   *
+   * The correlation middleware is registered with `app.use()` in production rather than
+   * as Nest middleware, so a suite that asserts on correlation ids has to mount it the
+   * same way or it would be proving something about a different wiring.
+   */
+  middleware?: RequestHandler[];
+  /**
+   * Count Prisma operations, so a suite can assert an N+1 has not appeared.
+   *
+   * Off by default: the counting client is a `$extends` proxy, and every suite paying
+   * for it to observe something only one suite asserts is the wrong trade. Read the
+   * total through `queryCounter` from `public-app.harness.ts`.
+   */
+  countQueries?: boolean;
 }): Promise<BookingTestApp> {
   currentOrganization = options.organization;
   currentClock = options.clock;
+  currentQueues = options.queues;
+  currentRedis = options.redis;
+  countingEnabled = options.countQueries ?? false;
   enqueued.length = 0;
 
   const moduleRef = await Test.createTestingModule({
@@ -215,6 +298,8 @@ export async function createBookingTestApp(options: {
   // `rawBody: true` for the same reason production sets it: the webhook verifies a
   // signature over the bytes as sent.
   const app = moduleRef.createNestApplication({ rawBody: true });
+  for (const handler of options.middleware ?? []) app.use(handler);
+  if (options.globalPrefix !== undefined) app.setGlobalPrefix(options.globalPrefix);
   await app.init();
 
   return {

@@ -91,6 +91,45 @@ beforeEach(async () => {
   };
 });
 
+describe('a booking that has been rescheduled twice', () => {
+  it('still shows the customer what they paid', async () => {
+    // The payment stays on the booking that was paid. Read through the replacement's
+    // own `payments` relation it is invisible, and the customer is shown a paid
+    // appointment as owing the full price.
+    const replacement = await prisma.booking.create({
+      data: {
+        ...makeBooking(ctx, {
+          status: 'CANCELED_BY_BUSINESS',
+          expiresAt: null,
+          startsAt: new Date(SLOT_FRIDAY_0900.getTime() + 2 * 60 * 60_000),
+        }),
+        rescheduledFromBookingId: bookingId,
+        financialRootBookingId: bookingId,
+      },
+    });
+
+    const latest = await prisma.booking.create({
+      data: {
+        ...makeBooking(ctx, {
+          status: 'CONFIRMED',
+          expiresAt: null,
+          startsAt: new Date(SLOT_FRIDAY_0900.getTime() + 4 * 60 * 60_000),
+        }),
+        confirmedAt: NOW,
+        rescheduledFromBookingId: replacement.id,
+        financialRootBookingId: bookingId,
+      },
+    });
+
+    const { token } = await issueFor(latest.id);
+    const response = await get('/manage/booking', token).expect(200);
+
+    expect((response.body as { paid: { amountCents: number } }).paid.amountCents).toBe(
+      ctx.service30.priceCents,
+    );
+  });
+});
+
 describe('what the database stores', () => {
   it('stores only a hash, never the token', async () => {
     const { token } = await issueFor(bookingId);

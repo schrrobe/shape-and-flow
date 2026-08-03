@@ -23,8 +23,17 @@ playwright-report/
 test-results/
 
 # secrets
+#
+# Every .env is ignored and the examples are exempted, rather than listing the
+# ones that exist today: `.env.production` was not covered when it was added, and
+# the failure mode of that omission is a live Stripe key in a commit.
 .env
-.env.local
+.env.*
+!.env.example
+!.env.*.example
 
 # logs
 *.log
+
+# database dumps written by infrastructure/scripts/backup.sh
+backups/

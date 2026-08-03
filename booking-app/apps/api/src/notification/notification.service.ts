@@ -11,6 +11,7 @@ import { EMAIL_PROVIDER } from '../providers/email/email-provider.js';
 import { SMS_PROVIDER } from '../providers/sms/sms-provider.js';
 
 import { dedupeKey } from './dedupe-key.js';
+import { reviveDates } from './revive-dates.js';
 
 import type { Clock } from '../domain/time/clock.js';
 import type {
@@ -344,27 +345,3 @@ export class NotificationService {
     }
   }
 }
-
-/**
- * Turn ISO strings back into Dates.
- *
- * The payload went through JSON on the way in, so every Date is now a string, and the
- * templates format Dates. Converting by shape rather than by a field list means a template
- * gaining a date field does not need this function changed.
- */
-function reviveDates(payload: unknown): unknown {
-  if (typeof payload === 'string' && ISO_INSTANT.test(payload)) return new Date(payload);
-  if (Array.isArray(payload)) return payload.map(reviveDates);
-
-  if (payload === null || typeof payload !== 'object') return payload;
-
-  return Object.fromEntries(
-    Object.entries(payload as Record<string, unknown>).map(([key, value]) => [
-      key,
-      reviveDates(value),
-    ]),
-  );
-}
-
-/** Deliberately strict, so a string that merely starts with a date is left alone. */
-const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;

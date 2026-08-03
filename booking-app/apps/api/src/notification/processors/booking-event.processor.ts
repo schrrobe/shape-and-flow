@@ -1,37 +1,15 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 
 import { withSerializationRetry } from '../../common/prisma-errors/serialization-retry.js';
-import { ENV } from '../../config/env.schema.js';
 import { Money } from '../../domain/money/money.js';
+import { receivedFrom } from '../../office/received.js';
 import { OrganizationContextService } from '../../organization/organization-context.service.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
+import { BookingNotificationData } from '../booking-notification-data.service.js';
 import { NotificationService } from '../notification.service.js';
+import { ReminderService } from '../reminder.service.js';
 
-import type { AppConfig } from '../../config/env.schema.js';
-import type { Prisma } from '../../prisma/client.js';
-import type { AppointmentData, CommonData } from '@shape-and-flow/booking-notification-templates';
-
-/** Everything a notification about a booking needs, loaded once. */
-const BOOKING_FOR_NOTIFICATION = {
-  id: true,
-  organizationId: true,
-  reference: true,
-  serviceNameSnapshot: true,
-  startsAt: true,
-  endsAt: true,
-  priceCentsSnapshot: true,
-  currency: true,
-  locale: true,
-  customerNote: true,
-  status: true,
-  employee: { select: { displayName: true } },
-  customer: {
-    select: { id: true, firstName: true, lastName: true, email: true, phone: true },
-  },
-  payments: { select: { status: true, amountCents: true, refundedAmountCents: true } },
-} as const;
-
-type BookingRow = Prisma.BookingGetPayload<{ select: typeof BOOKING_FOR_NOTIFICATION }>;
+import type { BookingRow } from '../booking-notification-data.service.js';
 
 /**
  * Turns a booking event into the messages it implies.
@@ -47,13 +25,12 @@ type BookingRow = Prisma.BookingGetPayload<{ select: typeof BOOKING_FOR_NOTIFICA
  */
 @Injectable()
 export class BookingEventProcessor {
-  private readonly logger = new Logger('BookingEvent');
-
   constructor(
     private readonly prisma: PrismaService,
     private readonly notifications: NotificationService,
     private readonly organizations: OrganizationContextService,
-    @Inject(ENV) private readonly config: AppConfig,
+    private readonly data: BookingNotificationData,
+    private readonly reminders: ReminderService,
   ) {}
 
   /** `booking.confirmed` — the customer's confirmation, and the office's copy. */
@@ -62,7 +39,7 @@ export class BookingEventProcessor {
     bookingId: string;
     managementToken?: string | undefined;
   }): Promise<void> {
-    const booking = await this.load(payload.bookingId);
+    const booking = await this.data.load(payload.bookingId);
     if (booking === null) return;
 
     const settings = this.organizations.getSettings();
@@ -70,7 +47,7 @@ export class BookingEventProcessor {
     await withSerializationRetry(
       () =>
         this.prisma.$transaction(async (tx) => {
-          const appointment = this.appointmentData(booking);
+          const appointment = this.data.appointmentData(booking);
 
           await this.notifications.queue(tx, {
             organizationId: booking.organizationId,
@@ -82,7 +59,7 @@ export class BookingEventProcessor {
             customerId: booking.customer.id,
             data: {
               ...appointment,
-              manageUrl: this.manageUrl(payload.managementToken),
+              manageUrl: this.data.manageUrl(payload.managementToken),
               freeCancellationUntil:
                 settings.freeCancellationHours > 0
                   ? new Date(
@@ -108,7 +85,7 @@ export class BookingEventProcessor {
               customerId: booking.customer.id,
               data: {
                 ...appointment,
-                manageUrl: this.manageUrl(payload.managementToken),
+                manageUrl: this.data.manageUrl(payload.managementToken),
                 freeCancellationUntil: null,
               },
             });
@@ -133,20 +110,42 @@ export class BookingEventProcessor {
         }),
       'notify-booking-confirmed',
     );
+
+    // After the transaction, not inside it. A delayed job is not transactional, and
+    // enqueueing one for a booking whose confirmation then rolled back would leave a
+    // reminder for an appointment nobody has. `fire` re-validates, so the worst case of
+    // enqueueing and then crashing is a job that skips itself.
+    await this.reminders.schedule(booking.id);
   }
 
-  /** `booking.canceled` — who cancelled decides which template. */
-  async canceled(payload: { organizationId: string; bookingId: string }): Promise<void> {
-    const booking = await this.load(payload.bookingId);
+  /**
+   * `booking.canceled` — who cancelled decides which template.
+   *
+   * `customerNotificationAlreadyQueued` is set by a transaction that already composed a
+   * customer message about this cancellation — a decided cancellation request, which
+   * names the retained amount and the office's note. Sending the generic one as well
+   * would be two emails about one decision, the second saying less than the first.
+   */
+  async canceled(payload: {
+    organizationId: string;
+    bookingId: string;
+    customerNotificationAlreadyQueued?: boolean | undefined;
+  }): Promise<void> {
+    if (payload.customerNotificationAlreadyQueued === true) {
+      await this.reminders.cancelFor(payload.bookingId);
+      return;
+    }
+
+    const booking = await this.data.load(payload.bookingId);
     if (booking === null) return;
 
     const byBusiness = booking.status === 'CANCELED_BY_BUSINESS';
-    const refunded = await this.refundedTotal(booking.id, booking.currency);
+    const refunded = this.promisedRefunds(booking);
 
     await withSerializationRetry(
       () =>
         this.prisma.$transaction(async (tx) => {
-          const appointment = this.appointmentData(booking);
+          const appointment = this.data.appointmentData(booking);
 
           if (byBusiness) {
             await this.notifications.queue(tx, {
@@ -187,6 +186,8 @@ export class BookingEventProcessor {
         }),
       'notify-booking-canceled',
     );
+
+    await this.reminders.cancelFor(booking.id);
   }
 
   /** `booking.rescheduled` — the new time, and a link that works. */
@@ -195,31 +196,43 @@ export class BookingEventProcessor {
     bookingId: string;
     previousBookingId: string;
     managementToken?: string | undefined;
+    customerNotificationAlreadyQueued?: boolean | undefined;
   }): Promise<void> {
-    const booking = await this.load(payload.bookingId);
-    const previous = await this.load(payload.previousBookingId);
+    const booking = await this.data.load(payload.bookingId);
+    const previous = await this.data.load(payload.previousBookingId);
     if (booking === null || previous === null) return;
 
-    await withSerializationRetry(
-      () =>
-        this.prisma.$transaction(async (tx) => {
-          await this.notifications.queue(tx, {
-            organizationId: booking.organizationId,
-            kind: 'BOOKING_RESCHEDULED',
-            channel: 'EMAIL',
-            locale: booking.locale,
-            recipient: booking.customer.email,
-            bookingId: booking.id,
-            customerId: booking.customer.id,
-            data: {
-              ...this.appointmentData(booking),
-              manageUrl: this.manageUrl(payload.managementToken),
-              previousStartsAt: previous.startsAt,
-            },
-          });
-        }),
-      'notify-booking-rescheduled',
-    );
+    // An approved reschedule request already told the customer, with the office's note.
+    // The reminder work below still has to happen either way.
+    if (payload.customerNotificationAlreadyQueued !== true) {
+      await withSerializationRetry(
+        () =>
+          this.prisma.$transaction(async (tx) => {
+            await this.notifications.queue(tx, {
+              organizationId: booking.organizationId,
+              kind: 'BOOKING_RESCHEDULED',
+              channel: 'EMAIL',
+              locale: booking.locale,
+              recipient: booking.customer.email,
+              bookingId: booking.id,
+              customerId: booking.customer.id,
+              data: {
+                ...this.data.appointmentData(booking),
+                manageUrl: this.data.manageUrl(payload.managementToken),
+                previousStartsAt: previous.startsAt,
+              },
+            });
+          }),
+        'notify-booking-rescheduled',
+      );
+    }
+
+    // The old booking's jobs are keyed on its own id and time, so they need removing
+    // separately — and the new booking needs its own. Either way `fire` would refuse the
+    // stale one: a reschedule replaces the booking row, so the old id is no longer
+    // CONFIRMED.
+    await this.reminders.cancelFor(previous.id);
+    await this.reminders.schedule(booking.id);
   }
 
   /** `refund.succeeded` — the money is on its way back. */
@@ -231,7 +244,7 @@ export class BookingEventProcessor {
 
     if (refund === null) return;
 
-    const booking = await this.load(refund.bookingId);
+    const booking = await this.data.load(refund.bookingId);
     if (booking === null) return;
 
     await withSerializationRetry(
@@ -247,7 +260,7 @@ export class BookingEventProcessor {
             customerId: booking.customer.id,
             // The refund id, so two partial refunds on one booking each get a message.
             dedupeDiscriminator: refund.id,
-            data: { ...this.appointmentData(booking), refundedCents: refund.amountCents },
+            data: { ...this.data.appointmentData(booking), refundedCents: refund.amountCents },
           });
         }),
       'notify-refund-succeeded',
@@ -256,7 +269,7 @@ export class BookingEventProcessor {
 
   /** `booking.payment_failed` — nothing was charged, and the slot is gone. */
   async paymentFailed(payload: { organizationId: string; bookingId: string }): Promise<void> {
-    const booking = await this.load(payload.bookingId);
+    const booking = await this.data.load(payload.bookingId);
     if (booking === null) return;
 
     await withSerializationRetry(
@@ -271,7 +284,7 @@ export class BookingEventProcessor {
             bookingId: booking.id,
             customerId: booking.customer.id,
             data: {
-              ...this.appointmentData(booking),
+              ...this.data.appointmentData(booking),
               reasonCode: 'PAYMENT_FAILED',
               refundedCents: 0,
             },
@@ -279,77 +292,27 @@ export class BookingEventProcessor {
         }),
       'notify-payment-failed',
     );
-  }
 
-  /** The fields every appointment template shares. */
-  private appointmentData(booking: BookingRow): AppointmentData {
-    return {
-      ...this.commonData(),
-      reference: booking.reference,
-      serviceName: booking.serviceNameSnapshot,
-      employeeName: booking.employee.displayName,
-      startsAt: booking.startsAt,
-      endsAt: booking.endsAt,
-      priceCents: booking.priceCentsSnapshot,
-      currency: booking.currency,
-      customerFirstName: booking.customer.firstName,
-    };
-  }
-
-  private commonData(): CommonData {
-    const organization = this.organizations.get();
-
-    return {
-      businessName: organization.name,
-      businessPhone: organization.contactPhone,
-      addressLine: `${organization.addressLine1}, ${organization.postalCode} ${organization.city}`,
-      businessEmail: organization.contactEmail,
-    };
+    await this.reminders.cancelFor(booking.id);
   }
 
   /**
-   * The management link.
+   * What actually arrived, from the booking's financial root.
    *
-   * The token goes in the fragment, after `#`, so it never reaches a server log, a proxy
-   * access log, or a `Referer` header — a fragment is not sent with the request. Without a
-   * token the customer gets the booking page and has to find their email again, which is
-   * the right failure: a link that half works is worse than one that is absent.
+   * Cash counts too: a customer who paid at the desk and then cancelled is owed that
+   * money back, and a message that ignored it would name the wrong retained amount.
    */
-  private manageUrl(token: string | undefined): string {
-    const base = `${this.config.PUBLIC_WEB_ORIGIN}/manage`;
-    return token === undefined ? base : `${base}#${token}`;
+  private paidTotal(booking: BookingRow): Money {
+    return receivedFrom(booking.financials, booking.currency);
   }
 
-  /** What actually arrived. Through Money, because the cent ban is right about this. */
-  private paidTotal(booking: BookingRow): Money {
+  /** Money already returned or reserved as part of the cancellation promise. */
+  private promisedRefunds(booking: BookingRow): Money {
     return Money.sum(
-      booking.payments
-        .filter((payment) => payment.status !== 'PENDING' && payment.status !== 'FAILED')
-        .map((payment) => Money.fromCents(payment.amountCents, booking.currency)),
+      booking.financials.refunds
+        .filter((refund) => refund.status === 'PENDING' || refund.status === 'SUCCEEDED')
+        .map((refund) => Money.fromCents(refund.amountCents, booking.currency)),
       booking.currency,
     );
-  }
-
-  private async refundedTotal(bookingId: string, currency: string): Promise<Money> {
-    const sum = await this.prisma.refund.aggregate({
-      where: { bookingId, status: 'SUCCEEDED' },
-      _sum: { amountCents: true },
-    });
-
-    return Money.fromCents(sum._sum.amountCents ?? 0, currency);
-  }
-
-  /** The booking, or null when it has been deleted since the event was written. */
-  private async load(bookingId: string): Promise<BookingRow | null> {
-    const booking = await this.prisma.booking.findUnique({
-      where: { id: bookingId },
-      select: BOOKING_FOR_NOTIFICATION,
-    });
-
-    if (booking === null) {
-      this.logger.warn(`booking ${bookingId} no longer exists; no notification sent`);
-    }
-
-    return booking;
   }
 }
