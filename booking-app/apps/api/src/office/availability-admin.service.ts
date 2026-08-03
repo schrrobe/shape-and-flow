@@ -178,7 +178,11 @@ export class AvailabilityAdminService {
     if (row === null) throw notFound('Blocked time not found.');
     this.scope.assertMayAccessEmployee(session, row.employeeId);
 
-    await this.prisma.blockedTime.delete({ where: { id }, select: { id: true } });
+    const deleted = await this.prisma.blockedTime.deleteMany({
+      where: { id, organizationId: session.organizationId },
+    });
+
+    if (deleted.count === 0) throw notFound('Blocked time not found.');
   }
 
   /* ── time off ───────────────────────────────────────────────────────────────── */
@@ -281,12 +285,16 @@ export class AvailabilityAdminService {
           }
 
           return await tx.timeOff.update({
-            where: { id },
+            where: { id, organizationId: session.organizationId },
             data: {
               status: body.status,
               ...(body.reason === undefined ? {} : { reason: body.reason }),
-              decidedByOfficeUserId: session.officeUserId,
-              decidedAt: this.clock.now(),
+              ...(body.status === 'REQUESTED'
+                ? { decidedByOfficeUserId: null, decidedAt: null }
+                : {
+                    decidedByOfficeUserId: session.officeUserId,
+                    decidedAt: this.clock.now(),
+                  }),
             },
           });
         }),

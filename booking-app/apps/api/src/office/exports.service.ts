@@ -23,6 +23,46 @@ import type { ExportQuery } from '@shape-and-flow/booking-contracts';
  */
 const PAGE_SIZE = 500;
 
+interface LedgerCursor {
+  at: Date;
+  id: string;
+}
+
+interface LedgerEntry extends LedgerCursor {
+  kind: 'MANUAL' | 'REFUND' | 'STRIPE';
+  cells: readonly (string | number | null | undefined)[];
+}
+
+interface CardLedgerRow {
+  id: string;
+  amountCents: number;
+  currency: string;
+  status: string;
+  paymentMethodType: string | null;
+  paidAt: Date | null;
+  booking: { reference: string; serviceNameSnapshot: string };
+}
+
+interface ManualLedgerRow {
+  id: string;
+  amountCents: number;
+  currency: string;
+  method: string;
+  paidAt: Date;
+  note: string | null;
+  booking: { reference: string; serviceNameSnapshot: string };
+}
+
+interface RefundLedgerRow {
+  id: string;
+  amountCents: number;
+  currency: string;
+  status: string;
+  reason: string;
+  settledAt: Date | null;
+  booking: { reference: string; serviceNameSnapshot: string };
+}
+
 /**
  * The accounting hand-off.
  *
@@ -132,117 +172,10 @@ export class ExportsService {
     });
   }
 
-  /**
-   * Every movement of money in the range, in one file.
-   *
-   * Three sources, one shape. The three reads happen up front rather than page by page,
-   * because a ledger has to be *sorted by date across all three* — paging them
-   * independently would interleave them wrongly, and a bookkeeper reading a month of
-   * movements out of order is worse than a month held in memory.
-   */
-  async payments(organizationId: string, query: ExportQuery): Promise<Readable> {
+  /** Every settled movement of money in the range, merged lazily from three pagers. */
+  payments(organizationId: string, query: ExportQuery): Readable {
     const zone = this.organizations.getTimezone();
     const { from, to } = this.range(query, zone);
-
-    const [payments, manualPayments, refunds] = await Promise.all([
-      this.prisma.payment.findMany({
-        where: { organizationId, paidAt: { gte: from, lt: to } },
-        select: {
-          id: true,
-          amountCents: true,
-          currency: true,
-          status: true,
-          paymentMethodType: true,
-          paidAt: true,
-          booking: { select: { reference: true, serviceNameSnapshot: true } },
-        },
-      }),
-      this.prisma.manualPayment.findMany({
-        where: { organizationId, paidAt: { gte: from, lt: to } },
-        select: {
-          id: true,
-          amountCents: true,
-          currency: true,
-          method: true,
-          paidAt: true,
-          note: true,
-          booking: { select: { reference: true, serviceNameSnapshot: true } },
-        },
-      }),
-      this.prisma.refund.findMany({
-        where: {
-          organizationId,
-          // Filtered on the date the row is *dated* with below — settlement, falling back
-          // to the request. Filtering on `requestedAt` while printing `settledAt` files a
-          // refund requested on the 30th and settled on the 2nd under the wrong month and
-          // then omits it from the right one, so neither file reconciles.
-          OR: [
-            { settledAt: { gte: from, lt: to } },
-            { settledAt: null, requestedAt: { gte: from, lt: to } },
-          ],
-        },
-        select: {
-          id: true,
-          amountCents: true,
-          currency: true,
-          status: true,
-          reason: true,
-          requestedAt: true,
-          settledAt: true,
-          booking: { select: { reference: true, serviceNameSnapshot: true } },
-        },
-      }),
-    ]);
-
-    const entries = [
-      ...payments.map((payment) => ({
-        at: payment.paidAt ?? new Date(0),
-        cells: [
-          'STRIPE',
-          payment.id,
-          payment.booking.reference,
-          payment.booking.serviceNameSnapshot,
-          csvInstant(payment.paidAt, zone),
-          csvAmount(payment.amountCents),
-          payment.currency,
-          payment.status,
-          payment.paymentMethodType,
-          '',
-        ],
-      })),
-      ...manualPayments.map((payment) => ({
-        at: payment.paidAt,
-        cells: [
-          'MANUAL',
-          payment.id,
-          payment.booking.reference,
-          payment.booking.serviceNameSnapshot,
-          csvInstant(payment.paidAt, zone),
-          csvAmount(payment.amountCents),
-          payment.currency,
-          'RECORDED',
-          payment.method,
-          payment.note,
-        ],
-      })),
-      ...refunds.map((refund) => ({
-        at: refund.settledAt ?? refund.requestedAt,
-        cells: [
-          'REFUND',
-          refund.id,
-          refund.booking.reference,
-          refund.booking.serviceNameSnapshot,
-          csvInstant(refund.settledAt ?? refund.requestedAt, zone),
-          // Negative, because that is the direction the money went. A ledger whose
-          // refunds are positive is one somebody will sum wrongly.
-          csvAmount(-refund.amountCents),
-          refund.currency,
-          refund.status,
-          refund.reason,
-          '',
-        ],
-      })),
-    ].sort((left, right) => left.at.getTime() - right.at.getTime());
 
     const header = [
       'kind',
@@ -257,10 +190,201 @@ export class ExportsService {
       'note',
     ];
 
-    return Readable.from([
-      CSV_BOM + csvLine(header),
-      ...entries.map((entry) => csvLine(entry.cells)),
+    const entries = mergeLedgerEntries([
+      this.cardEntries(organizationId, from, to, zone),
+      this.manualEntries(organizationId, from, to, zone),
+      this.refundEntries(organizationId, from, to, zone),
     ]);
+
+    return Readable.from(
+      (async function* generate() {
+        yield CSV_BOM + csvLine(header);
+        for await (const entry of entries) yield csvLine(entry.cells);
+      })(),
+    );
+  }
+
+  private async *cardEntries(
+    organizationId: string,
+    from: Date,
+    to: Date,
+    zone: string,
+  ): AsyncGenerator<LedgerEntry> {
+    let cursor: LedgerCursor | null = null;
+
+    for (;;) {
+      const rows: CardLedgerRow[] = await this.prisma.payment.findMany({
+        where: {
+          organizationId,
+          paidAt: { gte: from, lt: to },
+          ...(cursor === null
+            ? {}
+            : {
+                OR: [{ paidAt: { gt: cursor.at } }, { paidAt: cursor.at, id: { gt: cursor.id } }],
+              }),
+        },
+        select: {
+          id: true,
+          amountCents: true,
+          currency: true,
+          status: true,
+          paymentMethodType: true,
+          paidAt: true,
+          booking: { select: { reference: true, serviceNameSnapshot: true } },
+        },
+        orderBy: [{ paidAt: 'asc' }, { id: 'asc' }],
+        take: PAGE_SIZE,
+      });
+
+      for (const payment of rows) {
+        if (payment.paidAt === null) continue;
+        yield {
+          kind: 'STRIPE',
+          id: payment.id,
+          at: payment.paidAt,
+          cells: [
+            'STRIPE',
+            payment.id,
+            payment.booking.reference,
+            payment.booking.serviceNameSnapshot,
+            csvInstant(payment.paidAt, zone),
+            csvAmount(payment.amountCents),
+            payment.currency,
+            payment.status,
+            payment.paymentMethodType,
+            '',
+          ],
+        };
+      }
+
+      if (rows.length < PAGE_SIZE) return;
+      const last = rows.at(-1);
+      if (last?.paidAt === null || last === undefined) return;
+      cursor = { at: last.paidAt, id: last.id };
+    }
+  }
+
+  private async *manualEntries(
+    organizationId: string,
+    from: Date,
+    to: Date,
+    zone: string,
+  ): AsyncGenerator<LedgerEntry> {
+    let cursor: LedgerCursor | null = null;
+
+    for (;;) {
+      const rows: ManualLedgerRow[] = await this.prisma.manualPayment.findMany({
+        where: {
+          organizationId,
+          paidAt: { gte: from, lt: to },
+          ...(cursor === null
+            ? {}
+            : {
+                OR: [{ paidAt: { gt: cursor.at } }, { paidAt: cursor.at, id: { gt: cursor.id } }],
+              }),
+        },
+        select: {
+          id: true,
+          amountCents: true,
+          currency: true,
+          method: true,
+          paidAt: true,
+          note: true,
+          booking: { select: { reference: true, serviceNameSnapshot: true } },
+        },
+        orderBy: [{ paidAt: 'asc' }, { id: 'asc' }],
+        take: PAGE_SIZE,
+      });
+
+      for (const payment of rows) {
+        yield {
+          kind: 'MANUAL',
+          id: payment.id,
+          at: payment.paidAt,
+          cells: [
+            'MANUAL',
+            payment.id,
+            payment.booking.reference,
+            payment.booking.serviceNameSnapshot,
+            csvInstant(payment.paidAt, zone),
+            csvAmount(payment.amountCents),
+            payment.currency,
+            'RECORDED',
+            payment.method,
+            payment.note,
+          ],
+        };
+      }
+
+      if (rows.length < PAGE_SIZE) return;
+      const last = rows.at(-1);
+      if (last === undefined) return;
+      cursor = { at: last.paidAt, id: last.id };
+    }
+  }
+
+  private async *refundEntries(
+    organizationId: string,
+    from: Date,
+    to: Date,
+    zone: string,
+  ): AsyncGenerator<LedgerEntry> {
+    let cursor: LedgerCursor | null = null;
+
+    for (;;) {
+      const rows: RefundLedgerRow[] = await this.prisma.refund.findMany({
+        where: {
+          organizationId,
+          status: 'SUCCEEDED',
+          settledAt: { gte: from, lt: to },
+          ...(cursor === null
+            ? {}
+            : {
+                OR: [
+                  { settledAt: { gt: cursor.at } },
+                  { settledAt: cursor.at, id: { gt: cursor.id } },
+                ],
+              }),
+        },
+        select: {
+          id: true,
+          amountCents: true,
+          currency: true,
+          status: true,
+          reason: true,
+          settledAt: true,
+          booking: { select: { reference: true, serviceNameSnapshot: true } },
+        },
+        orderBy: [{ settledAt: 'asc' }, { id: 'asc' }],
+        take: PAGE_SIZE,
+      });
+
+      for (const refund of rows) {
+        if (refund.settledAt === null) continue;
+        yield {
+          kind: 'REFUND',
+          id: refund.id,
+          at: refund.settledAt,
+          cells: [
+            'REFUND',
+            refund.id,
+            refund.booking.reference,
+            refund.booking.serviceNameSnapshot,
+            csvInstant(refund.settledAt, zone),
+            csvAmount(-refund.amountCents),
+            refund.currency,
+            refund.status,
+            refund.reason,
+            '',
+          ],
+        };
+      }
+
+      if (rows.length < PAGE_SIZE) return;
+      const last = rows.at(-1);
+      if (last?.settledAt === null || last === undefined) return;
+      cursor = { at: last.settledAt, id: last.id };
+    }
   }
 
   /**
@@ -302,4 +426,46 @@ export class ExportsService {
       })(),
     );
   }
+}
+
+/** Merge sorted sources while holding only one current row from each source. */
+async function* mergeLedgerEntries(
+  sources: readonly AsyncIterable<LedgerEntry>[],
+): AsyncGenerator<LedgerEntry> {
+  const iterators = sources.map((source) => source[Symbol.asyncIterator]());
+  const heads: IteratorResult<LedgerEntry>[] = await Promise.all(
+    iterators.map(async (iterator) => await iterator.next()),
+  );
+
+  try {
+    for (;;) {
+      let earliest = -1;
+      let earliestEntry: LedgerEntry | null = null;
+
+      for (const [index, head] of heads.entries()) {
+        if (head.done === true) continue;
+        if (earliestEntry === null || compareLedgerEntries(head.value, earliestEntry) < 0) {
+          earliest = index;
+          earliestEntry = head.value;
+        }
+      }
+
+      if (earliest === -1 || earliestEntry === null) return;
+      yield earliestEntry;
+
+      const iterator = iterators[earliest];
+      if (iterator === undefined) return;
+      heads[earliest] = await iterator.next();
+    }
+  } finally {
+    await Promise.all(iterators.map(async (iterator) => await iterator.return?.()));
+  }
+}
+
+function compareLedgerEntries(left: LedgerEntry, right: LedgerEntry): number {
+  return (
+    left.at.getTime() - right.at.getTime() ||
+    left.id.localeCompare(right.id) ||
+    left.kind.localeCompare(right.kind)
+  );
 }

@@ -139,9 +139,12 @@ function currentKey(): string {
   return attemptKey.value;
 }
 
-watch([paymentEuros, paymentMethod, paymentNote, refundEuros, refundReason], () => {
+watch(
+  [cancelReason, cancelRefundEuros, paymentEuros, paymentMethod, paymentNote, refundEuros, refundReason],
+  () => {
   attemptKey.value = null;
-});
+  },
+);
 
 function close(): void {
   dialog.value = null;
@@ -161,12 +164,16 @@ async function confirmCancel(): Promise<void> {
   const refund = cancelRefundCents.value;
 
   const done = await action.run(() =>
-    api.office.bookings.cancel(id.value, {
-      reason: cancelReason.value.trim(),
-      ...(cancelRefundEuros.value.trim() === '' || refund === null
-        ? {}
-        : { refund: { amountCents: refund } }),
-    }),
+    api.office.bookings.cancel(
+      id.value,
+      {
+        reason: cancelReason.value.trim(),
+        ...(cancelRefundEuros.value.trim() === '' || refund === null
+          ? {}
+          : { refund: { amountCents: refund } }),
+      },
+      currentKey(),
+    ),
   );
 
   if (done) {

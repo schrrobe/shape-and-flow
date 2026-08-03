@@ -4,6 +4,7 @@ import { Worker } from 'bullmq';
 import { ExpirySweeper } from '../../booking/expiry.sweeper.js';
 import { ExpiryProcessor } from '../../booking/processors/expiry.processor.js';
 import { StripeEventProcessor } from '../../booking/processors/stripe-event.processor.js';
+import { AuditRetentionService } from '../../common/audit/audit-retention.service.js';
 import {
   correlationId,
   newCorrelationId,
@@ -79,6 +80,7 @@ export class WorkerRegistrarService {
     notifications: NotificationReconciler,
     reminderReconciler: ReminderReconciler,
     idempotency: IdempotencyService,
+    auditRetention: AuditRetentionService,
   ) {
     this.routes = {
       [JOB.BOOKING_EXPIRY_REQUESTED]: (payload) => expiry.handle(payload),
@@ -120,7 +122,12 @@ export class WorkerRegistrarService {
         this.logSweep('reminders rebuilt', await reminderReconciler.runOnce());
       },
       [JOB.SWEEP_RETENTION]: async () => {
-        this.logSweep('notifications redacted', await notifications.redactOld());
+        const [notificationsRedacted, auditRowsDeleted] = await Promise.all([
+          notifications.redactOld(),
+          auditRetention.sweep(),
+        ]);
+        this.logSweep('notifications redacted', notificationsRedacted);
+        this.logSweep('audit rows deleted', auditRowsDeleted);
       },
     };
   }

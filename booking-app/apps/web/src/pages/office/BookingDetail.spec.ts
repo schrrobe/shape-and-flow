@@ -82,14 +82,31 @@ let pinia: Pinia;
 let refundKeys: string[] = [];
 /** How many refund attempts the fake API refuses before it accepts one. */
 let refundFailures = 0;
+let cancelKeys: string[] = [];
+/** How many cancellation attempts the fake API refuses before it accepts one. */
+let cancelFailures = 0;
 
 beforeEach(async () => {
   pinia = createPinia();
   setActivePinia(pinia);
   refundKeys = [];
   refundFailures = 0;
+  cancelKeys = [];
+  cancelFailures = 0;
 
   vi.stubGlobal('fetch', (url: string, init?: RequestInit) => {
+    if (url.endsWith('/office/bookings/b1/cancel') && init?.method === 'POST') {
+      const headers = new Headers(init.headers);
+      cancelKeys.push(headers.get('Idempotency-Key') ?? '');
+
+      if (cancelFailures > 0) {
+        cancelFailures -= 1;
+        return Promise.resolve(json({ code: 'INTERNAL', correlationId: 'c1' }, 500));
+      }
+
+      return Promise.resolve(json({ bookingId: 'b1', refundId: null }));
+    }
+
     if (url.includes('/refunds') && init?.method === 'POST') {
       const headers = new Headers(init.headers);
       refundKeys.push(headers.get('Idempotency-Key') ?? '');
@@ -167,6 +184,19 @@ async function openRefundFor(amount: string) {
   return wrapper;
 }
 
+async function openCancelFor(reason: string) {
+  const wrapper = await mountDetail();
+
+  await wrapper.get('[data-test=action-cancel]').trigger('click');
+
+  const input = inputInDialog('[data-test=cancel-reason]');
+  input.value = reason;
+  input.dispatchEvent(new Event('input'));
+  await flushPromises();
+
+  return wrapper;
+}
+
 /** The confirm button of the open dialog, which is the last of its two footer buttons. */
 function confirmButton(): HTMLButtonElement {
   const buttons = [...document.body.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')];
@@ -223,5 +253,36 @@ describe('BookingDetail refunds', () => {
     await confirm();
 
     expect(refundKeys).toHaveLength(0);
+  });
+});
+
+describe('BookingDetail cancellations', () => {
+  it('sends the same idempotency key when the operator retries the same cancellation', async () => {
+    cancelFailures = 1;
+    await openCancelFor('Krankheit');
+
+    await confirm();
+    await confirm();
+
+    expect(cancelKeys).toHaveLength(2);
+    expect(cancelKeys[0]).toBe(cancelKeys[1]);
+    expect(cancelKeys[0]).not.toBe('');
+  });
+
+  it('mints a new key when the cancellation reason changes', async () => {
+    cancelFailures = 1;
+    await openCancelFor('Krankheit');
+
+    await confirm();
+
+    const input = inputInDialog('[data-test=cancel-reason]');
+    input.value = 'Geschlossen';
+    input.dispatchEvent(new Event('input'));
+    await flushPromises();
+
+    await confirm();
+
+    expect(cancelKeys).toHaveLength(2);
+    expect(cancelKeys[0]).not.toBe(cancelKeys[1]);
   });
 });

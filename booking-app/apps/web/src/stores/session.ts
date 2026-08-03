@@ -48,6 +48,8 @@ export const useSession = defineStore('session', () => {
    * request: two would mean two `/auth/me` calls, and the loser deciding last.
    */
   let inflight: Promise<void> | null = null;
+  /** Changes whenever a newer action invalidates an older hydration response. */
+  let generation = 0;
 
   const isAuthenticated = computed(() => user.value !== null);
   const role = computed(() => user.value?.role ?? null);
@@ -67,12 +69,16 @@ export const useSession = defineStore('session', () => {
    */
   async function hydrate(): Promise<void> {
     inflight ??= (async () => {
+      const started = generation;
+
       try {
         const response = await api.auth.me();
+        if (started !== generation) return;
         user.value = response.user;
         expired.value = false;
         unreachable.value = false;
       } catch (error) {
+        if (started !== generation) return;
         user.value = null;
         // A 401 means "not signed in". Anything else means the answer never arrived, and
         // saying "your session expired" to somebody whose network dropped is a lie that
@@ -119,6 +125,7 @@ export const useSession = defineStore('session', () => {
     try {
       await api.auth.logout();
     } finally {
+      generation += 1;
       user.value = null;
       returnTo.value = null;
       expired.value = false;
@@ -147,6 +154,7 @@ export const useSession = defineStore('session', () => {
   function markExpired(attemptedPath: string): boolean {
     if (expired.value) return false;
 
+    generation += 1;
     expired.value = true;
     user.value = null;
     rememberReturnTo(attemptedPath);

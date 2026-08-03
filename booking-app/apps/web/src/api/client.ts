@@ -186,9 +186,9 @@ function backoffMs(attempt: number): number {
  *    cookie, and the API's CSRF guard requires a header a cross-site form post cannot set.
  *  - **Envelope parsing.** A failure arrives as a typed `ApiError` carrying the code and the
  *    correlation id, so a component branches on a code and a support request has an id.
- *  - **A single retry, GETs only.** A read that failed on a transient 5xx is worth repeating; a
- *    write is not, even with an idempotency key, because the key is per attempt and a retry
- *    would consume the customer's one chance to see the real error.
+ *  - **A single retry, GETs only.** A read that failed on a transient 5xx is worth repeating;
+ *    writes are retried only by the caller, which owns the operation's idempotency key and
+ *    can keep it stable while the user decides whether to try again.
  *
  * An `AbortError` propagates untouched. A component that navigated away is not looking at an
  * error message, and turning an abort into one would show it a spurious failure.
@@ -390,10 +390,11 @@ export const api = {
           session: true,
         }),
 
-      cancel: (id: string, body: CancelBookingRequest) =>
+      cancel: (id: string, body: CancelBookingRequest, idempotencyKey: string) =>
         request<{ bookingId: string; refundId: string | null }>(`/office/bookings/${id}/cancel`, {
           method: 'POST',
           body,
+          headers: { 'Idempotency-Key': idempotencyKey },
           session: true,
         }),
 

@@ -42,7 +42,8 @@ import type {
  * `ReservationService` through the office service. What is left in this file is the
  * decision about *who may* — which is the controller's actual job.
  *
- * The three money routes carry `@Idempotent`. A retried request at a busy desk is not a
+ * Every route that creates a booking or moves money carries `@Idempotent`. A retried
+ * request at a busy desk is not a
  * hypothetical, and each of these has a failure mode that costs real money: two
  * bookings, two recorded payments, two refunds.
  */
@@ -101,6 +102,7 @@ export class OfficeBookingsController {
    */
   @Post(':id/cancel')
   @Roles('OWNER', 'ADMIN')
+  @Idempotent('booking.cancel')
   // No `@Audited`: CancellationService writes its row inside the transaction that
   // cancels the booking. A second, after-the-fact row here made every business
   // cancellation appear twice in the log, with a summary that said less.

@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 
 import { BookingModule } from './booking/booking.module.js';
+import { AuditRetentionService } from './common/audit/audit-retention.service.js';
 import { LoggingModule } from './common/logging/logger.module.js';
 import { ConfigModule } from './config/config.module.js';
 import { DomainModule } from './domain/domain.module.js';
@@ -47,6 +48,6 @@ import { ProvidersModule } from './providers/providers.module.js';
     PaymentModule,
     NotificationModule,
   ],
-  providers: [WorkerRegistrarService, SchedulerService],
+  providers: [WorkerRegistrarService, SchedulerService, AuditRetentionService],
 })
 export class WorkerModule {}
