@@ -88,5 +88,11 @@ export type NotificationKind = z.infer<typeof notificationKindSchema>;
 export const notificationChannelSchema = z.enum(['EMAIL', 'SMS']);
 export type NotificationChannel = z.infer<typeof notificationChannelSchema>;
 
-export const notificationStatusSchema = z.enum(['PENDING', 'SENT', 'DELIVERED', 'FAILED']);
+export const notificationStatusSchema = z.enum([
+  'PENDING',
+  'SENDING',
+  'SENT',
+  'DELIVERED',
+  'FAILED',
+]);
 export type NotificationStatus = z.infer<typeof notificationStatusSchema>;

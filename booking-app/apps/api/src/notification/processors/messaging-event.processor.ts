@@ -15,7 +15,17 @@ import type { WebhookProvider } from '../../prisma/client.js';
  * the API response already told us. Only delivery and its failures change what we know.
  */
 const RESEND_DELIVERED = 'email.delivered';
-const RESEND_FAILURES = new Set(['email.bounced', 'email.failed', 'email.complained']);
+const RESEND_FAILURES = new Set(['email.bounced', 'email.failed']);
+
+/**
+ * A complaint is not a delivery failure.
+ *
+ * `email.complained` means the message arrived and the recipient pressed "spam". Recording it
+ * as FAILED would say the confirmation never reached the customer — it did — and would inflate
+ * the reconciler's failure count with something no retry can fix. The verdict stays
+ * delivered; the complaint is kept in `lastError` so it is visible to whoever looks.
+ */
+const RESEND_COMPLAINED = 'email.complained';
 
 /** Twilio's terminal statuses. Anything else is still in flight. */
 const TWILIO_DELIVERED = 'delivered';
@@ -103,6 +113,12 @@ export class MessagingEventProcessor {
     if (type === undefined || providerMessageId === undefined) return null;
 
     if (type === RESEND_DELIVERED) return { providerMessageId, delivered: true };
+
+    // Delivered, and complained about. See the note on RESEND_COMPLAINED.
+    if (type === RESEND_COMPLAINED) {
+      return { providerMessageId, delivered: true, error: type };
+    }
+
     if (RESEND_FAILURES.has(type)) return { providerMessageId, delivered: false, error: type };
 
     return null;
@@ -119,7 +135,11 @@ export class MessagingEventProcessor {
     if (status === TWILIO_DELIVERED) return { providerMessageId, delivered: true };
 
     if (TWILIO_FAILURES.has(status)) {
-      const code = readString(event.ErrorCode);
+      // Twilio sends `ErrorCode` as a JSON number on some transports and as a string on
+      // others. Read as a string only, the numeric form is dropped — and the code is the one
+      // field a support conversation with Twilio actually starts from.
+      const code =
+        typeof event.ErrorCode === 'number' ? String(event.ErrorCode) : readString(event.ErrorCode);
 
       return {
         providerMessageId,

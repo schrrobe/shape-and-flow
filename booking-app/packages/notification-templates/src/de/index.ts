@@ -1,6 +1,6 @@
 import { formatDate, formatDateTime, formatMoneyCents, formatTime } from '../format.js';
 
-import type { AppointmentData, Locale, LocaleTemplates } from '../types.js';
+import type { AppointmentData, CancellationReasonCode, Locale, LocaleTemplates } from '../types.js';
 
 const LOCALE: Locale = 'de';
 
@@ -16,6 +16,17 @@ function price(data: AppointmentData): string {
 function money(cents: number, data: AppointmentData): string {
   return formatMoneyCents(cents, data.currency, LOCALE);
 }
+
+/**
+ * Business-cancellation reasons, in German.
+ *
+ * A record rather than a switch, so adding a code to `CancellationReasonCode` is a type
+ * error here until this locale has wording for it.
+ */
+const REASONS: Record<CancellationReasonCode, string> = {
+  SEE_MESSAGE: 'siehe Nachricht',
+  PAYMENT_FAILED: 'die Zahlung konnte nicht abgeschlossen werden',
+};
 
 /**
  * The German templates.
@@ -60,7 +71,7 @@ export const deTemplates: LocaleTemplates = {
     subject: `Wir müssen Ihren Termin am ${formatDate(data.startsAt, LOCALE)} absagen`,
     blocks: [
       `Guten Tag ${data.customerFirstName},`,
-      `leider müssen wir Ihren Termin am ${when(data)} absagen. Der Grund: ${data.reason}.`,
+      `leider müssen wir Ihren Termin am ${when(data)} absagen. Der Grund: ${REASONS[data.reasonCode]}.`,
       `Das tut uns aufrichtig leid.`,
       data.refundedCents > 0
         ? `Wir erstatten ${money(data.refundedCents, data)} vollständig zurück.`
@@ -69,7 +80,7 @@ export const deTemplates: LocaleTemplates = {
     ],
     sms:
       `${data.businessName}: Wir müssen Ihren Termin am ${formatDate(data.startsAt, LOCALE)}, ` +
-      `${formatTime(data.startsAt, LOCALE)} Uhr leider absagen. Grund: ${data.reason}. ` +
+      `${formatTime(data.startsAt, LOCALE)} Uhr leider absagen. Grund: ${REASONS[data.reasonCode]}. ` +
       `Bitte rufen Sie uns an: ${data.businessPhone}`,
   }),
 

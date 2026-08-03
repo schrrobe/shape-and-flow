@@ -94,8 +94,10 @@ export class BookingEventProcessor {
 
           // SMS only when the business has turned it on and the customer gave a number.
           // Sending to a missing number is a provider error; sending when it is switched
-          // off is a bill the business did not agree to.
-          if (settings.smsRemindersEnabled && booking.customer.phone !== null) {
+          // off is a bill the business did not agree to. Gated on
+          // `smsConfirmationsEnabled` rather than the reminder flag: those are two
+          // decisions, and a business may want either one without the other.
+          if (settings.smsConfirmationsEnabled && booking.customer.phone !== null) {
             await this.notifications.queue(tx, {
               organizationId: booking.organizationId,
               kind: 'BOOKING_CONFIRMATION',
@@ -157,7 +159,9 @@ export class BookingEventProcessor {
               customerId: booking.customer.id,
               data: {
                 ...appointment,
-                reason: 'siehe Nachricht',
+                // A code, resolved by the template in the customer's locale. A German
+                // sentence here would reach an English-speaking customer untranslated.
+                reasonCode: 'SEE_MESSAGE',
                 refundedCents: refunded.amountCents,
               },
             });
@@ -268,7 +272,7 @@ export class BookingEventProcessor {
             customerId: booking.customer.id,
             data: {
               ...this.appointmentData(booking),
-              reason: 'Die Zahlung konnte nicht abgeschlossen werden',
+              reasonCode: 'PAYMENT_FAILED',
               refundedCents: 0,
             },
           });

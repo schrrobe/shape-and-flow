@@ -58,7 +58,7 @@ const SAMPLES: { [K in NotificationKind]: TemplateData[K] } = {
   },
   BOOKING_CANCELED_BY_BUSINESS: {
     ...APPOINTMENT,
-    reason: 'Krankheit im Team',
+    reasonCode: 'SEE_MESSAGE',
     refundedCents: 4500,
   },
   BOOKING_RESCHEDULED: {
