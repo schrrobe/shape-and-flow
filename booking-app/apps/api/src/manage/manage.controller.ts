@@ -1,4 +1,4 @@
-import { Controller, Get, Inject, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Inject, Query } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { manageAvailabilityQuerySchema } from '@shape-and-flow/booking-contracts';
 
@@ -11,7 +11,7 @@ import { OrganizationContextService } from '../organization/organization-context
 import { PrismaService } from '../prisma/prisma.service.js';
 import { AvailabilitySnapshotService } from '../public/availability-snapshot.service.js';
 
-import { ManagedBooking, ManagementToken, ManagementTokenGuard } from './management-token.guard.js';
+import { ManagedBooking, ManagementToken } from './management-token.guard.js';
 
 import type { ResolvedToken } from './management-token.service.js';
 import type { Clock } from '../domain/time/clock.js';
@@ -58,7 +58,6 @@ const BOOKING_VIEW = {
 
 @Controller('manage')
 @ManagementToken()
-@UseGuards(ManagementTokenGuard)
 @Throttle(MANAGE_LIMIT)
 export class ManageController {
   constructor(
@@ -111,11 +110,10 @@ export class ManageController {
       customerNote: booking.customerNote,
       cancellationPolicy: {
         feePolicy: settings.cancellationFeePolicy,
-        // The instant the free window closes, so the interface can count down to it
-        // rather than recomputing the rule.
-        freeUntil: new Date(
-          booking.startsAt.getTime() - settings.freeCancellationHours * 3_600_000,
-        ).toISOString(),
+        // From the pricing module, which is what `feeApplies` is decided by. Recomputing
+        // the boundary here would give the customer a countdown that can disagree with the
+        // fee they are actually charged.
+        freeUntil: policy.freeUntil.toISOString(),
         feeApplies: policy.feeApplies,
         suggestedRetained: policy.suggestedRetained.toJSON(),
         suggestedRefund: policy.suggestedRefund.toJSON(),
@@ -196,22 +194,30 @@ export class ManageController {
   private paidTotal(payments: readonly PaymentRow[], currency: string): Money {
     // A refunded payment was still received: `paid` is what arrived, and `refunded` is
     // what went back. Subtracting here would make both numbers say the same thing.
-    const settled: PaymentStatus[] = ['SUCCEEDED', 'PARTIALLY_REFUNDED', 'REFUNDED'];
-
     return Money.sum(
-      payments
-        .filter((payment) => settled.includes(payment.status))
-        .map((payment) => Money.fromCents(payment.amountCents, currency)),
+      settledOnly(payments).map((payment) => Money.fromCents(payment.amountCents, currency)),
       currency,
     );
   }
 
   private refundedTotal(payments: readonly PaymentRow[], currency: string): Money {
+    // The same filter as `paidTotal`, so the two numbers describe the same set of rows.
+    // Summing every row would let a PENDING or FAILED payment carrying a non-zero refunded
+    // amount report a refund larger than the payment it came from.
     return Money.sum(
-      payments.map((payment) => Money.fromCents(payment.refundedAmountCents, currency)),
+      settledOnly(payments).map((payment) =>
+        Money.fromCents(payment.refundedAmountCents, currency),
+      ),
       currency,
     );
   }
+}
+
+const SETTLED: PaymentStatus[] = ['SUCCEEDED', 'PARTIALLY_REFUNDED', 'REFUNDED'];
+
+/** The payments that represent money actually received. */
+function settledOnly(payments: readonly PaymentRow[]): readonly PaymentRow[] {
+  return payments.filter((payment) => SETTLED.includes(payment.status));
 }
 
 interface PaymentRow {

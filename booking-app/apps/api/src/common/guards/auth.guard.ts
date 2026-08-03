@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 
-import { MANAGEMENT_TOKEN_ROUTE } from '../../manage/management-token.guard.js';
+import { MANAGEMENT_TOKEN_ROUTE } from '../../manage/management-token.metadata.js';
 import { AppError } from '../errors/app-error.js';
 
 import { IS_PUBLIC } from './public.decorator.js';
