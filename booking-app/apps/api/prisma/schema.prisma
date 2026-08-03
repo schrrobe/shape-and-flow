@@ -308,7 +308,6 @@ model ClosedDay {
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   @@unique([organizationId, date])
-  @@index([organizationId, date])
   @@map("closed_days")
 }
 
@@ -404,6 +403,7 @@ model Employee {
   employeeServices       EmployeeService[]
   bookings               Booking[]
 
+  @@unique([organizationId, id])
   @@index([organizationId, archivedAt, displayOrder])
   @@index([organizationId, isBookableOnline])
   @@map("employees")
@@ -562,6 +562,7 @@ model Service {
   employeeServices EmployeeService[]
   bookings         Booking[]
 
+  @@unique([organizationId, id])
   @@unique([organizationId, name])
   @@index([organizationId, archivedAt, displayOrder])
   @@index([organizationId, isBookableOnline])
@@ -615,6 +616,7 @@ model Customer {
   bookings      Booking[]
   notifications Notification[]
 
+  @@unique([organizationId, id])
   @@unique([organizationId, emailNormalized])
   @@index([organizationId, lastName, firstName])
   @@index([organizationId, phone])
@@ -654,7 +656,8 @@ model Booking {
   priceCentsSnapshot           Int           @map("price_cents_snapshot")
   currency                     String
   status                       BookingStatus
-  /// Non-null exactly while status is PENDING_PAYMENT or EXPIRING.
+  /// Required while status is PENDING_PAYMENT or EXPIRING and retained after
+  /// the reservation is confirmed or expires for auditability.
   expiresAt                    DateTime?     @map("expires_at") @db.Timestamptz(3)
   confirmedAt                  DateTime?     @map("confirmed_at") @db.Timestamptz(3)
   canceledAt                   DateTime?     @map("canceled_at") @db.Timestamptz(3)
@@ -663,7 +666,7 @@ model Booking {
   idempotencyKeyId             String?       @unique @map("idempotency_key_id")
   customerNote                 String?       @map("customer_note")
   locale                       Locale
-  rescheduledFromBookingId     String?       @unique @map("rescheduled_from_booking_id")
+  rescheduledFromBookingId     String?       @map("rescheduled_from_booking_id")
   /// The booking the money is on. Null means this one is it.
   ///
   /// A reschedule replaces the booking row and leaves the payment where it was
@@ -682,10 +685,10 @@ model Booking {
   updatedAt                    DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   organization               Organization           @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  customer                   Customer               @relation(fields: [customerId], references: [id], onDelete: Restrict)
-  employee                   Employee               @relation(fields: [employeeId], references: [id], onDelete: Restrict)
-  service                    Service                @relation(fields: [serviceId], references: [id], onDelete: Restrict)
-  rescheduledFrom            Booking?               @relation("BookingReschedule", fields: [rescheduledFromBookingId], references: [id], onDelete: SetNull)
+  customer                   Customer               @relation(fields: [organizationId, customerId], references: [organizationId, id], onDelete: Restrict)
+  employee                   Employee               @relation(fields: [organizationId, employeeId], references: [organizationId, id], onDelete: Restrict)
+  service                    Service                @relation(fields: [organizationId, serviceId], references: [organizationId, id], onDelete: Restrict)
+  rescheduledFrom            Booking?               @relation("BookingReschedule", fields: [organizationId, rescheduledFromBookingId], references: [organizationId, id], onDelete: Restrict)
   rescheduledTo              Booking?               @relation("BookingReschedule")
   financialRoot              Booking?               @relation("BookingFinancialRoot", fields: [financialRootBookingId], references: [id], onDelete: Restrict)
   financialDescendants       Booking[]              @relation("BookingFinancialRoot")
@@ -699,7 +702,9 @@ model Booking {
   resultingRescheduleRequest RescheduleRequest?     @relation("RescheduleRequestResult")
   notifications              Notification[]
 
+  @@unique([organizationId, id])
   @@unique([organizationId, reference])
+  @@unique([organizationId, rescheduledFromBookingId])
   @@index([organizationId, employeeId, blockStartsAt])
   @@index([organizationId, status, startsAt])
   @@index([organizationId, customerId, startsAt])
@@ -727,10 +732,10 @@ model BookingStatusHistory {
   createdAt         DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  booking      Booking      @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  booking      Booking      @relation(fields: [organizationId, bookingId], references: [organizationId, id], onDelete: Cascade)
   actor        OfficeUser?  @relation(fields: [actorOfficeUserId], references: [id], onDelete: SetNull)
 
-  @@index([bookingId, createdAt])
+  @@index([organizationId, bookingId, createdAt])
   @@index([organizationId, createdAt])
   @@map("booking_status_history")
 }
@@ -750,9 +755,9 @@ model ManagementToken {
   updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  booking      Booking      @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  booking      Booking      @relation(fields: [organizationId, bookingId], references: [organizationId, id], onDelete: Cascade)
 
-  @@index([bookingId, revokedAt])
+  @@index([organizationId, bookingId, revokedAt])
   @@index([expiresAt])
   @@map("management_tokens")
 }
@@ -785,11 +790,12 @@ model Payment {
   updatedAt               DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  booking      Booking      @relation(fields: [bookingId], references: [id], onDelete: Restrict)
+  booking      Booking      @relation(fields: [organizationId, bookingId], references: [organizationId, id], onDelete: Restrict)
   refunds      Refund[]
 
+  @@unique([organizationId, id])
   @@index([organizationId, status])
-  @@index([bookingId])
+  @@index([organizationId, bookingId])
   @@index([organizationId, paidAt])
   @@map("payments")
 }
@@ -811,10 +817,10 @@ model ManualPayment {
   updatedAt              DateTime            @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  booking      Booking      @relation(fields: [bookingId], references: [id], onDelete: Restrict)
+  booking      Booking      @relation(fields: [organizationId, bookingId], references: [organizationId, id], onDelete: Restrict)
   recordedBy   OfficeUser   @relation(fields: [recordedByOfficeUserId], references: [id], onDelete: Restrict)
 
-  @@index([bookingId])
+  @@index([organizationId, bookingId])
   @@index([organizationId, paidAt])
   @@map("manual_payments")
 }
@@ -843,13 +849,14 @@ model Refund {
   updatedAt            DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   organization        Organization         @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  booking             Booking              @relation(fields: [bookingId], references: [id], onDelete: Restrict)
-  payment             Payment              @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  booking             Booking              @relation(fields: [organizationId, bookingId], references: [organizationId, id], onDelete: Restrict)
+  payment             Payment              @relation(fields: [organizationId, paymentId], references: [organizationId, id], onDelete: Restrict)
   issuedBy            OfficeUser?          @relation(fields: [issuedByOfficeUserId], references: [id], onDelete: SetNull)
   cancellationRequest CancellationRequest?
 
   @@index([organizationId, status])
-  @@index([paymentId])
+  @@index([organizationId, bookingId])
+  @@index([organizationId, paymentId])
   @@map("refunds")
 }
 
@@ -881,11 +888,12 @@ model CancellationRequest {
   updatedAt                    DateTime        @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  booking      Booking      @relation(fields: [bookingId], references: [id], onDelete: Restrict)
+  booking      Booking      @relation(fields: [organizationId, bookingId], references: [organizationId, id], onDelete: Restrict)
   decidedBy    OfficeUser?  @relation(fields: [decidedByOfficeUserId], references: [id], onDelete: SetNull)
   refund       Refund?      @relation(fields: [refundId], references: [id], onDelete: SetNull)
 
   @@index([organizationId, decision, requestedAt])
+  @@index([organizationId, bookingId])
   @@map("cancellation_requests")
 }
 
@@ -905,16 +913,18 @@ model RescheduleRequest {
   decidedByOfficeUserId String?         @map("decided_by_office_user_id")
   decidedAt             DateTime?       @map("decided_at") @db.Timestamptz(3)
   decisionNote          String?         @map("decision_note")
-  resultingBookingId    String?         @unique @map("resulting_booking_id")
+  resultingBookingId    String?         @map("resulting_booking_id")
   createdAt             DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt             DateTime        @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   organization     Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  booking          Booking      @relation("RescheduleRequestBooking", fields: [bookingId], references: [id], onDelete: Restrict)
-  resultingBooking Booking?     @relation("RescheduleRequestResult", fields: [resultingBookingId], references: [id], onDelete: SetNull)
+  booking          Booking      @relation("RescheduleRequestBooking", fields: [organizationId, bookingId], references: [organizationId, id], onDelete: Restrict)
+  resultingBooking Booking?     @relation("RescheduleRequestResult", fields: [organizationId, resultingBookingId], references: [organizationId, id], onDelete: Restrict)
   decidedBy        OfficeUser?  @relation(fields: [decidedByOfficeUserId], references: [id], onDelete: SetNull)
 
+  @@unique([organizationId, resultingBookingId])
   @@index([organizationId, decision, requestedAt])
+  @@index([organizationId, bookingId])
   @@map("reschedule_requests")
 }
 
@@ -957,12 +967,12 @@ model Notification {
   updatedAt         DateTime            @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  booking      Booking?     @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  booking      Booking?     @relation(fields: [organizationId, bookingId], references: [organizationId, id], onDelete: Cascade)
   customer     Customer?    @relation(fields: [customerId], references: [id], onDelete: SetNull)
   officeUser   OfficeUser?  @relation(fields: [officeUserId], references: [id], onDelete: SetNull)
 
   @@index([organizationId, status, createdAt])
-  @@index([bookingId])
+  @@index([organizationId, bookingId])
   @@index([status, scheduledFor])
   @@map("notifications")
 }

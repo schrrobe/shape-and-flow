@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { PrismaService } from './prisma.service.js';
+import { logLevelsFor, PrismaService } from './prisma.service.js';
 
 /**
  * Regression guard for a bug that opened two connection pools.
@@ -30,5 +30,12 @@ describe('PrismaService', () => {
     for (const hook of NEST_LIFECYCLE_HOOKS) {
       expect(own, `${hook} must live on PrismaLifecycle, not PrismaService`).not.toContain(hook);
     }
+  });
+
+  it('never enables query logging outside development', () => {
+    expect(logLevelsFor('debug', 'development')).toContain('query');
+    expect(logLevelsFor('debug', 'test')).not.toContain('query');
+    expect(logLevelsFor('debug', 'production')).not.toContain('query');
+    expect(logLevelsFor('info', 'development')).not.toContain('query');
   });
 });

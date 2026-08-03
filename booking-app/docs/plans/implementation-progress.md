@@ -1,8 +1,8 @@
 # Phase 1 — Implementation Progress
 
-Companion to `phase-1-implementation-plan.md`. That document is the spec and does
-not change; this one records what is built, what is next, and the decisions taken
-while implementing that the plan could not have known.
+Companion to `phase-1-implementation-plan.md`. That document is the working spec
+and is revised when implementation or review proves a statement wrong; this one
+records what is built, what is next, and why the implementation diverged.
 
 |                   |                                                                                   |
 | ----------------- | --------------------------------------------------------------------------------- |
@@ -220,12 +220,18 @@ exist, the real clients do not).
 
 ## Version drift from the plan, and why
 
+Snapshot as of 2026-08-02. Re-check these constraints when any pinned tool is
+updated: TypeScript support is documented in
+[`typescript-eslint`'s dependency versions](https://typescript-eslint.io/users/dependency-versions/),
+and Vitest's transformer change is covered by its
+[`experimentalOxc` migration note](https://vitest.dev/guide/migration.html#experimental-oxc).
+
 The plan was written against a slightly older ecosystem. Each of these was a
 decision, not a mechanical bump.
 
-- **TypeScript 6.0.3, not 7.** TS 7 is latest, but `typescript-eslint` 8.65 caps
-  at `<6.1.0`. Type-aware linting is load-bearing for several planned rules, so
-  the newest version that keeps it working wins.
+- **TypeScript 6.0.3, not 7.** As of the snapshot date,
+  `typescript-eslint` 8.65 caps support at `<6.1.0`. Type-aware linting is
+  load-bearing for several planned rules, so the newest compatible version wins.
 - **Prisma 7, with a driver adapter.** Prisma 7 removed `url` from the datasource
   block and requires an adapter, so `PrismaService` builds a `PrismaPg` pool from
   validated config. Its ESM-native `prisma-client` generator also removes the
@@ -930,8 +936,10 @@ Each of these would have passed a casual "it works" check.
   `SEED_STAFF_PASSWORD` to choose them on a fresh database, which is what the e2e stack
   does. The seed's entrypoint is `src/seed.main.ts`, so `node dist/seed.main.js` works in a
   built image; `pnpm db:seed` runs the same code through tsx.
-- `vitest.integration.config.ts` refuses to run unless `DATABASE_URL` names a
-  database containing `booking_test`.
+- `assertTestDatabaseUrl()` in `src/config/env.schema.ts` parses the PostgreSQL
+  URL and requires the decoded database pathname to be exactly `booking_test`.
+  `test/database.harness.ts` invokes this guard before any truncation, so
+  near-misses such as `production_booking_test` are rejected.
 - `test/redis.harness.ts` refuses to run unless `REDIS_QUEUE_PREFIX` starts with
   `test-`, because its reset calls `obliterate` on every queue. The API and its
   workers must agree on this variable. Worker readiness in stage 7 must expose the

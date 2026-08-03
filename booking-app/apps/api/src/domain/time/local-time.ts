@@ -26,9 +26,6 @@ export type WallClockResult =
 
 const LOCAL_DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
 
-/** One hour, the size of every DST transition in Europe/Berlin. */
-const TRANSITION_MS = 3_600_000;
-
 const WEEKDAY_BY_ISO: Record<number, Weekday> = {
   1: Weekday.MONDAY,
   2: Weekday.TUESDAY,
@@ -87,31 +84,39 @@ export function wallClockToInstant(
 
   const startOfDay = parseLocalDate(date, zone);
 
-  // 1440 means the next local midnight. Calendar-aware `plus({ days: 1 })` is
-  // correct across a transition, where adding 1440 minutes of real time is not.
+  let year: number = startOfDay.year;
+  let month: number = startOfDay.month;
+  let day: number = startOfDay.day;
+
+  // Calculate the next calendar date in UTC so a target zone that skips its
+  // midnight cannot silently advance the requested date before validation.
   if (minute === 1440) {
-    return { ok: true, instant: startOfDay.plus({ days: 1 }).toJSDate() };
+    const nextDate = DateTime.utc(year, month, day).plus({ days: 1 });
+    year = nextDate.year;
+    month = nextDate.month;
+    day = nextDate.day;
   }
 
-  const hour = Math.floor(minute / 60);
-  const minuteOfHour = minute % 60;
+  const hour = minute === 1440 ? 0 : Math.floor(minute / 60);
+  const minuteOfHour = minute === 1440 ? 0 : minute % 60;
 
-  const candidate = startOfDay.set({ hour, minute: minuteOfHour });
+  const candidate = DateTime.fromObject({ year, month, day, hour, minute: minuteOfHour }, { zone });
 
   // Luxon resolves a non-existent local time by shifting it forward, so a
   // mismatch against what was asked for is exactly the gap.
-  if (candidate.hour !== hour || candidate.minute !== minuteOfHour) {
+  if (
+    candidate.year !== year ||
+    candidate.month !== month ||
+    candidate.day !== day ||
+    candidate.hour !== hour ||
+    candidate.minute !== minuteOfHour
+  ) {
     return { ok: false, reason: 'NONEXISTENT' };
   }
 
-  // Luxon resolves an ambiguous local time to the earlier offset. If the same
-  // wall clock recurs one real hour later at a different offset, it is ambiguous.
-  const oneHourLater = DateTime.fromMillis(candidate.toMillis() + TRANSITION_MS, { zone });
-  if (
-    oneHourLater.hour === hour &&
-    oneHourLater.minute === minuteOfHour &&
-    oneHourLater.offset !== candidate.offset
-  ) {
+  // Handles any transition size; Luxon returns every instant sharing this wall
+  // clock rather than requiring an assumption about a one-hour offset change.
+  if (candidate.getPossibleOffsets().length > 1) {
     return { ok: false, reason: 'AMBIGUOUS' };
   }
 

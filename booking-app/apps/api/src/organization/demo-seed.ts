@@ -1,7 +1,7 @@
 import { hash } from '@node-rs/argon2';
 
 import { ARGON2_OPTIONS } from '../auth/password.options.js';
-import { Locale, OfficeUserRole, Weekday } from '../prisma/client.js';
+import { Locale, OfficeUserRole, Prisma, PrismaClient, Weekday } from '../prisma/client.js';
 
 import type { PrismaClient } from '../prisma/client.js';
 
@@ -102,19 +102,35 @@ export async function seedDemoOrganization(
 
   // ── employees ───────────────────────────────────────────────────────────────
   const employeeSeeds = [
-    { firstName: 'Mara', lastName: 'Vogt', displayOrder: 0, worksSaturday: true },
-    { firstName: 'Jonas', lastName: 'Reit', displayOrder: 1, worksSaturday: false },
+    {
+      id: 'seed-employee-mara-vogt',
+      firstName: 'Mara',
+      lastName: 'Vogt',
+      displayOrder: 0,
+      worksSaturday: true,
+    },
+    {
+      id: 'seed-employee-jonas-reit',
+      firstName: 'Jonas',
+      lastName: 'Reit',
+      displayOrder: 1,
+      worksSaturday: false,
+    },
   ];
 
   const employees = [];
   for (const seed of employeeSeeds) {
     const displayName = `${seed.firstName} ${seed.lastName}`;
-    const existing = await prisma.employee.findFirst({ where: { organizationId, displayName } });
-
+    const legacyEmployee = await prisma.employee.findFirst({
+      where: { organizationId, displayName },
+    });
     const employee =
-      existing ??
-      (await prisma.employee.create({
-        data: {
+      legacyEmployee ??
+      (await prisma.employee.upsert({
+        where: { id: seed.id },
+        update: {},
+        create: {
+          id: seed.id,
           organizationId,
           firstName: seed.firstName,
           lastName: seed.lastName,
@@ -213,26 +229,42 @@ export async function seedDemoOrganization(
     }
 
     for (const segment of segments) {
-      const existing = await prisma.workingHours.findFirst({
-        where: { organizationId, employeeId: employee.id, weekday: segment.weekday },
+      const segmentId = `seed-hours-${employee.id}-${segment.weekday.toLowerCase()}`;
+      const legacySegment = await prisma.workingHours.findFirst({
+        where: { organizationId, employeeId: employee.id, ...segment },
       });
-      if (existing) continue;
-
-      const created = await prisma.workingHours.create({
-        data: { organizationId, employeeId: employee.id, ...segment },
-      });
+      const created =
+        legacySegment ??
+        (await prisma.workingHours.upsert({
+          where: { id: segmentId },
+          update: {},
+          create: { id: segmentId, organizationId, employeeId: employee.id, ...segment },
+        }));
 
       // Saturday is a short shift with no lunch break.
       if (segment.weekday !== Weekday.SATURDAY) {
-        await prisma.break.create({
-          data: {
+        const legacyBreak = await prisma.break.findFirst({
+          where: {
             organizationId,
             workingHoursId: created.id,
             startMinute: 12 * 60,
             endMinute: 12 * 60 + 30,
-            label: 'Mittagspause',
           },
         });
+        if (!legacyBreak) {
+          await prisma.break.upsert({
+            where: { id: `${segmentId}-lunch` },
+            update: {},
+            create: {
+              id: `${segmentId}-lunch`,
+              organizationId,
+              workingHoursId: created.id,
+              startMinute: 12 * 60,
+              endMinute: 12 * 60 + 30,
+              label: 'Mittagspause',
+            },
+          });
+        }
       }
     }
   }
@@ -298,4 +330,5 @@ async function ensureUser(
   });
 
   return true;
+}
 }

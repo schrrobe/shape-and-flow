@@ -7,12 +7,17 @@ import { PrismaClient } from './client.js';
 
 import type { AppConfig } from '../config/env.schema.js';
 
-/** Prisma log levels enabled per application log level. */
-function logLevelsFor(level: AppConfig['LOG_LEVEL']): ('query' | 'info' | 'warn' | 'error')[] {
+/** Prisma log levels enabled per application log level and environment. */
+export function logLevelsFor(
+  level: AppConfig['LOG_LEVEL'],
+  nodeEnv: AppConfig['NODE_ENV'],
+): ('query' | 'info' | 'warn' | 'error')[] {
   switch (level) {
     case 'trace':
     case 'debug':
-      return ['query', 'info', 'warn', 'error'];
+      return nodeEnv === 'development'
+        ? ['query', 'info', 'warn', 'error']
+        : ['info', 'warn', 'error'];
     case 'info':
       return ['info', 'warn', 'error'];
     case 'warn':
@@ -41,8 +46,11 @@ function logLevelsFor(level: AppConfig['LOG_LEVEL']): ('query' | 'info' | 'warn'
 export class PrismaService extends PrismaClient {
   constructor(@Inject(ENV) config: AppConfig) {
     super({
-      adapter: new PrismaPg({ connectionString: config.DATABASE_URL }),
-      log: logLevelsFor(config.LOG_LEVEL),
+      adapter: new PrismaPg({
+        connectionString: config.DATABASE_URL,
+        max: config.DATABASE_POOL_SIZE,
+      }),
+      log: logLevelsFor(config.LOG_LEVEL, config.NODE_ENV),
     });
   }
 }

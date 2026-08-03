@@ -33,7 +33,11 @@ export class OrganizationContextService implements OnApplicationBootstrap {
     await this.refresh();
   }
 
-  /** Reload after settings change, so cached policy cannot go stale. */
+  /**
+   * Reload this process after a settings change. Phase 1 runs one API process;
+   * before horizontal scaling, settings writes must publish cross-process
+   * invalidation (or this cache must gain a short TTL).
+   */
   async refresh(): Promise<void> {
     const slug = this.config.DEFAULT_ORGANIZATION_SLUG;
 

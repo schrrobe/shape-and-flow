@@ -85,7 +85,10 @@ function retainedFor(paid: Money, settings: CancellationFeeSettings): Money {
 
     case 'FIXED_AMOUNT':
       // Capped: a fee larger than the amount paid cannot be retained.
-      return Money.fromCents(settings.cancellationFeeAmountCents, paid.currency).cappedAt(paid);
+      return Money.fromCents(
+        Math.max(0, settings.cancellationFeeAmountCents),
+        paid.currency,
+      ).cappedAt(paid);
 
     case 'PERCENTAGE':
       // Money.percent truncates, so the fractional cent stays with the customer.

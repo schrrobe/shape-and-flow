@@ -8,15 +8,21 @@ runs:
   steps:
     # Reads the pinned version from package.json#packageManager, so the pnpm
     # version lives in exactly one place.
-    - uses: pnpm/action-setup@v4
+    - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
 
     # Reads the pinned version from .tool-versions, so the Node version also
     # lives in exactly one place and matches local asdf.
-    - uses: actions/setup-node@v4
+    - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
       with:
         node-version-file: .tool-versions
         cache: pnpm
 
     - name: Install dependencies
       shell: bash
+      # Prisma loads prisma.config.ts during the API postinstall generate step,
+      # even though client generation never connects to PostgreSQL. Use an
+      # intentionally unreachable URL here; database jobs provide their real
+      # URL to later migration/test steps through the job environment.
+      env:
+        DATABASE_URL: postgresql://prisma-generate:prisma-generate@127.0.0.1:1/prisma_generate
       run: pnpm install --frozen-lockfile

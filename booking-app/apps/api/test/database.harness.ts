@@ -1,6 +1,7 @@
 import { PrismaPg } from '@prisma/adapter-pg';
 import pg from 'pg';
 
+import { assertTestDatabaseUrl } from '../src/config/env.schema.js';
 import { Prisma, PrismaClient } from '../src/prisma/client.js';
 import { createTenantGuardedClient } from '../src/prisma/tenant.extension.js';
 
@@ -18,14 +19,7 @@ import type { TenantPrismaClient } from '../src/prisma/tenant.extension.js';
  * clones can be added behind this same interface without touching a test.
  */
 
-const connectionString = process.env.DATABASE_URL;
-
-if (!connectionString?.includes('booking_test')) {
-  throw new Error(
-    `Integration tests refuse to run against "${connectionString ?? '(unset)'}". ` +
-      'The database name must contain "booking_test" — see vitest.integration.config.ts.',
-  );
-}
+const connectionString = assertTestDatabaseUrl(process.env.DATABASE_URL);
 
 /**
  * The pool is created here rather than letting the adapter own it, so teardown
@@ -75,7 +69,10 @@ export async function disconnectDatabase(): Promise<void> {
 /** Reads a constraint definition, for tests that assert the schema itself. */
 export async function constraintDefinition(name: string): Promise<string | null> {
   const rows = await prisma.$queryRaw<{ def: string }[]>(Prisma.sql`
-    SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conname = ${name}
+    SELECT pg_get_constraintdef(pc.oid) AS def
+    FROM pg_constraint AS pc
+    JOIN pg_namespace AS namespace ON namespace.oid = pc.connamespace
+    WHERE namespace.nspname = 'public' AND pc.conname = ${name}
   `);
   return rows[0]?.def ?? null;
 }
