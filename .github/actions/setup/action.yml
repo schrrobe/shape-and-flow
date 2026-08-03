@@ -19,4 +19,10 @@ runs:
 
     - name: Install dependencies
       shell: bash
+      # Prisma loads prisma.config.ts during the API postinstall generate step,
+      # even though client generation never connects to PostgreSQL. Use an
+      # intentionally unreachable URL here; database jobs provide their real
+      # URL to later migration/test steps through the job environment.
+      env:
+        DATABASE_URL: postgresql://prisma-generate:prisma-generate@127.0.0.1:1/prisma_generate
       run: pnpm install --frozen-lockfile
