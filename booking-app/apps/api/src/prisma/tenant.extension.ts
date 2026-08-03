@@ -149,13 +149,24 @@ function filterScopeState(where: unknown, organizationId: string): ScopeState {
 
 /** Compound unique inputs wrap their fields in a generated key such as
  * `organizationId_name`, so upsert/update must inspect those wrappers too. */
+const TENANT_COMPOUND_UNIQUE_KEYS = new Set([
+  'organizationId_date',
+  'organizationId_email',
+  'organizationId_emailNormalized',
+  'organizationId_id',
+  'organizationId_name',
+  'organizationId_reference',
+  'organizationId_rescheduledFromBookingId',
+  'organizationId_resultingBookingId',
+]);
+
 function uniqueScopeState(where: unknown, organizationId: string): ScopeState {
   const direct = filterScopeState(where, organizationId);
   if (direct !== 'missing' || !isRecord(where)) return direct;
 
   return combineScopeStates(
     Object.entries(where)
-      .filter(([key]) => key !== 'OR' && key !== 'NOT')
+      .filter(([key]) => TENANT_COMPOUND_UNIQUE_KEYS.has(key))
       .map(([, value]) => uniqueScopeState(value, organizationId)),
   );
 }

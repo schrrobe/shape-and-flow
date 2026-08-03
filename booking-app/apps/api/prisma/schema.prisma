@@ -746,6 +746,7 @@ model Payment {
   booking      Booking      @relation(fields: [organizationId, bookingId], references: [organizationId, id], onDelete: Restrict)
   refunds      Refund[]
 
+  @@unique([organizationId, id])
   @@index([organizationId, status])
   @@index([organizationId, bookingId])
   @@index([organizationId, paidAt])
@@ -802,13 +803,13 @@ model Refund {
 
   organization        Organization         @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   booking             Booking              @relation(fields: [organizationId, bookingId], references: [organizationId, id], onDelete: Restrict)
-  payment             Payment              @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  payment             Payment              @relation(fields: [organizationId, paymentId], references: [organizationId, id], onDelete: Restrict)
   issuedBy            OfficeUser?          @relation(fields: [issuedByOfficeUserId], references: [id], onDelete: SetNull)
   cancellationRequest CancellationRequest?
 
   @@index([organizationId, status])
   @@index([organizationId, bookingId])
-  @@index([paymentId])
+  @@index([organizationId, paymentId])
   @@map("refunds")
 }
 

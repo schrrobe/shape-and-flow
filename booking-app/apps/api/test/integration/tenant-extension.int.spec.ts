@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
+import { isForeignKeyViolation } from '../../src/common/prisma-errors/prisma-errors.js';
 import { assertOwned } from '../../src/prisma/tenant.extension.js';
 import { guardedFor, prisma, resetDatabase } from '../database.harness.js';
 import { makeBooking, seedOrganization } from '../factories/index.js';
@@ -143,6 +144,19 @@ describe('unique-key access', () => {
     expect(found?.organizationId).toBe(orgA.organization.id);
   });
 
+  it('does not treat a scoped relation filter as ownership of the target row', async () => {
+    const booking = await prisma.booking.create({ data: makeBooking(orgB) });
+
+    await expect(
+      guarded.booking.findUnique({
+        where: {
+          id: booking.id,
+          employee: { organizationId: orgA.organization.id },
+        } as never,
+      }),
+    ).rejects.toThrow(/requires organizationId/);
+  });
+
   it('assertOwned turns a foreign row into 404, never 403', () => {
     const foreign = { organizationId: orgB.organization.id };
 
@@ -282,6 +296,21 @@ describe('upserts', () => {
       }),
     ).rejects.toThrow(/current organization/i);
   });
+
+  it('rejects a foreign tenant in an upsert update payload', async () => {
+    await expect(
+      guarded.serviceCategory.upsert({
+        where: {
+          organizationId_name: {
+            organizationId: orgA.organization.id,
+            name: 'Massage',
+          },
+        },
+        create: { organizationId: orgA.organization.id, name: 'Massage' },
+        update: { organizationId: orgB.organization.id },
+      }),
+    ).rejects.toThrow(/current organization/i);
+  });
 });
 
 describe('updates', () => {
@@ -342,7 +371,36 @@ describe('database tenant consistency', () => {
           actorType: 'SYSTEM',
         },
       }),
-    ).rejects.toMatchObject({ code: 'P2003' });
+    ).rejects.toSatisfy(isForeignKeyViolation);
+  });
+
+  it('rejects a refund whose payment belongs to another tenant', async () => {
+    const ownBooking = await prisma.booking.create({ data: makeBooking(orgA) });
+    const foreignBooking = await prisma.booking.create({ data: makeBooking(orgB) });
+    const foreignPayment = await prisma.payment.create({
+      data: {
+        organizationId: orgB.organization.id,
+        bookingId: foreignBooking.id,
+        amountCents: 4500,
+        currency: 'EUR',
+        status: 'SUCCEEDED',
+      },
+    });
+
+    await expect(
+      prisma.refund.create({
+        data: {
+          organizationId: orgA.organization.id,
+          bookingId: ownBooking.id,
+          paymentId: foreignPayment.id,
+          amountCents: 4500,
+          currency: 'EUR',
+          status: 'PENDING',
+          reason: 'GOODWILL',
+          idempotencyKey: 'foreign-payment-refund',
+        },
+      }),
+    ).rejects.toSatisfy(isForeignKeyViolation);
   });
 });
 

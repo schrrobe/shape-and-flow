@@ -9,7 +9,7 @@ records what is built, what is next, and why the implementation diverged.
 | Branch | `feat/p1-01-foundation` (PR #2) |
 | Tasks complete | 12 of 49 |
 | Unit tests | 241 passing |
-| Integration tests | 68 passing |
+| Integration tests | 71 passing |
 | Gates | Unit/integration/lint/format/typecheck/build are re-verified before each update; e2e is not available until the web workspace lands in its later stacked PR |
 
 ## Execution order — vertical slice
@@ -151,6 +151,7 @@ Each of these would have passed a casual "it works" check.
   `booking_test`.
 - The seeded owner password is generated and printed once. Re-running the seed
   does not reset it.
-- `vitest.integration.config.ts` parses the PostgreSQL URL and refuses to run
-  unless its decoded database pathname is exactly `booking_test`; near-misses
-  such as `production_booking_test` are rejected before any truncation.
+- `assertTestDatabaseUrl()` in `src/config/env.schema.ts` parses the PostgreSQL
+  URL and requires the decoded database pathname to be exactly `booking_test`.
+  `test/database.harness.ts` invokes this guard before any truncation, so
+  near-misses such as `production_booking_test` are rejected.
