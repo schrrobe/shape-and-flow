@@ -1,0 +1,36 @@
+{
+  "name": "@shape-and-flow/booking-notification-templates",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Locale-complete email and SMS templates for the booking application.",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "prepare": "pnpm run build",
+    "build": "tsc -p tsconfig.build.json",
+    "lint": "eslint .",
+    "format": "prettier --check .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@shape-and-flow/booking-contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "@shape-and-flow/booking-config": "workspace:*",
+    "@types/node": "26.1.2",
+    "@vitest/coverage-v8": "4.1.10",
+    "eslint": "10.8.0",
+    "prettier": "3.9.6",
+    "typescript": "6.0.3",
+    "vitest": "4.1.10"
+  }
+}

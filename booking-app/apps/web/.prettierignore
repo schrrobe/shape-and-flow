@@ -1,0 +1,6 @@
+# Build output: generated, minified, and never reviewed.
+dist
+
+# Playwright's own output: a run's artefacts, not source.
+test-results
+playwright-report

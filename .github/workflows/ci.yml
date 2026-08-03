@@ -1,0 +1,267 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A new push to the same ref supersedes the previous run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+# Every job runs the same commands a developer runs locally, in the same order.
+#
+# The pipeline is written once, in full. While a package does not exist yet,
+# pnpm's filter and --if-present semantics make its step a no-op that exits 0
+# rather than a red job, so CI stays green as the stages land and no later task
+# has to come back and edit this file.
+#
+# `pnpm install` runs the API's postinstall `prisma generate`, and prisma.config.ts
+# refuses to load without DATABASE_URL — so every job that installs needs one, even the
+# jobs that never touch a database. This value is deliberately a dead address: it lets
+# the schema resolve and would fail loudly rather than quietly reach something real. The
+# jobs that do use Postgres override it with their service container's URL.
+env:
+  DATABASE_URL: postgresql://ci:ci@127.0.0.1:1/unused?schema=public
+
+jobs:
+  lint:
+    name: Lint, format and typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - run: pnpm lint
+      - run: pnpm format
+      - run: pnpm typecheck
+
+  test:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - name: Unit tests with coverage
+        run: pnpm api test --coverage
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: coverage
+          path: booking-app/apps/api/coverage
+          if-no-files-found: ignore
+          retention-days: 7
+
+  integration:
+    name: Integration tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17@sha256:a426e44bac0b759c95894d68e1a0ac03ecc20b619f498a91aae373bf06d8508d
+        env:
+          POSTGRES_USER: booking
+          POSTGRES_PASSWORD: booking
+          POSTGRES_DB: booking_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U booking -d booking_test"
+          --health-interval 3s
+          --health-timeout 3s
+          --health-retries 15
+      redis:
+        image: redis:7@sha256:595cc6f2bb3af6e03347b90deb6123c6aa2c81dea05ce08128de8a174b6ac67b
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 3s
+          --health-timeout 3s
+          --health-retries 15
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://booking:booking@localhost:5432/booking_test?schema=public
+      TEST_DATABASE_URL: postgresql://booking:booking@localhost:5432/booking_test?schema=public
+      REDIS_URL: redis://localhost:6379
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - name: Apply migrations
+        run: pnpm api prisma:migrate:deploy
+      - run: pnpm test:integration
+
+  e2e:
+    name: End-to-end tests
+    runs-on: ubuntu-latest
+    needs: [integration]
+    services:
+      postgres:
+        image: postgres:17@sha256:a426e44bac0b759c95894d68e1a0ac03ecc20b619f498a91aae373bf06d8508d
+        env:
+          POSTGRES_USER: booking
+          POSTGRES_PASSWORD: booking
+          POSTGRES_DB: booking_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U booking -d booking_test"
+          --health-interval 3s
+          --health-timeout 3s
+          --health-retries 15
+      redis:
+        image: redis:7@sha256:595cc6f2bb3af6e03347b90deb6123c6aa2c81dea05ce08128de8a174b6ac67b
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 3s
+          --health-timeout 3s
+          --health-retries 15
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://booking:booking@localhost:5432/booking_test?schema=public
+      REDIS_URL: redis://localhost:6379
+      # What the stack Playwright starts connects to. Locally these default to the
+      # docker-compose test stack and a database of their own; here there is one
+      # Postgres service and no integration run to collide with, so the e2e stack uses
+      # it directly. Redis still gets its own logical database, because the reset
+      # deletes session and rate-limit keys by pattern.
+      E2E_DATABASE_URL: postgresql://booking:booking@localhost:5432/booking_test?schema=public
+      E2E_REDIS_URL: redis://localhost:6379/1
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - name: Install Playwright browsers
+        run: pnpm web exec playwright install --with-deps chromium
+      # Builds the API and the web bundle, then runs the suite against them: the e2e
+      # stack serves `dist`, not a dev server. Migrations are applied by the API's own
+      # start command, so there is no separate step for them.
+      - run: pnpm test:e2e
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: booking-app/apps/web/playwright-report
+          if-no-files-found: ignore
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-traces
+          path: booking-app/apps/web/test-results
+          if-no-files-found: ignore
+          retention-days: 7
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - run: pnpm build
+
+  # Deploys the production compose file for real, on throwaway volumes, and takes it
+  # through the sequence an operator takes on the first day: migrate, seed, start, check,
+  # back up, destroy, restore.
+  #
+  # Everything here is verifiable only by running it. A Dockerfile that no longer builds,
+  # a compose file whose migrate gate stopped gating, a constraint lost to a migration, a
+  # backup script broken by a rename — none of that is visible to a unit test, and all of
+  # it is visible the moment somebody deploys.
+  deploy-check:
+    name: Deployment check
+    runs-on: ubuntu-latest
+    needs: [lint]
+    env:
+      COMPOSE: docker compose --env-file booking-app/.env.production -f booking-app/docker-compose.prod.yml
+    steps:
+      - uses: actions/checkout@v4
+
+      # NODE_ENV=development with the fake providers, which is not what production runs.
+      # It is what *can* run: NODE_ENV=production refuses `fake` for email and SMS, and the
+      # real Resend and Twilio adapters are Task 3.4 and do not exist yet. When 3.4 lands,
+      # delete these three substitutions and this job checks the real thing.
+      #
+      # The provider rules themselves are covered by env.schema.spec.ts, so nothing here is
+      # the only test of them.
+      - name: Write a deployment environment
+        run: |
+          sed -e 's/^NODE_ENV=production/NODE_ENV=development/' \
+              -e 's/^PAYMENT_PROVIDER=stripe/PAYMENT_PROVIDER=fake/' \
+              -e 's/^EMAIL_PROVIDER=resend/EMAIL_PROVIDER=fake/' \
+              -e 's/^SMS_PROVIDER=twilio/SMS_PROVIDER=fake/' \
+              -e 's/replace_me_with_a_long_random_string/ci-throwaway-password/g' \
+              booking-app/.env.production.example > booking-app/.env.production
+
+      - name: Build the images
+        run: |
+          docker build -f booking-app/apps/api/Dockerfile --target api     -t sf-booking-api:local     .
+          docker build -f booking-app/apps/api/Dockerfile --target worker  -t sf-booking-worker:local  .
+          docker build -f booking-app/apps/api/Dockerfile --target migrate -t sf-booking-migrate:local .
+          docker build -f booking-app/apps/web/Dockerfile                  -t sf-booking-web:local     .
+
+      - name: Migrate a fresh database
+        run: |
+          $COMPOSE up -d --wait postgres redis
+          $COMPOSE run --rm migrate
+
+      # The same file restore.sh runs. If a migration drops a constraint as a side effect —
+      # which is exactly what Prisma's default enum strategy does — this is where it stops.
+      - name: Constraint inventory
+        run: $COMPOSE exec -T postgres psql -v ON_ERROR_STOP=1 -U booking -d booking < booking-app/infrastructure/sql/constraint-inventory.sql
+
+      # The API resolves DEFAULT_ORGANIZATION_SLUG at bootstrap and refuses to start without
+      # it, so a first deployment seeds before it starts. This asserts that ordering works.
+      - name: Seed
+        run: $COMPOSE run --rm migrate pnpm prisma:seed
+
+      - name: Start the stack
+        run: $COMPOSE up -d --wait
+
+      - name: Readiness through the API's own port
+        run: |
+          curl -fsS http://127.0.0.1:3001/api/health/ready | tee /dev/stderr | grep -q '"status":"ok"'
+
+      # A deep link is a 404 on disk and a real destination in the browser. Without the SPA
+      # fallback every office bookmark breaks on reload, and nothing else would notice.
+      - name: The bundle answers a deep link
+        run: |
+          test "$(curl -fsS -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/office/calendar)" = 200
+
+      # The host vhost is never exercised by the compose stack, so it is parsed here.
+      # A self-signed certificate because nginx loads the certificate during `-t`.
+      - name: The edge vhost parses
+        run: |
+          mkdir -p /tmp/certs
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=buchung.example.com \
+            -keyout /tmp/certs/privkey.pem -out /tmp/certs/fullchain.pem
+          docker run --rm \
+            -v "$PWD/booking-app/infrastructure/nginx/booking.conf:/etc/nginx/conf.d/booking.conf:ro" \
+            -v /tmp/certs:/etc/letsencrypt/live/buchung.example.com:ro \
+            nginx:1.29-alpine sh -c 'mkdir -p /var/www/certbot; rm -f /etc/nginx/conf.d/default.conf; nginx -t'
+
+      # The whole point of a backup is the restore, so the restore is what is tested.
+      - name: Back up, destroy, restore
+        run: |
+          booking-app/infrastructure/scripts/backup.sh
+          $COMPOSE down -v
+          $COMPOSE up -d --wait postgres
+          booking-app/infrastructure/scripts/restore.sh "$(ls -1t backups/*.dump | head -1)" --force
+
+      - name: Logs
+        if: failure()
+        run: $COMPOSE logs --tail=200
+
+      - name: Tear down
+        if: always()
+        run: $COMPOSE down -v

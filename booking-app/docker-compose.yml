@@ -1,0 +1,55 @@
+# Local development infrastructure for the booking app.
+#
+# The compose project name and the container names are prefixed so a second
+# product area in this monorepo cannot collide with them, and the published
+# ports are deliberately non-default so this stack cannot be confused with a
+# system-wide Postgres or Redis.
+name: shape-and-flow-booking
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: shape-and-flow-booking-postgres
+    environment:
+      POSTGRES_USER: booking
+      POSTGRES_PASSWORD: booking
+      POSTGRES_DB: booking
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - '5433:5432'
+    volumes:
+      - booking-postgres-data:/var/lib/postgresql/data
+      # Runs only on first initialisation of an empty data volume.
+      #
+      # So a machine that already has `booking-postgres-data` will not pick this up, and
+      # `prisma migrate dev` keeps failing with P1003 for the missing shadow database. The
+      # one-time fix is `pnpm db:reset`, which takes the volume down and brings it back
+      # empty so the entrypoint runs this script. It discards local data.
+      - ./docker/postgres-init.sql:/docker-entrypoint-initdb.d/10-shadow-database.sql:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U booking -d booking']
+      interval: 3s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: shape-and-flow-booking-redis
+    command: ['redis-server', '--appendonly', 'yes']
+    ports:
+      - '6380:6379'
+    volumes:
+      - booking-redis-data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 3s
+      timeout: 3s
+      retries: 10
+      start_period: 3s
+    restart: unless-stopped
+
+volumes:
+  booking-postgres-data:
+  booking-redis-data:
