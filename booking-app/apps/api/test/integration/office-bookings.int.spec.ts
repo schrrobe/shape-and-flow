@@ -219,7 +219,7 @@ describe('POST /api/office/bookings', () => {
 
     // No money was taken: the customer is standing at the desk, not on a payment page.
     expect(await prisma.payment.count({ where: { bookingId } })).toBe(0);
-    expect(testApp.payments.sessions()).toHaveLength(0);
+    expect(await testApp.payments.sessions()).toHaveLength(0);
   });
 
   it('obeys the same collision rules as an online booking', async () => {
@@ -890,6 +890,215 @@ describe('GET /api/office/audit-log', () => {
 
 /* ── CSV export ───────────────────────────────────────────────────────────────── */
 
+describe('the audit trail', () => {
+  it('writes exactly one row per booking status change', async () => {
+    // The service writes its row inside the transaction that changes the booking, and the
+    // interceptor wrote a second one afterwards. Two rows for one action means an auditor
+    // reading a count sees twice the activity, and the two disagree about the summary.
+    const owner = await signedInAs('OWNER');
+
+    for (const [path, action] of [
+      ['cancel', 'BOOKING_CANCELED'],
+      ['complete', 'BOOKING_MARKED_COMPLETED'],
+      ['no-show', 'BOOKING_MARKED_NO_SHOW'],
+    ] as const) {
+      const booking = await bookingAt(berlin(NEXT_MONDAY, '10:00'));
+      // Completing and no-showing need the appointment to be over.
+      await prisma.booking.update({
+        where: { id: booking.id },
+        data: { startsAt: berlin('2026-08-13', '10:00'), endsAt: berlin('2026-08-13', '10:30') },
+      });
+
+      const request = owner.post(`/api/office/bookings/${booking.id}/${path}`);
+      if (path === 'cancel') request.set('Idempotency-Key', randomUUID());
+
+      await request.send(path === 'cancel' ? { reason: 'Krankheit' } : {}).expect(201);
+
+      expect(await prisma.auditLog.count({ where: { action, entityId: booking.id } }), action).toBe(
+        1,
+      );
+    }
+  });
+
+  it('names the created booking, not the path, on a manual booking', async () => {
+    // There is no `:id` in the path and the response field is `bookingId`, not `id`, so
+    // the interceptor fell through to the placeholder and wrote a row pointing at "-".
+    const owner = await signedInAs('OWNER');
+
+    const created = await owner
+      .post('/api/office/bookings')
+      .set('Idempotency-Key', randomUUID())
+      .send(manualBookingBody())
+      .expect(201);
+
+    expect(
+      await prisma.auditLog.findFirstOrThrow({ where: { action: 'BOOKING_CREATED_MANUALLY' } }),
+    ).toMatchObject({ entityId: (created.body as { bookingId: string }).bookingId });
+  });
+
+  it('names the refund, not the booking, on a refund', async () => {
+    const owner = await signedInAs('OWNER');
+    const booking = await bookingAt(berlin(NEXT_MONDAY, '10:00'));
+    await paidWithCard(booking.id, 4500);
+
+    const refunded = await owner
+      .post(`/api/office/bookings/${booking.id}/refunds`)
+      .set('Idempotency-Key', randomUUID())
+      .send({ amountCents: 1000, reason: 'GOODWILL' })
+      .expect(201);
+
+    expect(
+      await prisma.auditLog.findFirstOrThrow({ where: { action: 'REFUND_ISSUED' } }),
+    ).toMatchObject({
+      entityId: (refunded.body as { refundId: string }).refundId,
+      entityType: 'Refund',
+    });
+  });
+});
+
+describe('deciding a cancellation request without the refund capability', () => {
+  /** A pending request whose frozen suggestion decides whether money will move. */
+  async function openCancellationRequest(suggestedRetainedAmountCents: number): Promise<string> {
+    const booking = await bookingAt(berlin(NEXT_MONDAY, '10:00'));
+    await paidWithCard(booking.id, 4500);
+
+    const request = await prisma.cancellationRequest.create({
+      data: {
+        organizationId: ctx.organization.id,
+        bookingId: booking.id,
+        suggestedRetainedAmountCents,
+      },
+      select: { id: true },
+    });
+
+    return request.id;
+  }
+
+  it('allows full retention even when the body omits the amount', async () => {
+    // Keeping everything moves no money, so it needs no refund capability. Treating an
+    // omitted amount as zero made the most common approval — accept the suggestion —
+    // look like a full refund and refused it.
+    const admin = await signedInAs('ADMIN', { canIssueRefunds: false });
+    const requestId = await openCancellationRequest(4500);
+
+    await admin
+      .post(`/api/office/cancellation-requests/${requestId}/decide`)
+      .send({ decision: 'APPROVED' })
+      .expect(201);
+
+    expect(await prisma.refund.count()).toBe(0);
+  });
+
+  it('refuses when the suggestion leaves money to refund', async () => {
+    const admin = await signedInAs('ADMIN', { canIssueRefunds: false });
+    const requestId = await openCancellationRequest(1000);
+
+    await admin
+      .post(`/api/office/cancellation-requests/${requestId}/decide`)
+      .send({ decision: 'APPROVED' })
+      .expect(403);
+
+    expect(await prisma.refund.count()).toBe(0);
+    expect(
+      (await prisma.cancellationRequest.findUniqueOrThrow({ where: { id: requestId } })).decision,
+    ).toBe('PENDING');
+  });
+});
+
+describe('a booking that has been rescheduled twice', () => {
+  /** A replacement in a chain: rescheduled from one booking, financially rooted at another. */
+  async function replacementOf(
+    previousId: string,
+    rootId: string,
+    startsAt: Date,
+    status: BookingStatus,
+  ): Promise<{ id: string }> {
+    return await prisma.booking.create({
+      data: {
+        ...makeBooking(ctx, { status, startsAt, expiresAt: null }),
+        ...(status === 'CONFIRMED' ? { confirmedAt: NOW } : {}),
+        rescheduledFromBookingId: previousId,
+        financialRootBookingId: rootId,
+      },
+      select: { id: true },
+    });
+  }
+
+  it('shows the office the payment that is still on the original booking', async () => {
+    const owner = await signedInAs('OWNER');
+
+    const original = await bookingAt(berlin(NEXT_MONDAY, '10:00'), {
+      status: 'CANCELED_BY_BUSINESS',
+    });
+    await paidWithCard(original.id, ctx.service30.priceCents);
+
+    const first = await replacementOf(
+      original.id,
+      original.id,
+      berlin(NEXT_MONDAY, '12:00'),
+      'CANCELED_BY_BUSINESS',
+    );
+    const second = await replacementOf(
+      first.id,
+      original.id,
+      berlin(NEXT_MONDAY, '14:00'),
+      'CONFIRMED',
+    );
+
+    const detail = officeBookingDetailSchema.parse(
+      (await owner.get(`/api/office/bookings/${second.id}`).expect(200)).body,
+    );
+
+    expect(detail.payments).toHaveLength(1);
+    expect(detail.payments[0]?.status).toBe('SUCCEEDED');
+    expect(detail.paid.amountCents).toBe(ctx.service30.priceCents);
+  });
+
+  it('counts a manual payment recorded on an earlier link exactly once', async () => {
+    const owner = await signedInAs('OWNER');
+
+    const original = await bookingAt(berlin(NEXT_MONDAY, '10:00'), {
+      status: 'CANCELED_BY_BUSINESS',
+    });
+    const first = await replacementOf(
+      original.id,
+      original.id,
+      berlin(NEXT_MONDAY, '12:00'),
+      'CANCELED_BY_BUSINESS',
+    );
+
+    await owner
+      .post(`/api/office/bookings/${first.id}/manual-payments`)
+      .set('Idempotency-Key', randomUUID())
+      .send({ amountCents: 4500, method: 'CASH' })
+      .expect(201);
+
+    const second = await replacementOf(
+      first.id,
+      original.id,
+      berlin(NEXT_MONDAY, '14:00'),
+      'CONFIRMED',
+    );
+
+    const detail = officeBookingDetailSchema.parse(
+      (await owner.get(`/api/office/bookings/${second.id}`).expect(200)).body,
+    );
+
+    expect(detail.manualPayments).toHaveLength(1);
+    expect(detail.paid.amountCents).toBe(4500);
+
+    const csv = await owner
+      .get('/api/office/exports/bookings.csv')
+      .query({ from: '2026-08-01', to: '2026-08-31' })
+      .expect(200);
+
+    const latestLine = csv.text
+      .split('\r\n')
+      .find((line) => line.includes(';CONFIRMED;') && line.includes('45,00'));
+    expect(latestLine).toBeDefined();
+  });
+});
+
 describe('CSV export', () => {
   it('streams semicolon-delimited utf-8 with a BOM', async () => {
     const owner = await signedInAs('OWNER');
@@ -983,6 +1192,74 @@ describe('CSV export', () => {
     }
     // Refunds are negative, because that is the direction the money went.
     expect(response.text).toContain('-10,00');
+  });
+
+  it('files a refund under the month it settled in', async () => {
+    // The ledger dates each refund at its settlement. Selecting them by request date
+    // instead put a refund requested in August and settled in September into August's
+    // file — carrying a September date — and left it out of September's altogether, so
+    // neither month reconciled against Stripe.
+    const owner = await signedInAs('OWNER');
+    const booking = await bookingAt(berlin(NEXT_MONDAY, '10:00'));
+    await paidWithCard(booking.id, 4500);
+
+    const payment = await prisma.payment.findFirstOrThrow({ where: { bookingId: booking.id } });
+    await prisma.refund.create({
+      data: {
+        organizationId: ctx.organization.id,
+        bookingId: booking.id,
+        paymentId: payment.id,
+        amountCents: 1000,
+        currency: 'EUR',
+        status: 'SUCCEEDED',
+        reason: 'GOODWILL',
+        idempotencyKey: randomUUID(),
+        requestedAt: new Date('2026-08-31T20:00:00.000Z'),
+        settledAt: new Date('2026-09-01T06:00:00.000Z'),
+      },
+    });
+
+    const august = await owner
+      .get('/api/office/exports/payments.csv')
+      .query({ from: '2026-08-01', to: '2026-08-31' })
+      .expect(200);
+    expect(august.text).not.toContain('REFUND');
+
+    const september = await owner
+      .get('/api/office/exports/payments.csv')
+      .query({ from: '2026-09-01', to: '2026-09-30' })
+      .expect(200);
+    expect(september.text).toContain('REFUND');
+    expect(september.text).toContain('-10,00');
+  });
+
+  it('keeps an unsettled refund at the date it was requested', async () => {
+    const owner = await signedInAs('OWNER');
+    const booking = await bookingAt(berlin(NEXT_MONDAY, '10:00'));
+    await paidWithCard(booking.id, 4500);
+
+    const payment = await prisma.payment.findFirstOrThrow({ where: { bookingId: booking.id } });
+    await prisma.refund.create({
+      data: {
+        organizationId: ctx.organization.id,
+        bookingId: booking.id,
+        paymentId: payment.id,
+        amountCents: 1000,
+        currency: 'EUR',
+        status: 'PENDING',
+        reason: 'GOODWILL',
+        idempotencyKey: randomUUID(),
+        requestedAt: new Date('2026-08-20T09:00:00.000Z'),
+        settledAt: null,
+      },
+    });
+
+    const august = await owner
+      .get('/api/office/exports/payments.csv')
+      .query({ from: '2026-08-01', to: '2026-08-31' })
+      .expect(200);
+
+    expect(august.text).toContain('REFUND');
   });
 
   it('is closed to an EMPLOYEE', async () => {

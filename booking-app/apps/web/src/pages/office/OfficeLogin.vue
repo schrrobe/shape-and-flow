@@ -69,6 +69,7 @@ async function submit(): Promise<void> {
     <form class="flex flex-col gap-4" @submit.prevent="submit">
       <SfInput
         v-model="email"
+        data-test="email"
         label="Email"
         type="email"
         autocomplete="username"
@@ -78,6 +79,7 @@ async function submit(): Promise<void> {
 
       <SfInput
         v-model="password"
+        data-test="password"
         label="Password"
         type="password"
         autocomplete="current-password"
@@ -85,7 +87,13 @@ async function submit(): Promise<void> {
         :maxlength="200"
       />
 
-      <SfButton type="submit" :loading="submitting" loading-label="Signing in" block>
+      <SfButton
+        type="submit"
+        data-test="sign-in"
+        :loading="submitting"
+        loading-label="Signing in"
+        block
+      >
         Sign in
       </SfButton>
     </form>

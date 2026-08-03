@@ -112,7 +112,7 @@ async function submit(): Promise<void> {
       {{ t('booking.detailsTitle') }}
     </h1>
 
-    <SfAlert v-if="errorKey !== null" tone="danger" :title="t('errors.title')">
+    <SfAlert v-if="errorKey !== null" tone="danger" data-test="error" :title="t('errors.title')">
       {{ t(errorKey, { seconds: retryAfterSeconds ?? 60 }) }}
     </SfAlert>
 
@@ -120,12 +120,14 @@ async function submit(): Promise<void> {
       <div class="grid gap-4 sm:grid-cols-2">
         <SfInput
           v-model="draft.firstName"
+          data-test="first-name"
           :label="t('booking.firstName')"
           autocomplete="given-name"
           required
         />
         <SfInput
           v-model="draft.lastName"
+          data-test="last-name"
           :label="t('booking.lastName')"
           autocomplete="family-name"
           required
@@ -134,6 +136,7 @@ async function submit(): Promise<void> {
 
       <SfInput
         v-model="draft.email"
+        data-test="email"
         type="email"
         :label="t('booking.email')"
         :description="t('booking.emailHint')"
@@ -144,6 +147,7 @@ async function submit(): Promise<void> {
 
       <SfInput
         v-model="draft.phone"
+        data-test="phone"
         type="tel"
         :label="t('booking.phone')"
         :description="t('booking.phoneHint')"
@@ -152,6 +156,7 @@ async function submit(): Promise<void> {
 
       <SfTextarea
         v-model="draft.note"
+        data-test="note"
         :label="t('booking.note')"
         :description="t('booking.notePrivacyHint')"
         :maxlength="CUSTOMER_NOTE_MAX_LENGTH"
@@ -164,13 +169,15 @@ async function submit(): Promise<void> {
           <dd>{{ draft.serviceName }}</dd>
 
           <dt class="text-text-secondary">{{ t('booking.summaryEmployee') }}</dt>
-          <dd>{{ draft.employeeName ?? t('booking.employeeAny') }}</dd>
+          <dd data-test="summary-employee">{{ draft.employeeName ?? t('booking.employeeAny') }}</dd>
 
           <dt class="text-text-secondary">{{ t('booking.summaryTime') }}</dt>
-          <dd v-if="draft.slot !== null">{{ d(draft.slot, 'full') }}</dd>
+          <dd v-if="draft.slot !== null" data-test="summary-time">{{ d(draft.slot, 'full') }}</dd>
 
           <dt class="text-text-secondary">{{ t('booking.summaryPrice') }}</dt>
-          <dd v-if="draft.servicePriceCents !== null">{{ money(draft.servicePriceCents) }}</dd>
+          <dd v-if="draft.servicePriceCents !== null" data-test="summary-price">
+            {{ money(draft.servicePriceCents) }}
+          </dd>
         </dl>
         <p class="mt-3 text-sm text-text-secondary">
           {{ t('booking.reservationHint', { minutes: 5 }) }}
@@ -183,6 +190,7 @@ async function submit(): Promise<void> {
         </SfButton>
         <SfButton
           type="submit"
+          data-test="submit"
           :loading="submitting"
           :disabled="!complete"
           :loading-label="t('booking.submitting')"

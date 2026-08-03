@@ -33,6 +33,13 @@ interface PersistedDraft {
   employeeName: string | null;
   /** `null` means "any available employee", which is a real choice and not an empty one. */
   employeeId: string | null;
+  /**
+   * Whether the customer has answered the employee question at all.
+   *
+   * Persisted rather than derived, because the one choice that cannot be told from its own
+   * absence is the common one: `employeeId: null` is both "anyone" and "not asked yet".
+   */
+  employeeChosen: boolean;
   slotStartsAt: string | null;
   firstName: string;
   lastName: string;
@@ -49,6 +56,7 @@ function emptyDraft(): PersistedDraft {
     servicePriceCents: null,
     employeeName: null,
     employeeId: null,
+    employeeChosen: false,
     slotStartsAt: null,
     firstName: '',
     lastName: '',
@@ -65,7 +73,17 @@ function readStored(): PersistedDraft {
 
     // Merged over a fresh draft, so a stored shape from an older deploy cannot produce
     // undefined fields the form would then render as "undefined".
-    return { ...emptyDraft(), ...(JSON.parse(raw) as Partial<PersistedDraft>) };
+    const parsed = JSON.parse(raw) as Partial<PersistedDraft>;
+    const draft = { ...emptyDraft(), ...parsed };
+
+    return {
+      ...draft,
+      // A draft written before this field existed is read by the old rule: a named
+      // employee was chosen, a null one was never asked about. Applied here, against the
+      // raw object, because the merge above would otherwise hide the difference between
+      // "absent" and "stored as false".
+      employeeChosen: parsed.employeeChosen ?? draft.employeeId !== null,
+    };
   } catch {
     return emptyDraft();
   }
@@ -99,8 +117,8 @@ export const useBookingDraft = defineStore('booking-draft', () => {
   const phone = ref(stored.phone);
   const note = ref(stored.note);
 
-  /** True once the customer has picked a specific person rather than "anyone". */
-  const employeeChosen = ref(stored.employeeId !== null);
+  /** True once the customer has answered the employee question, "anyone" included. */
+  const employeeChosen = ref(stored.employeeChosen);
 
   /**
    * The hosted payment page, and the reservation it belongs to.
@@ -123,6 +141,7 @@ export const useBookingDraft = defineStore('booking-draft', () => {
       servicePriceCents: servicePriceCents.value,
       employeeId: employeeId.value,
       employeeName: employeeName.value,
+      employeeChosen: employeeChosen.value,
       slotStartsAt: slotStartsAt.value,
       firstName: firstName.value,
       lastName: lastName.value,
@@ -146,6 +165,7 @@ export const useBookingDraft = defineStore('booking-draft', () => {
       servicePriceCents,
       employeeId,
       employeeName,
+      employeeChosen,
       slotStartsAt,
       firstName,
       lastName,
@@ -154,6 +174,10 @@ export const useBookingDraft = defineStore('booking-draft', () => {
       note,
     ],
     persist,
+    // Synchronous, so what is stored is never one tick behind what is chosen. A reload
+    // is not something the page gets to schedule, and a watcher that flushed afterwards
+    // both lost the last choice and wrote an empty draft back over a `reset`.
+    { flush: 'sync' },
   );
 
   /** Start an attempt, or resume the one already in progress. */
@@ -259,6 +283,24 @@ export const useBookingDraft = defineStore('booking-draft', () => {
     reservation.value = null;
   }
 
+  /**
+   * The reservation lapsed: pick a new slot, under a new key.
+   *
+   * The key is the part `clearSlot` cannot do. It is bound to the booking the previous
+   * attempt held, so submitting a different slot under it is a spent key with a new body
+   * — which the API refuses as `IDEMPOTENCY_KEY_REUSED`. The customer would be told to
+   * pick again and then blocked from doing so.
+   *
+   * Everything chosen earlier stays: the service, the person and their own details were
+   * never the problem.
+   */
+  function expireReservation(): void {
+    slotStartsAt.value = null;
+    reservation.value = null;
+    idempotencyKey.value = crypto.randomUUID();
+    persist();
+  }
+
   const price = computed<MoneyDto | null>(() => reservation.value?.price ?? null);
 
   return {
@@ -286,6 +328,7 @@ export const useBookingDraft = defineStore('booking-draft', () => {
     canReach,
     furthestReachable,
     clearSlot,
+    expireReservation,
     reset,
   };
 });

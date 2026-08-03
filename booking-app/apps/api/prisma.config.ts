@@ -33,10 +33,10 @@ export default defineConfig({
   migrations: {
     path: resolve(packageDir, 'prisma/migrations'),
     // tsx, not bare node: the seed imports the generated Prisma client through
-    // `../src/prisma/client.js`, and Node does not resolve a `.js` specifier to
-    // the `.ts` file that actually exists. tsx applies the same NodeNext
-    // resolution TypeScript does.
-    seed: 'tsx prisma/seed.ts',
+    // `./prisma/client.js`, and Node does not resolve a `.js` specifier to the
+    // `.ts` file that actually exists. tsx applies the same NodeNext resolution
+    // TypeScript does. The built `dist/seed.main.js` needs no wrapper at all.
+    seed: 'tsx src/seed.main.ts',
   },
   datasource: {
     url: databaseUrl,

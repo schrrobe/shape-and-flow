@@ -5,6 +5,10 @@ import { ReservationService } from '../booking/reservation.service.js';
 import { AppError } from '../common/errors/app-error.js';
 import { addLocalDays, wallClockToInstantOrThrow } from '../domain/time/local-time.js';
 import { OrganizationContextService } from '../organization/organization-context.service.js';
+import {
+  BookingFinancialsService,
+  emptyFinancials,
+} from '../payment/booking-financials.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
 import { decodeCursor, keysetOrderBy, keysetWhere, toPage } from './cursor.js';
@@ -14,6 +18,7 @@ import { receivedFrom } from './received.js';
 import type { OfficeSession } from '../auth/session.store.js';
 import type { CustomerInput } from '../booking/customer-upsert.service.js';
 import type { LocalDate } from '../domain/time/local-time.js';
+import type { BookingFinancials } from '../payment/booking-financials.service.js';
 import type { Prisma } from '../prisma/client.js';
 import type {
   CreateManualBookingRequest,
@@ -24,7 +29,14 @@ import type {
   RefundListResponse,
 } from '@shape-and-flow/booking-contracts';
 
-/** What a list row needs, plus the money columns "paid" is summed from. */
+/**
+ * What a list row needs.
+ *
+ * No financial relations. A reschedule leaves the payment on the booking that was paid,
+ * so `booking.payments` on a replacement is empty and every row in a chain but the first
+ * reported nothing received. The money comes from `BookingFinancialsService`, which
+ * resolves the chain's root once for the whole page.
+ */
 const LIST_FIELDS = {
   id: true,
   reference: true,
@@ -40,8 +52,6 @@ const LIST_FIELDS = {
   customerId: true,
   employee: { select: { displayName: true } },
   customer: { select: { firstName: true, lastName: true } },
-  payments: { select: { amountCents: true, currency: true, status: true } },
-  manualPayments: { select: { amountCents: true, currency: true } },
   cancellationRequests: { where: { decision: 'PENDING' as const }, select: { id: true } },
   rescheduleRequests: { where: { decision: 'PENDING' as const }, select: { id: true } },
 } as const satisfies Prisma.BookingSelect;
@@ -75,20 +85,6 @@ const DETAIL_FIELDS = {
   customer: {
     select: { id: true, firstName: true, lastName: true, email: true, phone: true },
   },
-  payments: {
-    select: {
-      id: true,
-      amountCents: true,
-      currency: true,
-      status: true,
-      paymentMethodType: true,
-      refundedAmountCents: true,
-      paidAt: true,
-    },
-    orderBy: { createdAt: 'asc' as const },
-  },
-  manualPayments: { orderBy: { paidAt: 'asc' as const } },
-  refunds: { orderBy: { requestedAt: 'asc' as const } },
   statusHistory: { orderBy: { createdAt: 'asc' as const } },
   notifications: {
     select: {
@@ -133,6 +129,7 @@ export class OfficeBookingsService {
     private readonly organizations: OrganizationContextService,
     private readonly scope: EmployeeScopeService,
     private readonly reservations: ReservationService,
+    private readonly financials: BookingFinancialsService,
   ) {}
 
   /* ── reading ────────────────────────────────────────────────────────────────── */
@@ -176,7 +173,16 @@ export class OfficeBookingsService {
       (field === 'startsAt' ? row.startsAt : row.createdAt).toISOString(),
     );
 
-    return { items: page.items.map(toListItem), nextCursor: page.nextCursor };
+    // One batched read for the whole page, not one per row: a page of fifty costs three
+    // queries however many reschedule chains it contains.
+    const financials = await this.financials.loadMany(page.items.map((row) => row.id));
+
+    return {
+      items: page.items.map((row) =>
+        toListItem(row, financials.get(row.id) ?? emptyFinancials(row.id)),
+      ),
+      nextCursor: page.nextCursor,
+    };
   }
 
   async detail(session: OfficeSession, id: string): Promise<OfficeBookingDetail> {
@@ -192,12 +198,13 @@ export class OfficeBookingsService {
 
     const openCancellation = booking.cancellationRequests[0];
     const openReschedule = booking.rescheduleRequests[0];
+    const financials = await this.financials.load(booking.id);
 
     return {
       // The detail select is a superset of the list one, so the same mapper produces the
       // same fields — which is what stops a list row and a detail row disagreeing about
       // what a booking's `paid` figure is.
-      ...toListItem(booking),
+      ...toListItem(booking, financials),
       serviceId: booking.serviceId,
       blockStartsAt: booking.blockStartsAt.toISOString(),
       blockEndsAt: booking.blockEndsAt.toISOString(),
@@ -220,7 +227,7 @@ export class OfficeBookingsService {
         email: booking.customer.email,
         phone: booking.customer.phone,
       },
-      payments: booking.payments.map((payment) => ({
+      payments: financials.payments.map((payment) => ({
         id: payment.id,
         amount: { amountCents: payment.amountCents, currency: payment.currency },
         status: payment.status,
@@ -228,7 +235,7 @@ export class OfficeBookingsService {
         refundedAmountCents: payment.refundedAmountCents,
         paidAt: payment.paidAt?.toISOString() ?? null,
       })),
-      manualPayments: booking.manualPayments.map((payment) => ({
+      manualPayments: financials.manualPayments.map((payment) => ({
         id: payment.id,
         amount: { amountCents: payment.amountCents, currency: payment.currency },
         method: payment.method,
@@ -236,7 +243,7 @@ export class OfficeBookingsService {
         recordedByOfficeUserId: payment.recordedByOfficeUserId,
         note: payment.note,
       })),
-      refunds: booking.refunds.map(toRefundDto),
+      refunds: financials.refunds.map(toRefundDto),
       statusHistory: booking.statusHistory.map((entry) => ({
         id: entry.id,
         fromStatus: entry.fromStatus,
@@ -279,12 +286,11 @@ export class OfficeBookingsService {
   async refunds(session: OfficeSession, bookingId: string): Promise<RefundListResponse> {
     await this.assertReachable(session, bookingId);
 
-    const rows = await this.prisma.refund.findMany({
-      where: { bookingId, organizationId: session.organizationId },
-      orderBy: { requestedAt: 'asc' },
-    });
+    // Through the chain's root, so a refund issued before a reschedule is still listed
+    // against the appointment the office is looking at.
+    const { refunds } = await this.financials.load(bookingId);
 
-    return { items: rows.map(toRefundDto) };
+    return { items: refunds.map(toRefundDto) };
   }
 
   /* ── creating ───────────────────────────────────────────────────────────────── */
@@ -428,7 +434,7 @@ function splitSort(sort: string): ['startsAt' | 'createdAt', 'asc' | 'desc'] {
  */
 type ListRow = Prisma.BookingGetPayload<{ select: typeof LIST_FIELDS }>;
 
-function toListItem(row: ListRow) {
+function toListItem(row: ListRow, financials: BookingFinancials) {
   return {
     id: row.id,
     reference: row.reference,
@@ -446,7 +452,7 @@ function toListItem(row: ListRow) {
     customerId: row.customerId,
     customerName: `${row.customer.firstName} ${row.customer.lastName}`,
     price: { amountCents: row.priceCentsSnapshot, currency: row.currency },
-    paid: receivedFrom(row, row.currency).toJSON(),
+    paid: receivedFrom(financials, row.currency).toJSON(),
     createdAt: row.createdAt.toISOString(),
   };
 }

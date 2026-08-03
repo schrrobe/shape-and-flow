@@ -4,6 +4,10 @@ import { Injectable } from '@nestjs/common';
 
 import { addLocalDays, wallClockToInstantOrThrow } from '../domain/time/local-time.js';
 import { OrganizationContextService } from '../organization/organization-context.service.js';
+import {
+  BookingFinancialsService,
+  emptyFinancials,
+} from '../payment/booking-financials.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
 import { CSV_BOM, csvAmount, csvInstant, csvLine } from './csv.js';
@@ -76,6 +80,7 @@ export class ExportsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly organizations: OrganizationContextService,
+    private readonly financials: BookingFinancialsService,
   ) {}
 
   bookings(organizationId: string, query: ExportQuery): Readable {
@@ -125,14 +130,16 @@ export class ExportsService {
           customer: {
             select: { firstName: true, lastName: true, email: true, phone: true },
           },
-          payments: { select: { amountCents: true, currency: true, status: true } },
-          manualPayments: { select: { amountCents: true, currency: true } },
         },
         // By id, which is the only column guaranteed unique — so the page boundary can
         // never split or repeat a row the way a timestamp cursor can on ties.
         orderBy: { id: 'asc' },
         take: PAGE_SIZE,
       });
+
+      // Batched per page. A rescheduled booking's payment sits on the row that was paid,
+      // so reading each booking's own relation exported it as unpaid.
+      const financials = await this.financials.loadMany(rows.map((row) => row.id));
 
       return {
         cursor: rows.at(-1)?.id ?? null,
@@ -150,7 +157,12 @@ export class ExportsService {
             booking.customer.email,
             booking.customer.phone,
             csvAmount(booking.priceCentsSnapshot),
-            csvAmount(receivedFrom(booking, booking.currency).amountCents),
+            csvAmount(
+              receivedFrom(
+                financials.get(booking.id) ?? emptyFinancials(booking.id),
+                booking.currency,
+              ).amountCents,
+            ),
             booking.currency,
             csvInstant(booking.createdAt, zone),
             ...(query.includeCustomerNote ? [booking.customerNote] : []),

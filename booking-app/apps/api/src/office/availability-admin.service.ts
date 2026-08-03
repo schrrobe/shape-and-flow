@@ -6,7 +6,12 @@ import { withCalendarLock } from '../booking/calendar-lock.js';
 import { AppError } from '../common/errors/app-error.js';
 import { isExclusionViolation } from '../common/prisma-errors/prisma-errors.js';
 import { CLOCK } from '../domain/time/clock.js';
-import { addLocalDays, wallClockToInstantOrThrow } from '../domain/time/local-time.js';
+import {
+  addLocalDays,
+  dateColumnToLocalDate,
+  localDateToDateColumn,
+  wallClockToInstantOrThrow,
+} from '../domain/time/local-time.js';
 import { OrganizationContextService } from '../organization/organization-context.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
@@ -192,8 +197,10 @@ export class AvailabilityAdminService {
         organizationId: session.organizationId,
         ...this.employeeFilter(session, query.employeeId),
         ...(query.status === undefined ? {} : { status: query.status }),
-        ...(query.to === undefined ? {} : { startDate: { lte: dateOnly(query.to) } }),
-        ...(query.from === undefined ? {} : { endDate: { gte: dateOnly(query.from) } }),
+        ...(query.to === undefined ? {} : { startDate: { lte: localDateToDateColumn(query.to) } }),
+        ...(query.from === undefined
+          ? {}
+          : { endDate: { gte: localDateToDateColumn(query.from) } }),
       },
       orderBy: { startDate: 'asc' },
     });
@@ -229,8 +236,8 @@ export class AvailabilityAdminService {
             data: {
               organizationId: session.organizationId,
               employeeId: body.employeeId,
-              startDate: dateOnly(body.startDate),
-              endDate: dateOnly(body.endDate),
+              startDate: localDateToDateColumn(body.startDate),
+              endDate: localDateToDateColumn(body.endDate),
               status: body.status,
               ...(body.reason === undefined || body.reason === null ? {} : { reason: body.reason }),
               ...(body.status === 'APPROVED'
@@ -272,8 +279,8 @@ export class AvailabilityAdminService {
               tx,
               session.organizationId,
               existing.employeeId,
-              dateString(existing.startDate),
-              dateString(existing.endDate),
+              dateColumnToLocalDate(existing.startDate),
+              dateColumnToLocalDate(existing.endDate),
             );
           }
 
@@ -306,7 +313,7 @@ export class AvailabilityAdminService {
     const rows = await this.prisma.closedDay.findMany({
       where: {
         organizationId: session.organizationId,
-        date: { gte: dateOnly(query.from), lte: dateOnly(query.to) },
+        date: { gte: localDateToDateColumn(query.from), lte: localDateToDateColumn(query.to) },
       },
       orderBy: { date: 'asc' },
     });
@@ -314,7 +321,7 @@ export class AvailabilityAdminService {
     return {
       items: rows.map((row) => ({
         id: row.id,
-        date: dateString(row.date),
+        date: dateColumnToLocalDate(row.date),
         reason: row.reason,
       })),
     };
@@ -337,18 +344,18 @@ export class AvailabilityAdminService {
       where: {
         organizationId_date: {
           organizationId: session.organizationId,
-          date: dateOnly(body.date),
+          date: localDateToDateColumn(body.date),
         },
       },
       create: {
         organizationId: session.organizationId,
-        date: dateOnly(body.date),
+        date: localDateToDateColumn(body.date),
         ...(body.reason === undefined || body.reason === null ? {} : { reason: body.reason }),
       },
       update: { reason: body.reason ?? null },
     });
 
-    return { id: row.id, date: dateString(row.date), reason: row.reason };
+    return { id: row.id, date: dateColumnToLocalDate(row.date), reason: row.reason };
   }
 
   async deleteClosedDay(session: OfficeSession, id: string): Promise<void> {
@@ -420,16 +427,6 @@ export class AvailabilityAdminService {
   }
 }
 
-/** A `YYYY-MM-DD` as the UTC midnight a Postgres `date` column compares against. */
-function dateOnly(date: LocalDate): Date {
-  return new Date(`${date}T00:00:00.000Z`);
-}
-
-/** And back: a `date` column reads as UTC midnight of the local date it means. */
-function dateString(value: Date): LocalDate {
-  return value.toISOString().slice(0, 10);
-}
-
 function toTimeOffDto(row: {
   id: string;
   employeeId: string;
@@ -442,8 +439,8 @@ function toTimeOffDto(row: {
   return {
     id: row.id,
     employeeId: row.employeeId,
-    startDate: dateString(row.startDate),
-    endDate: dateString(row.endDate),
+    startDate: dateColumnToLocalDate(row.startDate),
+    endDate: dateColumnToLocalDate(row.endDate),
     status: row.status,
     reason: row.reason,
     createdAt: row.createdAt.toISOString(),

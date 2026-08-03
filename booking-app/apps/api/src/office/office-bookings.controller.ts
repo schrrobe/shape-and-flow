@@ -80,7 +80,12 @@ export class OfficeBookingsController {
   @Post()
   @Roles('OWNER', 'ADMIN')
   @Idempotent('booking.create')
-  @Audited({ action: 'BOOKING_CREATED_MANUALLY', entityType: 'Booking' })
+  @Audited({
+    action: 'BOOKING_CREATED_MANUALLY',
+    entityType: 'Booking',
+    // There is no `:id` in the path: the booking is what this call produces.
+    responseIdField: 'bookingId',
+  })
   async create(
     @CurrentUser() session: OfficeSession,
     @Body() body: unknown,
@@ -98,7 +103,9 @@ export class OfficeBookingsController {
   @Post(':id/cancel')
   @Roles('OWNER', 'ADMIN')
   @Idempotent('booking.cancel')
-  @Audited({ action: 'BOOKING_CANCELED', entityType: 'Booking' })
+  // No `@Audited`: CancellationService writes its row inside the transaction that
+  // cancels the booking. A second, after-the-fact row here made every business
+  // cancellation appear twice in the log, with a summary that said less.
   async cancel(
     @CurrentUser() session: OfficeSession,
     @Param('id') id: string,
@@ -115,6 +122,7 @@ export class OfficeBookingsController {
       bookingId: id,
       officeUserId: session.officeUserId,
       reason: input.reason,
+      mayIssueRefunds: session.role === 'OWNER' || session.canIssueRefunds,
       ...(input.refund === undefined ? {} : { refundAmountCents: input.refund.amountCents }),
     });
 
@@ -123,7 +131,7 @@ export class OfficeBookingsController {
 
   @Post(':id/complete')
   @Roles('OWNER', 'ADMIN', 'EMPLOYEE')
-  @Audited({ action: 'BOOKING_MARKED_COMPLETED', entityType: 'Booking' })
+  // No `@Audited`: AttendanceService writes its row in the same transaction.
   async complete(
     @CurrentUser() session: OfficeSession,
     @Param('id') id: string,
@@ -138,7 +146,7 @@ export class OfficeBookingsController {
 
   @Post(':id/no-show')
   @Roles('OWNER', 'ADMIN', 'EMPLOYEE')
-  @Audited({ action: 'BOOKING_MARKED_NO_SHOW', entityType: 'Booking' })
+  // No `@Audited`: AttendanceService writes its row in the same transaction.
   async noShow(
     @CurrentUser() session: OfficeSession,
     @Param('id') id: string,
@@ -179,7 +187,8 @@ export class OfficeBookingsController {
   @Roles('OWNER', 'ADMIN')
   @RequiresRefundCapability()
   @Idempotent('refund.create')
-  @Audited({ action: 'REFUND_ISSUED', entityType: 'Refund' })
+  // The `:id` in the path is the booking; the row this records is the refund.
+  @Audited({ action: 'REFUND_ISSUED', entityType: 'Refund', responseIdField: 'refundId' })
   async issueRefund(
     @CurrentUser() session: OfficeSession,
     @Param('id') id: string,

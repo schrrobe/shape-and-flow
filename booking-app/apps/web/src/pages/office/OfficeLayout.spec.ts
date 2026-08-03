@@ -86,20 +86,24 @@ describe('OfficeLayout', () => {
       wrapper.find(`[data-test=nav-${entry.name}]`).exists(),
     ).map((entry) => entry.name);
 
-    // An owner holds every capability, so what is missing here is missing because the route
-    // does not exist yet. A link to an unregistered name resolves to the customer-facing 404.
-    expect(rendered).toEqual(['office-dashboard']);
+    // An owner holds every capability and every route now exists, so the whole sidebar
+    // renders. A link to an unregistered name would resolve to the customer-facing 404,
+    // which is what this has been guarding against since 10.1.
+    expect(rendered).toEqual(NAVIGATION.map((entry) => entry.name));
   });
 
   it('hides what a role may not reach', () => {
-    // The route filter and the capability filter are both in play, so this asserts the one
-    // thing that is observable in this task: an entry needs both. `navigation.spec.ts` covers
-    // the capability half across all three roles.
+    // Now that every route exists, this isolates the capability half: an owner sees
+    // Settings and an employee does not, from the same layout and the same table.
+    // `navigation.spec.ts` covers the matrix across all three roles.
     const employee = mountLayout(officeUser({ role: 'EMPLOYEE', employeeId: 'e1' }));
     expect(employee.find('[data-test=nav-office-settings]').exists()).toBe(false);
+    expect(employee.find('[data-test=nav-office-users]').exists()).toBe(false);
+    // An employee still gets their own calendar and their own bookings.
+    expect(employee.find('[data-test=nav-office-calendar]').exists()).toBe(true);
 
     const owner = mountLayout();
-    expect(owner.find('[data-test=nav-office-settings]').exists()).toBe(false);
+    expect(owner.find('[data-test=nav-office-settings]').exists()).toBe(true);
   });
 
   it('signs out and returns to the login page', async () => {

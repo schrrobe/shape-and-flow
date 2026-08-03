@@ -102,13 +102,76 @@ const routes: RouteRecordRaw[] = [
       // No `meta` of its own: vue-router merges every matched record's meta into
       // `route.meta`, so a child inherits the parent's `area` and `requiresSession`.
       //
-      // Named `office-dashboard` already, though it renders a landing page rather than the
-      // dashboard: task 10.2 replaces the component and the name, the path and the sidebar
-      // entry all stay put.
       {
         path: '',
         name: 'office-dashboard',
-        component: () => import('../pages/office/OfficeStart.vue'),
+        component: () => import('../pages/office/OfficeDashboard.vue'),
+      },
+      {
+        path: 'calendar',
+        name: 'office-calendar',
+        component: () => import('../pages/office/OfficeCalendar.vue'),
+      },
+      {
+        path: 'bookings',
+        name: 'office-bookings',
+        component: () => import('../pages/office/BookingList.vue'),
+      },
+      // Before `bookings/:id` for the same reason the detail sits after the list: the
+      // resolution order does not depend on it, but a reader should not have to know that
+      // to be sure "new" is a screen rather than a booking id.
+      {
+        path: 'bookings/new',
+        name: 'office-booking-new',
+        component: () => import('../pages/office/NewBooking.vue'),
+      },
+      // After the list, so `/office/bookings` matches the list rather than the detail with
+      // an empty id — vue-router resolves static segments before dynamic ones, but the
+      // order is what makes that visible to a reader.
+      {
+        path: 'bookings/:id',
+        name: 'office-booking',
+        component: () => import('../pages/office/BookingDetail.vue'),
+      },
+      {
+        path: 'requests',
+        name: 'office-requests',
+        component: () => import('../pages/office/RequestsPage.vue'),
+      },
+      {
+        path: 'employees',
+        name: 'office-employees',
+        component: () => import('../pages/office/EmployeesPage.vue'),
+      },
+      {
+        path: 'services',
+        name: 'office-services',
+        component: () => import('../pages/office/ServicesPage.vue'),
+      },
+      {
+        path: 'availability',
+        name: 'office-availability',
+        component: () => import('../pages/office/AvailabilityPage.vue'),
+      },
+      {
+        path: 'customers',
+        name: 'office-customers',
+        component: () => import('../pages/office/CustomersPage.vue'),
+      },
+      {
+        path: 'exports',
+        name: 'office-exports',
+        component: () => import('../pages/office/ExportsPage.vue'),
+      },
+      {
+        path: 'users',
+        name: 'office-users',
+        component: () => import('../pages/office/UsersPage.vue'),
+      },
+      {
+        path: 'settings',
+        name: 'office-settings',
+        component: () => import('../pages/office/SettingsPage.vue'),
       },
     ],
   },

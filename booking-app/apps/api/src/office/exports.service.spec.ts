@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { BookingFinancialsService } from '../payment/booking-financials.service.js';
+
 import { ExportsService } from './exports.service.js';
 
 import type { OrganizationContextService } from '../organization/organization-context.service.js';
@@ -109,7 +111,8 @@ function makeService(
     getTimezone: () => 'Europe/Berlin',
   } as OrganizationContextService;
 
-  return new ExportsService(prisma, organizations);
+  const financials = new BookingFinancialsService(prisma, organizations);
+  return new ExportsService(prisma, organizations, financials);
 }
 
 async function textOf(stream: Readable): Promise<string> {

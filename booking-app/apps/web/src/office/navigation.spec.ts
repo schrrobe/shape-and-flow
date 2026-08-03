@@ -52,25 +52,15 @@ describe('office navigation', () => {
     }
   });
 
-  it('has exactly these destinations still to be built', () => {
+  it('has no destination left unbuilt', () => {
     const missing = NAVIGATION.filter((entry) => !router.hasRoute(entry.name)).map(
       (entry) => entry.name,
     );
 
     // The layout hides entries whose route is not registered, which would otherwise send a
-    // member of staff to the customer-facing 404. Listing them here is what keeps that from
-    // becoming a permanent silent hole: tasks 10.2 and 10.3 have to shorten this list.
-    expect(missing).toEqual([
-      'office-calendar',
-      'office-bookings',
-      'office-requests',
-      'office-employees',
-      'office-services',
-      'office-availability',
-      'office-customers',
-      'office-exports',
-      'office-users',
-      'office-settings',
-    ]);
+    // member of staff to the customer-facing 404. The list was how tasks 10.2 and 10.3
+    // were held to shortening it; it is empty now, and an entry added without a route
+    // would put itself back on it.
+    expect(missing).toEqual([]);
   });
 });

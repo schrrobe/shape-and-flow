@@ -50,6 +50,18 @@ describe('envSchema', () => {
     expect(parsed.ENABLE_TEST_SUPPORT).toBe(false);
   });
 
+  it('logs every request by default, and samples only when told to', () => {
+    // A deployment that has not thought about log volume must not silently be
+    // dropping lines: sampling is something an operator turns on.
+    expect(envSchema.parse(valid).LOG_SAMPLE_RATE).toBe(1);
+    expect(envSchema.parse({ ...valid, LOG_SAMPLE_RATE: '0.05' }).LOG_SAMPLE_RATE).toBe(0.05);
+  });
+
+  it('rejects a sample rate outside 0 to 1', () => {
+    expect(paths(parseConfig({ ...valid, LOG_SAMPLE_RATE: '1.5' }))).toContain('LOG_SAMPLE_RATE');
+    expect(paths(parseConfig({ ...valid, LOG_SAMPLE_RATE: '-0.1' }))).toContain('LOG_SAMPLE_RATE');
+  });
+
   it('rejects an unknown APP_ROLE and names the variable', () => {
     const result = parseConfig({ ...valid, APP_ROLE: 'both' });
     expect(result.success).toBe(false);

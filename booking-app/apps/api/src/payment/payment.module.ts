@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 
 import { AuditWriterModule } from '../booking/audit.module.js';
 
+import { BookingFinancialsService } from './booking-financials.service.js';
 import { ManualPaymentService } from './manual-payment.service.js';
 import { RefundProcessor } from './processors/refund.processor.js';
 import { RefundWebhookHandler } from './refund-webhook.handler.js';
@@ -17,7 +18,19 @@ import { RefundService } from './refund.service.js';
  */
 @Module({
   imports: [AuditWriterModule],
-  providers: [RefundService, RefundProcessor, RefundWebhookHandler, ManualPaymentService],
-  exports: [RefundService, RefundProcessor, RefundWebhookHandler, ManualPaymentService],
+  providers: [
+    BookingFinancialsService,
+    RefundService,
+    RefundProcessor,
+    RefundWebhookHandler,
+    ManualPaymentService,
+  ],
+  exports: [
+    BookingFinancialsService,
+    RefundService,
+    RefundProcessor,
+    RefundWebhookHandler,
+    ManualPaymentService,
+  ],
 })
 export class PaymentModule {}

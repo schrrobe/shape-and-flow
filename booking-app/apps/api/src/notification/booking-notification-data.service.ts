@@ -1,10 +1,13 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 
+import { isAppError } from '../common/errors/app-error.js';
 import { ENV } from '../config/env.schema.js';
 import { OrganizationContextService } from '../organization/organization-context.service.js';
+import { BookingFinancialsService } from '../payment/booking-financials.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
 import type { AppConfig } from '../config/env.schema.js';
+import type { BookingFinancials } from '../payment/booking-financials.service.js';
 import type { Prisma } from '../prisma/client.js';
 import type { AppointmentData, CommonData } from '@shape-and-flow/booking-notification-templates';
 
@@ -25,10 +28,18 @@ export const BOOKING_FOR_NOTIFICATION = {
   customer: {
     select: { id: true, firstName: true, lastName: true, email: true, phone: true },
   },
-  payments: { select: { status: true, amountCents: true, refundedAmountCents: true } },
 } as const;
 
-export type BookingRow = Prisma.BookingGetPayload<{ select: typeof BOOKING_FOR_NOTIFICATION }>;
+/**
+ * The booking, plus the money on its financial root.
+ *
+ * Not `booking.payments`: a rescheduled booking's payment stays on the row that was
+ * paid, and a cancellation email that read this booking's own relation told the
+ * customer nothing had been refunded because it could see nothing that was paid.
+ */
+export type BookingRow = Prisma.BookingGetPayload<{
+  select: typeof BOOKING_FOR_NOTIFICATION;
+}> & { financials: BookingFinancials };
 
 /**
  * The booking fields every notification shares, built one way.
@@ -45,21 +56,41 @@ export class BookingNotificationData {
   constructor(
     private readonly prisma: PrismaService,
     private readonly organizations: OrganizationContextService,
+    private readonly financials: BookingFinancialsService,
     @Inject(ENV) private readonly config: AppConfig,
   ) {}
 
-  /** The booking, or null when it has been deleted since the event was written. */
-  async load(bookingId: string): Promise<BookingRow | null> {
-    const booking = await this.prisma.booking.findUnique({
-      where: { id: bookingId },
+  /**
+   * The booking, or null when it has been deleted since the event was written.
+   *
+   * Takes an optional transaction client because a caller may be composing a message
+   * about a booking it has just created and not yet committed — a reschedule
+   * approval builds the replacement and announces it in one transaction, and a read
+   * on a fresh connection would not see it.
+   */
+  async load(bookingId: string, tx?: Prisma.TransactionClient): Promise<BookingRow | null> {
+    const booking = await (tx ?? this.prisma).booking.findFirst({
+      where: { id: bookingId, organizationId: this.organizations.getOrganizationId() },
       select: BOOKING_FOR_NOTIFICATION,
     });
 
     if (booking === null) {
       this.logger.warn(`booking ${bookingId} no longer exists; no notification sent`);
+      return null;
     }
 
-    return booking;
+    try {
+      return { ...booking, financials: await this.financials.load(bookingId, tx) };
+    } catch (error) {
+      // The row can disappear between the two reads. That is the same harmless outcome
+      // as finding no booking initially; every other financial failure must still retry.
+      if (isAppError(error, 'NOT_FOUND')) {
+        this.logger.warn(`booking ${bookingId} no longer exists; no notification sent`);
+        return null;
+      }
+
+      throw error;
+    }
   }
 
   /** The fields every appointment template shares. */

@@ -13,9 +13,11 @@ import { OutboxReconciler } from '../messaging/outbox/outbox.reconciler.js';
 import { QUEUE_REGISTRY } from '../messaging/queues/enqueue.service.js';
 import { NotificationReconciler } from '../notification/notification.reconciler.js';
 import { OrganizationContextService } from '../organization/organization-context.service.js';
+import { Prisma } from '../prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
 import { deriveDisplayStatus } from './display-status.js';
+import { RECEIVED_PAYMENT_STATUSES } from './received.js';
 
 import type { OfficeSession } from '../auth/session.store.js';
 import type { Clock } from '../domain/time/clock.js';
@@ -146,12 +148,20 @@ export class DashboardService {
    * The cent arithmetic lives in SQL rather than in a `Money`, which is the one place
    * the domain's ban does not reach. It is a sum of same-currency integer columns, which
    * is the case `Money` exists to protect and not one it can help with here.
+   *
+   * Both per-booking sums join on the **financial root**, not on the booking itself. A
+   * reschedule leaves the money on the row it arrived on, so counting a replacement's own
+   * payment rows reported every paid-then-moved appointment as still owing, permanently.
    */
   private async moneyFigures(
     organizationId: string,
     startOfToday: Date,
     startOfTomorrow: Date,
   ): Promise<{ todayRevenueCents: number; unpaidConfirmedBookings: number }> {
+    // The same list `receivedFrom` filters on, so the tile and every other financial
+    // reader cannot drift apart about what counts as money in.
+    const received = Prisma.join(RECEIVED_PAYMENT_STATUSES);
+
     const rows = await this.prisma.$queryRaw<
       { today_revenue_cents: bigint; unpaid_confirmed_bookings: bigint }[]
     >`
@@ -160,7 +170,7 @@ export class DashboardService {
           COALESCE((
             SELECT SUM(p.amount_cents) FROM payments p
             WHERE p.organization_id = ${organizationId}
-              AND p.status IN ('SUCCEEDED', 'PARTIALLY_REFUNDED', 'REFUNDED')
+              AND p.status IN (${received})
               AND p.paid_at >= ${startOfToday} AND p.paid_at < ${startOfTomorrow}
           ), 0)
           +
@@ -177,12 +187,13 @@ export class DashboardService {
             AND (
               COALESCE((
                 SELECT SUM(p.amount_cents) FROM payments p
-                WHERE p.booking_id = b.id
-                  AND p.status IN ('SUCCEEDED', 'PARTIALLY_REFUNDED', 'REFUNDED')
+                WHERE p.booking_id = COALESCE(b.financial_root_booking_id, b.id)
+                  AND p.status IN (${received})
               ), 0)
               +
               COALESCE((
-                SELECT SUM(m.amount_cents) FROM manual_payments m WHERE m.booking_id = b.id
+                SELECT SUM(m.amount_cents) FROM manual_payments m
+                WHERE m.booking_id = COALESCE(b.financial_root_booking_id, b.id)
               ), 0)
             ) < b.price_cents_snapshot
         ) AS unpaid_confirmed_bookings

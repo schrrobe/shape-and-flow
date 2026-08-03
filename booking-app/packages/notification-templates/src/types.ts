@@ -63,7 +63,8 @@ export interface TemplateData {
   RESCHEDULE_REQUEST_RECEIVED: AppointmentData & { requestedStartsAt: Date };
   RESCHEDULE_REQUEST_DECIDED: AppointmentData & {
     approved: boolean;
-    manageUrl: string;
+    /** Null on a rejection: nothing moved, and no new link was minted. */
+    manageUrl: string | null;
     note: string | null;
   };
   REFUND_ISSUED: AppointmentData & { refundedCents: number };

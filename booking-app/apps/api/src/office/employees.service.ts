@@ -3,6 +3,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { BLOCKING_BOOKING_STATUSES } from '../booking/booking-status.machine.js';
 import { AppError } from '../common/errors/app-error.js';
 import { CLOCK } from '../domain/time/clock.js';
+import { dateColumnToLocalDate } from '../domain/time/local-time.js';
 import { OrganizationContextService } from '../organization/organization-context.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
@@ -229,7 +230,7 @@ export class EmployeesService {
       items: rows.map((row) => ({
         id: row.id,
         employeeId: row.employeeId,
-        date: dateOnly(row.date),
+        date: dateColumnToLocalDate(row.date),
         kind: row.kind,
         startMinute: row.startMinute,
         endMinute: row.endMinute,
@@ -269,7 +270,7 @@ export class EmployeesService {
       exception: {
         id: exception.id,
         employeeId: exception.employeeId,
-        date: dateOnly(exception.date),
+        date: dateColumnToLocalDate(exception.date),
         kind: exception.kind,
         startMinute: exception.startMinute,
         endMinute: exception.endMinute,
@@ -470,7 +471,7 @@ export class EmployeesService {
       employeeId,
       workingHours,
       exceptions: exceptions.map((exception) => ({
-        date: dateOnly(exception.date),
+        date: dateColumnToLocalDate(exception.date),
         kind: exception.kind,
         startMinute: exception.startMinute,
         endMinute: exception.endMinute,
@@ -485,11 +486,6 @@ export class EmployeesService {
   private organizationId(): string {
     return this.organizations.getOrganizationId();
   }
-}
-
-/** A `@db.Date` column comes back as UTC midnight, so the calendar part is the value. */
-function dateOnly(value: Date): string {
-  return value.toISOString().slice(0, 10);
 }
 
 /** One day of slack, so an exception on today's date is still considered. */

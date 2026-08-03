@@ -122,6 +122,26 @@ describe('RedirectToCheckout', () => {
     expect(wrapper.text()).toContain('abgelaufen');
   });
 
+  it('rotates the idempotency key when the reservation lapses', async () => {
+    const draft = useBookingDraft();
+    draft.begin();
+    draft.setService('s1', { name: 'Massage', priceCents: 4500 });
+    draft.setEmployee('e1', 'Mara Vogt');
+    draft.setSlot(new Date('2026-08-17T07:00:00.000Z'));
+    draft.setReservation(reservation('2026-08-14T06:00:00.000Z'));
+    const spentKey = draft.idempotencyKey;
+
+    mountPage();
+    await flushPromises();
+
+    // The lapsed reservation still holds the old key. Picking a new slot under it is a
+    // different body for a spent key, which the API refuses — so the retry the page
+    // just invited would fail with IDEMPOTENCY_KEY_REUSED.
+    expect(draft.idempotencyKey).not.toBe(spentKey);
+    expect(draft.slot).toBeNull();
+    expect(draft.serviceId).toBe('s1');
+  });
+
   it('sends a reload back to the start, because the checkout url is never persisted', async () => {
     // No reservation in memory: this URL was never meant to be bookmarkable.
     mountPage();

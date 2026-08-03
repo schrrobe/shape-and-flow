@@ -650,6 +650,14 @@ model Booking {
   customerNote                 String?       @map("customer_note")
   locale                       Locale
   rescheduledFromBookingId     String?       @unique @map("rescheduled_from_booking_id")
+  /// The booking the money is on. Null means this one is it.
+  ///
+  /// A reschedule replaces the booking row and leaves the payment where it was
+  /// paid, so after two moves the charge is two hops away. Every financial read
+  /// needs the same answer to "which booking was paid", and walking
+  /// `rescheduledFrom` gives a different number of hops per booking. This is that
+  /// answer as one column: constant-time from any link in the chain.
+  financialRootBookingId       String?       @map("financial_root_booking_id")
   /// Audit stamps. Deliberately plain columns rather than foreign keys: they
   /// must never make archiving an office user harder, and the decision trail
   /// that matters lives in BookingStatusHistory and AuditLog.
@@ -665,6 +673,8 @@ model Booking {
   service                    Service                @relation(fields: [serviceId], references: [id], onDelete: Restrict)
   rescheduledFrom            Booking?               @relation("BookingReschedule", fields: [rescheduledFromBookingId], references: [id], onDelete: SetNull)
   rescheduledTo              Booking?               @relation("BookingReschedule")
+  financialRoot              Booking?               @relation("BookingFinancialRoot", fields: [financialRootBookingId], references: [id], onDelete: Restrict)
+  financialDescendants       Booking[]              @relation("BookingFinancialRoot")
   statusHistory              BookingStatusHistory[]
   managementTokens           ManagementToken[]
   payments                   Payment[]
@@ -681,6 +691,7 @@ model Booking {
   @@index([organizationId, customerId, startsAt])
   @@index([organizationId, status, blockStartsAt, blockEndsAt])
   @@index([status, expiresAt])
+  @@index([financialRootBookingId])
   @@map("bookings")
 }
 

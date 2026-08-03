@@ -117,6 +117,8 @@ const MATRIX: {
   { method: 'get', path: '/api/office/dashboard', allow: ['OWNER', 'ADMIN', 'EMPLOYEE'] },
   { method: 'get', path: '/api/office/bookings', allow: ['OWNER', 'ADMIN', 'EMPLOYEE'] },
   { method: 'post', path: '/api/office/bookings', allow: ['OWNER', 'ADMIN'] },
+  // The same two as the route it feeds: the answer exists to become a manual booking.
+  { method: 'get', path: '/api/office/availability', allow: ['OWNER', 'ADMIN'] },
   { method: 'get', path: '/api/office/employees', allow: ['OWNER', 'ADMIN', 'EMPLOYEE'] },
   { method: 'post', path: '/api/office/employees', allow: ['OWNER', 'ADMIN'] },
   { method: 'put', path: '/api/office/employees/x/working-hours', allow: ['OWNER', 'ADMIN'] },
@@ -383,6 +385,11 @@ describe('the router walk', () => {
       'CustomersController.update',
       'CustomersController.erase',
       'OfficeBookingsController.recordManualPayment',
+      'OfficeBookingsController.cancel',
+      'OfficeBookingsController.complete',
+      'OfficeBookingsController.noShow',
+      'RequestsController.decideCancellation',
+      'RequestsController.decideReschedule',
     ]);
 
     const untraced = officeRoutes()

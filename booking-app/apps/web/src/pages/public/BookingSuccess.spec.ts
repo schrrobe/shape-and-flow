@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMemoryHistory, createRouter } from 'vue-router';
 
 import { i18n } from '../../i18n/index.js';
+import { DRAFT_STORAGE_KEY, useBookingDraft } from '../../stores/booking-draft.js';
 
 import BookingSuccess from './BookingSuccess.vue';
 
@@ -94,6 +95,21 @@ describe('BookingSuccess', () => {
     expect(wrapper.text()).toContain('SF-DCYPFZ');
     expect(wrapper.text()).toContain('Mara Vogt');
     expect(wrapper.text()).toContain('Termin bestätigt');
+  });
+
+  it('names the address the confirmation went to, after clearing the draft', async () => {
+    // `draft.reset()` runs on mount, and the template read `draft.email` — so the one
+    // sentence that tells the customer where to look for their confirmation rendered
+    // with an empty address.
+    sessionResponses = ['CONFIRMED'];
+    useBookingDraft().email = 'anna@example.com';
+
+    const wrapper = await mountPage();
+    await flushPromises();
+
+    expect(wrapper.text()).toContain('anna@example.com');
+    expect(useBookingDraft().email).toBe('');
+    expect(sessionStorage.getItem(DRAFT_STORAGE_KEY)).toBeNull();
   });
 
   it('stops polling as soon as it is confirmed', async () => {
