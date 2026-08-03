@@ -71,10 +71,10 @@ export class ManagementTokenService {
     bookingId: string,
     organizationId: string,
     endsAt: Date,
-  ): Promise<{ token: string }> {
+  ): Promise<{ id: string; token: string }> {
     const token = randomBytes(TOKEN_BYTES).toString('base64url');
 
-    await tx.managementToken.create({
+    const row = await tx.managementToken.create({
       data: {
         organizationId,
         bookingId,
@@ -84,7 +84,7 @@ export class ManagementTokenService {
       select: { id: true },
     });
 
-    return { token };
+    return { id: row.id, token };
   }
 
   /**

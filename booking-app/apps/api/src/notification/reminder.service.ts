@@ -23,7 +23,7 @@ export interface FireInput {
 export type FireOutcome = 'SENT' | 'SKIPPED';
 
 /** Epoch *seconds*, which is what the job id and the payload both carry. */
-function startsAtEpochSeconds(startsAt: Date): number {
+export function startsAtEpochSeconds(startsAt: Date): number {
   return Math.floor(startsAt.getTime() / 1000);
 }
 
@@ -183,7 +183,7 @@ export class ReminderService {
     // step describes — would make a 2-hour reminder dedupe into the 24-hour one already
     // sent for the same appointment, so a business configuring two offsets would silently
     // get one.
-    const discriminator = `${String(input.offsetMinutes)}-${String(input.expectedStartsAtEpochSeconds)}`;
+    const discriminator = this.reminderDedupeDiscriminator(input.offsetMinutes, booking.startsAt);
 
     await withSerializationRetry(
       () =>
@@ -192,7 +192,7 @@ export class ReminderService {
           // plaintext from confirmation exists only once and is long gone by now, and a
           // reminder is exactly when somebody wants to cancel or move an appointment — a
           // link that cannot authenticate would send them hunting for an old email.
-          const { token } = await this.tokens.issue(
+          const issued = await this.tokens.issue(
             tx,
             booking.id,
             booking.organizationId,
@@ -201,10 +201,10 @@ export class ReminderService {
 
           const appointment = {
             ...this.data.appointmentData(booking),
-            manageUrl: this.data.manageUrl(token),
+            manageUrl: this.data.manageUrl(issued.token),
           };
 
-          await this.notifications.queue(tx, {
+          const email = await this.notifications.queue(tx, {
             organizationId: booking.organizationId,
             kind: 'REMINDER_24H',
             channel: 'EMAIL',
@@ -216,8 +216,9 @@ export class ReminderService {
             data: appointment,
           });
 
+          let smsNotificationId: string | null = null;
           if (settings.smsRemindersEnabled && booking.customer.phone !== null) {
-            await this.notifications.queue(tx, {
+            const sms = await this.notifications.queue(tx, {
               organizationId: booking.organizationId,
               kind: 'REMINDER_24H',
               channel: 'SMS',
@@ -228,6 +229,13 @@ export class ReminderService {
               dedupeDiscriminator: discriminator,
               data: appointment,
             });
+            smsNotificationId = sms.notificationId;
+          }
+
+          // A redelivered reminder job may dedupe every message. Remove the token minted
+          // for that no-op so retries cannot accumulate live management credentials.
+          if (email.notificationId === null && smsNotificationId === null) {
+            await tx.managementToken.delete({ where: { id: issued.id } });
           }
         }),
       'reminder-fire',

@@ -8,7 +8,7 @@ import {
 } from '@shape-and-flow/booking-contracts';
 
 import { CsrfHeaderGuard } from '../auth/csrf-header.guard.js';
-import { CurrentUser, OfficeRoute, OfficeSessionGuard } from '../auth/office-session.guard.js';
+import { CurrentUser, OfficeRoute } from '../auth/office-session.guard.js';
 import {
   RefundCapabilityGuard,
   RequiresRefundCapability,
@@ -48,8 +48,8 @@ import type {
  * bookings, two recorded payments, two refunds.
  */
 @Controller('office/bookings')
+@UseGuards(CsrfHeaderGuard, RolesGuard, RefundCapabilityGuard)
 @OfficeRoute()
-@UseGuards(OfficeSessionGuard, CsrfHeaderGuard, RolesGuard, RefundCapabilityGuard)
 export class OfficeBookingsController {
   constructor(
     private readonly bookings: OfficeBookingsService,

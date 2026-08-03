@@ -3,6 +3,7 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { FixedClock } from '../../src/domain/time/clock.js';
 import { hashManagementToken } from '../../src/manage/management-token.service.js';
 import { QUEUE } from '../../src/messaging/queues/job-contracts.js';
+import { dedupeKey } from '../../src/notification/dedupe-key.js';
 import { NotificationModule } from '../../src/notification/notification.module.js';
 import { NotificationService } from '../../src/notification/notification.service.js';
 import { ReminderReconciler } from '../../src/notification/reminder.reconciler.js';
@@ -317,6 +318,15 @@ describe('firing', () => {
     ).toBe(2);
   });
 
+  it('does not accumulate management tokens when the same reminder is fired again', async () => {
+    const booking = await confirmedBooking({ startsAt: daysFromNow(3) });
+
+    await service.fire(fireArgs(booking));
+    await service.fire(fireArgs(booking));
+
+    expect(await prisma.managementToken.count({ where: { bookingId: booking.id } })).toBe(1);
+  });
+
   it('adds an SMS only when enabled and a number exists', async () => {
     await setSettings({ smsRemindersEnabled: true });
     const booking = await confirmedBooking({ startsAt: daysFromNow(3) });
@@ -398,6 +408,57 @@ describe('the reconciler', () => {
     // A sent reminder has no job left either, so "the job is missing" alone would send
     // every reminder again every night.
     expect(await reconciler.runOnce()).toBe(0);
+  });
+
+  it('leaves a pending reminder to the notification reconciler', async () => {
+    const booking = await confirmedBooking({ startsAt: hoursFromNow(30) });
+    await service.fire(fireArgs(booking));
+    await queues[QUEUE.NOTIFICATION].obliterate({ force: true });
+
+    expect(await reconciler.runOnce()).toBe(0);
+  });
+
+  it('continues past a full page of already handled bookings', async () => {
+    const startsAt = hoursFromNow(30);
+    const employees = await prisma.employee.createManyAndReturn({
+      data: Array.from({ length: 501 }, (_, index) => ({
+        organizationId: ctx.organization.id,
+        firstName: 'Page',
+        lastName: String(index),
+        displayName: `Page ${String(index)}`,
+        displayOrder: index,
+      })),
+      select: { id: true },
+    });
+    const bookings = await prisma.booking.createManyAndReturn({
+      data: employees.map((employee, index) => ({
+        ...makeBooking(ctx, { status: 'CONFIRMED', startsAt }),
+        employeeId: employee.id,
+        reference: `PAGE-${String(index).padStart(3, '0')}`,
+        confirmedAt: NOW,
+      })),
+      select: { id: true, startsAt: true },
+    });
+
+    await prisma.notification.createMany({
+      data: bookings.slice(0, 500).map((booking) => ({
+        organizationId: ctx.organization.id,
+        bookingId: booking.id,
+        kind: 'REMINDER_24H' as const,
+        channel: 'EMAIL' as const,
+        locale: 'de' as const,
+        recipient: 'page@example.com',
+        status: 'SENT' as const,
+        dedupeKey: dedupeKey(
+          'REMINDER_24H',
+          'EMAIL',
+          booking.id,
+          service.reminderDedupeDiscriminator(1440, booking.startsAt),
+        ),
+      })),
+    });
+
+    expect(await reconciler.runOnce()).toBe(1);
   });
 
   it('leaves a job that is still there alone', async () => {

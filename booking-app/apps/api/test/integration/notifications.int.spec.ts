@@ -17,7 +17,14 @@ import { BookingEventProcessor } from '../../src/notification/processors/booking
 import { MessagingEventProcessor } from '../../src/notification/processors/messaging-event.processor.js';
 import { ReminderService, reminderJobId } from '../../src/notification/reminder.service.js';
 import { WebhooksModule } from '../../src/webhooks/webhooks.module.js';
-import { PUBLIC_WEB_ORIGIN, createBookingTestApp, enqueued } from '../booking-app.harness.js';
+import {
+  PUBLIC_API_ORIGIN,
+  PUBLIC_WEB_ORIGIN,
+  RESEND_WEBHOOK_SECRET,
+  TWILIO_AUTH_TOKEN,
+  createBookingTestApp,
+  enqueued,
+} from '../booking-app.harness.js';
 import { prisma, resetDatabase } from '../database.harness.js';
 import { SLOT_FRIDAY_0900, makeBooking, seedOrganization } from '../factories/index.js';
 import { loadOrganization } from '../public-app.harness.js';
@@ -125,13 +132,23 @@ async function build(useRealQueues = false): Promise<void> {
   messagingEvents = testApp.app.get(MessagingEventProcessor);
 }
 
-/** A signed Resend webhook, the way Svix signs one. */
+/**
+ * A signed Resend webhook, signed the way Svix actually signs one.
+ *
+ * The secret is base64 behind `whsec_`, and the key is the *decoded* bytes; the digest is
+ * base64, not hex. Signing it any other way here would pass against a verifier that is
+ * wrong in the same way, which is precisely the bug this replaced.
+ *
+ * The timestamp is taken from the test clock because the verifier enforces a tolerance
+ * window against it.
+ */
 function postResend(type: string, data: Record<string, unknown>, svixId = 'msg_1') {
   const body = JSON.stringify({ type, data });
-  const timestamp = '1786000000';
-  const signature = createHmac('sha256', 'test-resend-secret')
+  const timestamp = String(Math.floor(NOW.getTime() / 1000));
+  const key = Buffer.from(RESEND_WEBHOOK_SECRET.replace('whsec_', ''), 'base64');
+  const signature = createHmac('sha256', key)
     .update(`${svixId}.${timestamp}.${body}`, 'utf8')
-    .digest('hex');
+    .digest('base64');
 
   return request(server())
     .post('/webhooks/resend')
@@ -142,10 +159,25 @@ function postResend(type: string, data: Record<string, unknown>, svixId = 'msg_1
     .send(body);
 }
 
-/** A signed Twilio webhook, which is form-encoded. */
+/**
+ * A signed Twilio webhook, which is form-encoded.
+ *
+ * HMAC-SHA1, base64, over the request URL followed by every parameter as `namevalue` sorted
+ * by name — not over the raw body.
+ */
 function postTwilio(fields: Record<string, string>) {
   const body = new URLSearchParams(fields).toString();
-  const signature = createHmac('sha256', 'test-twilio-token').update(body, 'utf8').digest('hex');
+
+  const signedPayload = Object.keys(fields)
+    .sort()
+    .reduce(
+      (accumulator, name) => `${accumulator}${name}${fields[name] ?? ''}`,
+      `${PUBLIC_API_ORIGIN}/api/webhooks/twilio`,
+    );
+
+  const signature = createHmac('sha1', TWILIO_AUTH_TOKEN)
+    .update(signedPayload, 'utf8')
+    .digest('base64');
 
   return (
     request(server())
@@ -405,7 +437,7 @@ describe('one booking.confirmed event', () => {
   });
 
   it('adds an SMS only when enabled and a number exists', async () => {
-    await withSettings({ smsRemindersEnabled: false });
+    await withSettings({ smsConfirmationsEnabled: false });
 
     await bookingEvents.confirmed({
       organizationId: ctx.organization.id,
@@ -415,7 +447,7 @@ describe('one booking.confirmed event', () => {
     expect(await prisma.notification.count({ where: { bookingId, channel: 'SMS' } })).toBe(0);
 
     await prisma.notification.deleteMany({ where: { bookingId } });
-    await withSettings({ smsRemindersEnabled: true });
+    await withSettings({ smsConfirmationsEnabled: true });
 
     await bookingEvents.confirmed({
       organizationId: ctx.organization.id,
@@ -426,7 +458,7 @@ describe('one booking.confirmed event', () => {
   });
 
   it('omits the SMS when the customer gave no number', async () => {
-    await withSettings({ smsRemindersEnabled: true });
+    await withSettings({ smsConfirmationsEnabled: true });
     await prisma.customer.updateMany({ data: { phone: null } });
 
     await bookingEvents.confirmed({
@@ -712,7 +744,7 @@ describe('POST /webhooks/resend', () => {
 
 describe('POST /webhooks/twilio', () => {
   it('marks an undelivered SMS FAILED with the error code', async () => {
-    await withSettings({ smsRemindersEnabled: true });
+    await withSettings({ smsConfirmationsEnabled: true });
     await bookingEvents.confirmed({
       organizationId: ctx.organization.id,
       bookingId,

@@ -126,6 +126,13 @@ enum NotificationChannel {
 
 enum NotificationStatus {
   PENDING
+  /// Claimed by a worker that is about to call the provider.
+  ///
+  /// The row is moved here by a conditional update before the send, so a redelivered job
+  /// updates zero rows and stops instead of sending a second message. A retryable failure
+  /// returns it to PENDING; the reconciler treats a row stuck here past the stall window
+  /// the same way it treats a stalled PENDING one.
+  SENDING
   SENT
   DELIVERED
   FAILED
@@ -272,6 +279,13 @@ model OrganizationSettings {
   cancellationFeePercent     Int                   @default(0) @map("cancellation_fee_percent")
   reminderOffsetsMinutes     Int[]                 @default([1440]) @map("reminder_offsets_minutes")
   smsRemindersEnabled        Boolean               @default(false) @map("sms_reminders_enabled")
+  /// Whether a booking confirmation also goes out by SMS.
+  ///
+  /// Separate from `smsRemindersEnabled`, which its name says covers reminders. Gating
+  /// confirmations on the reminder flag means a business that wanted reminders is billed
+  /// for a second message per booking it never agreed to — and one that wants confirmation
+  /// texts but no reminders cannot express that at all.
+  smsConfirmationsEnabled    Boolean               @default(false) @map("sms_confirmations_enabled")
   customerNoteEnabled        Boolean               @default(true) @map("customer_note_enabled")
   dataRetentionDays          Int                   @default(1095) @map("data_retention_days")
   officeNotificationEmail    String                @map("office_notification_email")

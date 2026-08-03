@@ -1,7 +1,7 @@
 import { Controller, Get, UseGuards } from '@nestjs/common';
 import { SkipThrottle } from '@nestjs/throttler';
 
-import { OfficeRoute, OfficeSessionGuard } from '../auth/office-session.guard.js';
+import { OfficeRoute } from '../auth/office-session.guard.js';
 import { Roles } from '../auth/roles.decorator.js';
 import { RolesGuard } from '../auth/roles.guard.js';
 
@@ -24,9 +24,9 @@ import type { OperationsSnapshot } from './operations.service.js';
  * work of the person on the treatment table.
  */
 @Controller('health')
-@OfficeRoute()
 @SkipThrottle()
-@UseGuards(OfficeSessionGuard, RolesGuard)
+@UseGuards(RolesGuard)
+@OfficeRoute()
 export class HealthDetailController {
   constructor(private readonly operations: OperationsService) {}
 

@@ -97,6 +97,7 @@ watch(
     previouslyFocused?.focus();
     previouslyFocused = null;
   },
+  { immediate: true },
 );
 
 onBeforeUnmount(() => {

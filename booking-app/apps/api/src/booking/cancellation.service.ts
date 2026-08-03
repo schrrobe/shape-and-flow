@@ -145,7 +145,7 @@ export class CancellationService {
     return await withSerializationRetry(
       () =>
         this.prisma.$transaction(async (tx) => {
-          const current = await this.lock(tx, booking.id);
+          const current = await this.lock(tx, booking.id, booking.organizationId);
 
           if (current !== BookingStatus.CONFIRMED) {
             throw notCancellable('This booking is no longer cancellable.');
@@ -214,31 +214,46 @@ export class CancellationService {
     reason?: string,
   ): Promise<CancelByCustomerResult> {
     try {
-      return await this.prisma.$transaction(async (tx) => {
-        const request = await tx.cancellationRequest.create({
-          data: {
-            organizationId: booking.organizationId,
-            bookingId: booking.id,
-            ...(reason === undefined ? {} : { reason }),
-            // Frozen. The customer was shown this number; deciding against a later
-            // policy would charge them something they never saw.
-            suggestedRetainedAmountCents: suggestedRetained.amountCents,
-          },
-          select: { id: true },
-        });
+      return await withSerializationRetry(
+        () =>
+          this.prisma.$transaction(async (tx) => {
+            // Re-read under the lock, exactly as `cancelImmediately` does. The status was
+            // last seen outside any transaction, and a booking cancelled, completed or
+            // marked no-show since then would otherwise collect a PENDING request that
+            // blocks the next legitimate one through `cancellation_requests_one_open`
+            // and outlives the booking it is about.
+            const current = await this.lock(tx, booking.id, booking.organizationId);
 
-        // The office has to be told, and the customer has to be told it is pending.
-        // Composed as real notification rows in this transaction, so they commit with
-        // the request.
-        await this.requestNotifications.queueCancellationReceived(tx, {
-          requestId: request.id,
-          bookingId: booking.id,
-          suggestedRetainedCents: suggestedRetained.amountCents,
-          reason: reason ?? null,
-        });
+            if (current !== BookingStatus.CONFIRMED) {
+              throw notCancellable(`A ${current} booking cannot be cancelled.`);
+            }
 
-        return { outcome: 'REQUESTED' as const, requestId: request.id, suggestedRetained };
-      });
+            const request = await tx.cancellationRequest.create({
+              data: {
+                organizationId: booking.organizationId,
+                bookingId: booking.id,
+                ...(reason === undefined ? {} : { reason }),
+                // Frozen. The customer was shown this number; deciding against a later
+                // policy would charge them something they never saw.
+                suggestedRetainedAmountCents: suggestedRetained.amountCents,
+              },
+              select: { id: true },
+            });
+
+            // The office has to be told, and the customer has to be told it is pending.
+            // Composed as real notification rows in this transaction, so they commit with
+            // the request.
+            await this.requestNotifications.queueCancellationReceived(tx, {
+              requestId: request.id,
+              bookingId: booking.id,
+              suggestedRetainedCents: suggestedRetained.amountCents,
+              reason: reason ?? null,
+            });
+
+            return { outcome: 'REQUESTED' as const, requestId: request.id, suggestedRetained };
+          }),
+        'open-cancellation-request',
+      );
     } catch (error) {
       // The partial unique index allows one PENDING request per booking. A second one is
       // the customer clicking twice, or asking again while they wait.
@@ -261,8 +276,28 @@ export class CancellationService {
     await withSerializationRetry(
       () =>
         this.prisma.$transaction(async (tx) => {
+          const organizationId = this.organizations.getOrganizationId();
+
+          // Unlocked, and only to learn which booking to lock. Both rows are then locked
+          // booking-first, which is the order `cancelByBusiness` takes through
+          // `closeOpenRequests`. Locking the request first here instead would have the
+          // two paths each holding the lock the other needs next, and PostgreSQL would
+          // resolve that by aborting one of them.
+          const target = await tx.cancellationRequest.findFirst({
+            where: { id: input.requestId, organizationId },
+            select: { bookingId: true },
+          });
+
+          if (target === null) {
+            throw new AppError('NOT_FOUND', { message: 'Cancellation request not found.' });
+          }
+
+          await this.lock(tx, target.bookingId, organizationId);
+
           const locked = await tx.$queryRaw<{ id: string; decision: string }[]>(
-            Prisma.sql`SELECT id, decision FROM cancellation_requests WHERE id = ${input.requestId} FOR UPDATE`,
+            Prisma.sql`SELECT id, decision FROM cancellation_requests
+                       WHERE id = ${input.requestId} AND organization_id = ${organizationId}
+                       FOR UPDATE`,
           );
 
           if (locked[0] === undefined) {
@@ -275,8 +310,8 @@ export class CancellationService {
             });
           }
 
-          const request = await tx.cancellationRequest.findUniqueOrThrow({
-            where: { id: input.requestId },
+          const request = await tx.cancellationRequest.findFirstOrThrow({
+            where: { id: input.requestId, organizationId },
             select: {
               id: true,
               bookingId: true,
@@ -285,8 +320,8 @@ export class CancellationService {
             },
           });
 
-          const booking = await tx.booking.findUniqueOrThrow({
-            where: { id: request.bookingId },
+          const booking = await tx.booking.findFirstOrThrow({
+            where: { id: request.bookingId, organizationId },
             select: CANCELLABLE,
           });
 
@@ -352,7 +387,7 @@ export class CancellationService {
     input: DecideRequestInput,
   ): Promise<RefundReservationResult> {
     const now = this.clock.now();
-    const current = await this.lock(tx, booking.id);
+    const current = await this.lock(tx, booking.id, booking.organizationId);
 
     // The business may have cancelled it in the meantime, or the appointment may have
     // happened. Either way the request is being decided about something settled.
@@ -425,14 +460,17 @@ export class CancellationService {
     return await withSerializationRetry(
       () =>
         this.prisma.$transaction(async (tx) => {
-          const current = await this.lock(tx, input.bookingId);
+          // The office route takes the booking id from the caller, so the organization is
+          // part of every lookup here rather than assumed from the id alone.
+          const organizationId = this.organizations.getOrganizationId();
+          const current = await this.lock(tx, input.bookingId, organizationId);
 
           if (current !== BookingStatus.CONFIRMED) {
             throw notCancellable(`A ${current} booking cannot be cancelled.`);
           }
 
-          const booking = await tx.booking.findUniqueOrThrow({
-            where: { id: input.bookingId },
+          const booking = await tx.booking.findFirstOrThrow({
+            where: { id: input.bookingId, organizationId },
             select: CANCELLABLE,
           });
 
@@ -625,10 +663,22 @@ export class CancellationService {
     });
   }
 
-  /** Lock the booking row and return its current status. */
-  private async lock(tx: Prisma.TransactionClient, bookingId: string): Promise<BookingStatus> {
+  /**
+   * Lock the booking row and return its current status.
+   *
+   * The organization is part of the predicate rather than checked afterwards: a row
+   * belonging to another tenant must not be locked at all, and a `FOR UPDATE` that finds
+   * nothing is the same 404 as a booking that does not exist.
+   */
+  private async lock(
+    tx: Prisma.TransactionClient,
+    bookingId: string,
+    organizationId: string,
+  ): Promise<BookingStatus> {
     const rows = await tx.$queryRaw<{ status: BookingStatus }[]>(
-      Prisma.sql`SELECT status FROM bookings WHERE id = ${bookingId} FOR UPDATE`,
+      Prisma.sql`SELECT status FROM bookings
+                 WHERE id = ${bookingId} AND organization_id = ${organizationId}
+                 FOR UPDATE`,
     );
 
     if (rows[0] === undefined) {

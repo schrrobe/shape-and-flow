@@ -2,7 +2,7 @@ import { Controller, Get, Logger, Query, UseGuards } from '@nestjs/common';
 import { availabilityQuerySchema } from '@shape-and-flow/booking-contracts';
 
 import { CsrfHeaderGuard } from '../auth/csrf-header.guard.js';
-import { OfficeRoute, OfficeSessionGuard } from '../auth/office-session.guard.js';
+import { OfficeRoute } from '../auth/office-session.guard.js';
 import { RefundCapabilityGuard } from '../auth/refund-capability.guard.js';
 import { Roles } from '../auth/roles.decorator.js';
 import { RolesGuard } from '../auth/roles.guard.js';
@@ -32,8 +32,8 @@ import type { AvailabilityResponse } from '@shape-and-flow/booking-contracts';
  * the public endpoint it mirrors.
  */
 @Controller('office')
+@UseGuards(CsrfHeaderGuard, RolesGuard, RefundCapabilityGuard)
 @OfficeRoute()
-@UseGuards(OfficeSessionGuard, CsrfHeaderGuard, RolesGuard, RefundCapabilityGuard)
 export class OfficeAvailabilityController {
   private readonly logger = new Logger('OfficeAvailability');
 

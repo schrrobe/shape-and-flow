@@ -19,6 +19,19 @@ import { WorkerModule } from './worker.module.js';
 async function bootstrap(): Promise<void> {
   const envFile = loadEnvFile();
 
+  // These have to exist before Nest builds the container: module initialisation can reject
+  // while opening PostgreSQL or Redis, before the configured application logger exists.
+  process.on('unhandledRejection', (reason) => {
+    const detail = reason instanceof Error ? (reason.stack ?? reason.message) : String(reason);
+    process.stderr.write(`unhandled rejection: ${detail}\n`);
+    process.exit(1);
+  });
+
+  process.on('uncaughtException', (error) => {
+    process.stderr.write(`uncaught exception: ${error.stack ?? error.message}\n`);
+    process.exit(1);
+  });
+
   // The role is checked before the container is built, so a process started with the wrong
   // role exits without opening a database connection or claiming a job. Two processes from
   // one image differ only by this variable, which makes it the thing worth asserting.
@@ -34,8 +47,18 @@ async function bootstrap(): Promise<void> {
   const registrar = app.get(WorkerRegistrarService);
   const scheduler = app.get(SchedulerService);
 
-  await scheduler.install();
-  registrar.start();
+  try {
+    await scheduler.install();
+    registrar.start();
+  } catch (error) {
+    const detail = error instanceof Error ? (error.stack ?? error.message) : String(error);
+    logger.error(`worker start-up failed: ${detail}`);
+
+    // `start` can fail after opening only some workers. Stop whatever exists and close the
+    // Nest container even when one cleanup operation reports an already-broken connection.
+    await Promise.allSettled([registrar.stop(), app.close()]);
+    process.exit(1);
+  }
 
   logger.log(`Environment file: ${envFile ?? '(ambient environment only)'}`);
   logger.log(
@@ -68,22 +91,6 @@ async function bootstrap(): Promise<void> {
 
   process.on('SIGTERM', () => void shutdown('SIGTERM'));
   process.on('SIGINT', () => void shutdown('SIGINT'));
-
-  // A worker that keeps running after an unhandled rejection is worse than one that exits:
-  // it holds its queue's locks while being unable to finish anything. Exiting non-zero lets
-  // the supervisor replace it.
-  process.on('unhandledRejection', (reason) => {
-    // `stack` is optional even on a real Error, so fall through to the message rather
-    // than logging the word "undefined" at the one moment the detail matters.
-    const detail = reason instanceof Error ? (reason.stack ?? reason.message) : String(reason);
-    logger.error(`unhandled rejection: ${detail}`);
-    process.exit(1);
-  });
-
-  process.on('uncaughtException', (error) => {
-    logger.error(`uncaught exception: ${error.stack ?? error.message}`);
-    process.exit(1);
-  });
 }
 
 await bootstrap();

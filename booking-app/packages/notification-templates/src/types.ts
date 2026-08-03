@@ -28,6 +28,20 @@ export interface AppointmentData extends CommonData {
 }
 
 /**
+ * Why the business cancelled, as a code rather than as prose.
+ *
+ * A code because the caller is server-side code with no locale of its own: passing a German
+ * sentence into a template that may render in English put untranslated copy in front of a
+ * customer. Each locale below resolves the code to its own wording, so a new reason is added
+ * in one enum and two template files rather than wherever the sentence happened to live.
+ *
+ * The office's own free-text reason is deliberately not forwarded: it is written for internal
+ * use and may say things — a staff illness, another customer — that should not be quoted to
+ * the person on the other end.
+ */
+export type CancellationReasonCode = 'SEE_MESSAGE' | 'PAYMENT_FAILED';
+
+/**
  * What each kind needs in order to render.
  *
  * A mapped type keyed by `NotificationKind`, which is what makes the registry below
@@ -45,7 +59,7 @@ export interface TemplateData {
     retainedCents: number;
   };
   BOOKING_CANCELED_BY_BUSINESS: AppointmentData & {
-    reason: string;
+    reasonCode: CancellationReasonCode;
     refundedCents: number;
   };
   BOOKING_RESCHEDULED: AppointmentData & {

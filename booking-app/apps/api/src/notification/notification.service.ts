@@ -56,7 +56,13 @@ export type SendOutcome = 'SENT' | 'FAILED';
  * refused, a 5xx or a network error means it did not answer.
  */
 function isRetryable(error: unknown): boolean {
-  const status = (error as { status?: unknown }).status;
+  // Guarded, because a rejection is not always an object: `Promise.reject()` and a provider
+  // SDK rejecting with undefined both reach here, and reading `.status` off either throws a
+  // TypeError out of the catch block that was supposed to handle the failure.
+  const status =
+    typeof error === 'object' && error !== null
+      ? (error as { status?: unknown }).status
+      : undefined;
 
   if (typeof status === 'number') return status >= 500 || status === 429;
 
@@ -162,8 +168,11 @@ export class NotificationService {
   /**
    * Render and send one notification.
    *
-   * Returns early for anything but PENDING, so a redelivered job does not send a second
-   * copy of a message already on its way.
+   * The row is *claimed* rather than merely checked. Reading the status and then sending is
+   * check-then-act: two workers handed the same redelivered job both read PENDING and both
+   * call the provider, and the customer gets two copies. A conditional update from PENDING
+   * to SENDING can only succeed for one of them, and the loser sees zero rows changed and
+   * stops.
    */
   async send(notificationId: string): Promise<SendOutcome> {
     const notification = await this.prisma.notification.findUnique({
@@ -187,8 +196,22 @@ export class NotificationService {
       return notification.status === NotificationStatus.FAILED ? 'FAILED' : 'SENT';
     }
 
+    // Rendered before the claim, so a template error leaves the row PENDING and re-drivable
+    // rather than parked in SENDING.
     const data = reviveDates(notification.payload) as TemplateData[NotificationKind];
     const rendered = render(notification.kind, notification.channel, notification.locale, data);
+
+    const claimed = await this.prisma.notification.updateMany({
+      where: { id: notification.id, status: NotificationStatus.PENDING },
+      data: { status: NotificationStatus.SENDING },
+    });
+
+    if (claimed.count === 0) {
+      // Somebody else got there between the read above and here. Their send is the one that
+      // counts, and reporting SENT is what stops BullMQ retrying this delivery.
+      this.logger.debug(`notification ${notification.id} was claimed by another worker`);
+      return 'SENT';
+    }
 
     try {
       const providerMessageId = await this.deliver(notification, rendered);
@@ -244,8 +267,9 @@ export class NotificationService {
   /**
    * Record what went wrong, and decide whether the caller should retry.
    *
-   * A permanent failure settles the row so it stops being counted as in flight. A
-   * transient one leaves it PENDING and rethrows, which is what makes BullMQ retry.
+   * A permanent failure settles the row so it stops being counted as in flight. A transient
+   * one is returned to PENDING and rethrown, which is what makes BullMQ retry — and what
+   * keeps the row visible to the reconciler, which only looks for work that is not claimed.
    */
   private async recordFailure(notificationId: string, error: unknown): Promise<SendOutcome> {
     const message = error instanceof Error ? error.message : String(error);
@@ -256,7 +280,9 @@ export class NotificationService {
       data: {
         attempts: { increment: 1 },
         lastError: message.slice(0, 1000),
-        ...(retryable ? {} : { status: NotificationStatus.FAILED, failedAt: this.clock.now() }),
+        ...(retryable
+          ? { status: NotificationStatus.PENDING }
+          : { status: NotificationStatus.FAILED, failedAt: this.clock.now() }),
       },
     });
 
@@ -291,24 +317,31 @@ export class NotificationService {
     // DELIVERED and FAILED are both terminal. A provider that reports both — Twilio sends
     // `sent` then `delivered`, and occasionally a late failure — must not flip a row that
     // has already settled.
-    if (
-      notification.status === NotificationStatus.DELIVERED ||
-      notification.status === NotificationStatus.FAILED
-    ) {
-      return;
-    }
-
+    //
+    // The check is part of the update, not a branch before it. Two callbacks handled at the
+    // same moment would both read a non-terminal status and both write, and the later one
+    // wins — so a late `failed` could overwrite a row another delivery already settled as
+    // DELIVERED. Expressed as a `where`, the second update matches nothing instead.
     const now = this.clock.now();
 
-    await this.prisma.notification.update({
-      where: { id: notification.id },
-      data: input.delivered
-        ? { status: NotificationStatus.DELIVERED, deliveredAt: now }
-        : {
-            status: NotificationStatus.FAILED,
-            failedAt: now,
-            ...(input.error === undefined ? {} : { lastError: input.error.slice(0, 1000) }),
-          },
+    const applied = await this.prisma.notification.updateMany({
+      where: {
+        id: notification.id,
+        status: { notIn: [NotificationStatus.DELIVERED, NotificationStatus.FAILED] },
+      },
+      data: {
+        // Recorded on both branches. A delivered message can still come with something worth
+        // keeping — a spam complaint arrives *after* successful delivery, and dropping the
+        // note would leave no trace of it anywhere.
+        ...(input.error === undefined ? {} : { lastError: input.error.slice(0, 1000) }),
+        ...(input.delivered
+          ? { status: NotificationStatus.DELIVERED, deliveredAt: now }
+          : { status: NotificationStatus.FAILED, failedAt: now }),
+      },
     });
+
+    if (applied.count === 0) {
+      this.logger.debug(`notification ${notification.id} had already settled; verdict ignored`);
+    }
   }
 }

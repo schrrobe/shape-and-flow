@@ -55,10 +55,14 @@ export class NotificationReconciler {
   async health(): Promise<NotificationHealth> {
     const cutoff = new Date(this.clock.now().getTime() - NOTIFICATION_STALLED_AFTER_MS);
 
+    // SENDING counts as in flight, and as stalled once it is past the window: a claimed row
+    // whose worker died is exactly the thing this figure exists to surface.
+    const inFlight = [NotificationStatus.PENDING, NotificationStatus.SENDING];
+
     const [pending, stalled, failed] = await Promise.all([
-      this.prisma.notification.count({ where: { status: NotificationStatus.PENDING } }),
+      this.prisma.notification.count({ where: { status: { in: inFlight } } }),
       this.prisma.notification.count({
-        where: { status: NotificationStatus.PENDING, createdAt: { lt: cutoff } },
+        where: { status: { in: inFlight }, createdAt: { lt: cutoff } },
       }),
       this.prisma.notification.count({ where: { status: NotificationStatus.FAILED } }),
     ]);
@@ -68,22 +72,47 @@ export class NotificationReconciler {
 
   /** Re-enqueue what stalled. Returns how many were re-driven. */
   async runOnce(): Promise<number> {
-    const cutoff = new Date(this.clock.now().getTime() - NOTIFICATION_STALLED_AFTER_MS);
+    const now = this.clock.now();
+    const cutoff = new Date(now.getTime() - NOTIFICATION_STALLED_AFTER_MS);
+
+    // One bucket per stall window. Collapsing repeated sweeps of the same row into one job is
+    // the point of a stable id — but BullMQ also refuses that id *later*, so a row that
+    // stalls a second time after its first re-drive finished would never be picked up again.
+    // The bucket keeps the collapsing inside one window and releases it in the next.
+    const bucket = Math.floor(now.getTime() / NOTIFICATION_STALLED_AFTER_MS);
 
     const stalled = await this.prisma.notification.findMany({
-      where: { status: NotificationStatus.PENDING, createdAt: { lt: cutoff } },
+      // SENDING as well as PENDING: a worker that claimed a row and then died leaves it
+      // there, and nothing else would ever come back for it.
+      where: {
+        status: { in: [NotificationStatus.PENDING, NotificationStatus.SENDING] },
+        createdAt: { lt: cutoff },
+      },
       orderBy: { createdAt: 'asc' },
       take: BATCH,
-      select: { id: true, organizationId: true },
+      select: { id: true, organizationId: true, status: true },
     });
+
+    // Released back to PENDING before re-enqueueing. Left as SENDING, `send` would fail to
+    // claim them and report success without having sent anything.
+    const abandoned = stalled
+      .filter((notification) => notification.status === NotificationStatus.SENDING)
+      .map((notification) => notification.id);
+
+    if (abandoned.length > 0) {
+      await this.prisma.notification.updateMany({
+        where: { id: { in: abandoned }, status: NotificationStatus.SENDING },
+        data: { status: NotificationStatus.PENDING },
+      });
+    }
 
     for (const notification of stalled) {
       await this.enqueue.enqueue(
         JOB.NOTIFICATION_SEND,
         { organizationId: notification.organizationId, notificationId: notification.id },
-        // Keyed on the notification, so repeated sweeps of the same stalled row collapse
-        // into one queued job.
-        { jobId: jobIdFor('notify', 'retry', notification.id) },
+        // Keyed on the notification and the window, so repeated sweeps collapse into one
+        // queued job without blocking a re-drive in the next window.
+        { jobId: jobIdFor('notify', 'retry', notification.id, String(bucket)) },
       );
     }
 

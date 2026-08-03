@@ -1,4 +1,11 @@
-import { Inject, Injectable, SetMetadata, createParamDecorator } from '@nestjs/common';
+import {
+  Inject,
+  Injectable,
+  SetMetadata,
+  UseGuards,
+  applyDecorators,
+  createParamDecorator,
+} from '@nestjs/common';
 
 import { AppError } from '../common/errors/app-error.js';
 import { ENV } from '../config/env.schema.js';
@@ -13,7 +20,9 @@ import type { Request } from 'express';
 /** Marks a route as reachable with an office session. Read by the global AuthGuard. */
 export const OFFICE_ROUTE = 'auth:office-session';
 
-export const OfficeRoute = (): MethodDecorator & ClassDecorator => SetMetadata(OFFICE_ROUTE, true);
+/** Marks an office route and binds the guard that resolves its session. */
+export const OfficeRoute = (): MethodDecorator & ClassDecorator =>
+  applyDecorators(SetMetadata(OFFICE_ROUTE, true), UseGuards(OfficeSessionGuard));
 
 interface WithSession {
   [CURRENT_USER]?: OfficeSession;

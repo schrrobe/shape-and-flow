@@ -203,6 +203,18 @@ describe('the maintenance schedule', () => {
 });
 
 describe('the process boundary', () => {
+  it('finishes shutdown even when stale workers and connections reject close', async () => {
+    const internals = registrar as unknown as {
+      workers: Map<string, { close: () => Promise<void> }>;
+      connections: { quit: () => Promise<unknown> }[];
+    };
+
+    internals.workers.set('stale', { close: () => Promise.reject(new Error('already closed')) });
+    internals.connections.push({ quit: () => Promise.reject(new Error('connection gone')) });
+
+    await expect(registrar.stop()).resolves.toBeUndefined();
+  });
+
   it('has no http adapter', () => {
     // `createApplicationContext`, not `create`. A worker reachable through a load balancer
     // nobody meant to point at it is a worse outcome than one that cannot serve at all.

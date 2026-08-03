@@ -41,6 +41,15 @@ export class CustomerUpsertService {
   ): Promise<{ id: string }> {
     const emailNormalized = normaliseEmail(input.email);
 
+    // Prisma's `upsert` is a read followed by an insert or an update, and that is not
+    // atomic at ReadCommitted: two first-time bookings for the same new address, arriving
+    // together, both read no row and both insert. One loses on
+    // `CUSTOMER_EMAIL_CONSTRAINT`.
+    //
+    // Not absorbed here, and it cannot be: a failed statement poisons the whole PostgreSQL
+    // transaction, so nothing after it can run — including a re-read. The reservation path
+    // treats the violation as retryable around its *outer* transaction, where the retry
+    // starts a clean one and finds the row the winner committed.
     return await tx.customer.upsert({
       // The composite unique key, so two organizations can each have a customer with
       // the same address.
@@ -60,3 +69,11 @@ export class CustomerUpsertService {
     });
   }
 }
+
+/**
+ * The index a concurrent first-time booking collides on.
+ *
+ * Named here rather than at the call site because this service owns the write that can
+ * violate it, and `reservation.service.ts` only has to know it is retryable.
+ */
+export const CUSTOMER_EMAIL_CONSTRAINT = 'customers_organization_id_email_normalized_key';

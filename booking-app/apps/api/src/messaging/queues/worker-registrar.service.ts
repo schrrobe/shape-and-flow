@@ -240,11 +240,21 @@ export class WorkerRegistrarService {
 
   /** Close every worker, waiting for in-flight jobs. Bounded, so shutdown cannot hang. */
   async stop(): Promise<void> {
-    if (this.workers.size === 0) return;
+    if (this.workers.size === 0 && this.connections.length === 0) return;
 
     this.logger.log(`draining ${String(this.workers.size)} workers`);
 
-    const drain = Promise.all([...this.workers.values()].map((worker) => worker.close()));
+    const drain = Promise.allSettled(
+      [...this.workers.values()].map((worker) => worker.close()),
+    ).then((results) => {
+      for (const result of results) {
+        if (result.status === 'rejected') {
+          this.logger.warn(
+            `worker close failed during shutdown: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`,
+          );
+        }
+      }
+    });
 
     await Promise.race([
       drain,
@@ -258,7 +268,14 @@ export class WorkerRegistrarService {
       }),
     ]);
 
-    await Promise.all(this.connections.map((connection) => connection.quit()));
+    const quits = await Promise.allSettled(this.connections.map((connection) => connection.quit()));
+    for (const result of quits) {
+      if (result.status === 'rejected') {
+        this.logger.warn(
+          `Redis quit failed during shutdown: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`,
+        );
+      }
+    }
 
     this.workers.clear();
     this.connections.length = 0;

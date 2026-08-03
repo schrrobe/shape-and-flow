@@ -1,10 +1,10 @@
-import { Body, Controller, HttpCode, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, HttpCode, Post } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { manageRescheduleRequestSchema } from '@shape-and-flow/booking-contracts';
 
 import { RescheduleService } from '../booking/reschedule.service.js';
 
-import { ManagedBooking, ManagementToken, ManagementTokenGuard } from './management-token.guard.js';
+import { ManagedBooking, ManagementToken } from './management-token.guard.js';
 
 import type { ResolvedToken } from './management-token.service.js';
 import type { ManageRescheduleResponse } from '@shape-and-flow/booking-contracts';
@@ -20,7 +20,6 @@ const MANAGE_LIMIT = { default: { limit: 30, ttl: 60_000 } };
  */
 @Controller('manage')
 @ManagementToken()
-@UseGuards(ManagementTokenGuard)
 @Throttle(MANAGE_LIMIT)
 export class ManageRescheduleController {
   constructor(private readonly reschedules: RescheduleService) {}

@@ -78,6 +78,10 @@ export class PasswordResetService {
       select: { id: true, email: true, firstName: true, lastName: true },
     });
 
+    // Paid on both branches. The remaining database and in-memory-provider work is small
+    // beside Argon2, so an observer cannot distinguish an existing account by latency.
+    await this.passwords.verifyDummy(email);
+
     if (user === null) {
       // Debug rather than warn: a typo'd address is ordinary, and a log line per attempt
       // at warn level would be a way to see which addresses exist by reading the logs.
@@ -171,8 +175,13 @@ export class PasswordResetService {
     // rolled back would sign somebody out for nothing. If this throws, the password has
     // changed and the sessions have not — which sounds worse than it is, because a
     // session is only usable by reading the same Redis this just failed to write.
-    const revoked = await this.sessions.destroyAllForUser(row.officeUserId);
-    this.logger.log(`password reset completed; ${String(revoked)} session(s) revoked`);
+    try {
+      const revoked = await this.sessions.destroyAllForUser(row.officeUserId);
+      this.logger.log(`password reset completed; ${String(revoked)} session(s) revoked`);
+    } catch (error) {
+      const detail = error instanceof Error ? (error.stack ?? error.message) : String(error);
+      this.logger.error('password reset committed, but session revocation failed', detail);
+    }
   }
 
   /**

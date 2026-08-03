@@ -140,9 +140,17 @@ function currentKey(): string {
 }
 
 watch(
-  [cancelReason, cancelRefundEuros, paymentEuros, paymentMethod, paymentNote, refundEuros, refundReason],
+  [
+    cancelReason,
+    cancelRefundEuros,
+    paymentEuros,
+    paymentMethod,
+    paymentNote,
+    refundEuros,
+    refundReason,
+  ],
   () => {
-  attemptKey.value = null;
+    attemptKey.value = null;
   },
 );
 

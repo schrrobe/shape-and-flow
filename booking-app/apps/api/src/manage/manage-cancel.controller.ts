@@ -1,10 +1,10 @@
-import { Body, Controller, HttpCode, Post, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, HttpCode, Post, Res } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { manageCancelRequestSchema } from '@shape-and-flow/booking-contracts';
 
 import { CancellationService } from '../booking/cancellation.service.js';
 
-import { ManagedBooking, ManagementToken, ManagementTokenGuard } from './management-token.guard.js';
+import { ManagedBooking, ManagementToken } from './management-token.guard.js';
 
 import type { ResolvedToken } from './management-token.service.js';
 import type { ManageCancelResponse } from '@shape-and-flow/booking-contracts';
@@ -26,7 +26,6 @@ const MANAGE_LIMIT = { default: { limit: 30, ttl: 60_000 } };
  */
 @Controller('manage')
 @ManagementToken()
-@UseGuards(ManagementTokenGuard)
 @Throttle(MANAGE_LIMIT)
 export class ManageCancelController {
   constructor(private readonly cancellations: CancellationService) {}

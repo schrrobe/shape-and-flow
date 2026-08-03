@@ -298,7 +298,10 @@ export const api = {
       request<ServiceListResponse>('/public/services', { signal }),
 
     employeesFor: (serviceId: string, signal?: AbortSignal) =>
-      request<ServiceEmployeesResponse>(`/public/services/${serviceId}/employees`, { signal }),
+      request<ServiceEmployeesResponse>(
+        `/public/services/${encodeURIComponent(serviceId)}/employees`,
+        { signal },
+      ),
 
     availability: (query: AvailabilityQuery, signal?: AbortSignal) =>
       request<AvailabilityResponse>('/public/availability', {
@@ -315,9 +318,10 @@ export const api = {
       }),
 
     bookingBySession: (checkoutSessionId: string, signal?: AbortSignal) =>
-      request<BookingBySessionResponse>(`/public/bookings/by-session/${checkoutSessionId}`, {
-        signal,
-      }),
+      request<BookingBySessionResponse>(
+        `/public/bookings/by-session/${encodeURIComponent(checkoutSessionId)}`,
+        { signal },
+      ),
   },
 
   /**

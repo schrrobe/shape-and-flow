@@ -8,6 +8,7 @@ import { correlationMiddleware } from './common/correlation/correlation.middlewa
 import { InFlightRequests } from './common/shutdown/inflight.js';
 import { assertAppRole, loadConfig } from './config/env.schema.js';
 import { loadEnvFile } from './config/load-dotenv.js';
+import { WEBHOOK_BODY_LIMIT } from './webhooks/raw-body.js';
 
 import type { NestExpressApplication } from '@nestjs/platform-express';
 
@@ -32,6 +33,14 @@ async function bootstrap(): Promise<void> {
     // Stripe webhook needs them: a signature covers the exact bytes sent.
     rawBody: true,
   });
+
+  // `rawBody: true` alone leaves the parser at Express's 100 KB default, so a large webhook
+  // event would be rejected before any handler saw it. Through `useBodyParser` rather than
+  // `app.use(bodyParser…)`: mounting a parser by hand replaces the one Nest instrumented and
+  // silently leaves `request.rawBody` undefined, which is the failure every signature check
+  // here depends on not happening.
+  app.useBodyParser('json', { limit: WEBHOOK_BODY_LIMIT });
+  app.useBodyParser('urlencoded', { limit: WEBHOOK_BODY_LIMIT, extended: true });
 
   // Route Nest's own logs through pino, so everything is one structured stream.
   const logger = app.get(PinoLogger);

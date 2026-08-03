@@ -1,18 +1,31 @@
-import { Injectable, SetMetadata, createParamDecorator } from '@nestjs/common';
+import {
+  Injectable,
+  SetMetadata,
+  UseGuards,
+  applyDecorators,
+  createParamDecorator,
+} from '@nestjs/common';
 
 import { AppError } from '../common/errors/app-error.js';
 
+import { MANAGEMENT_TOKEN_ROUTE } from './management-token.metadata.js';
 import { ManagementTokenService } from './management-token.service.js';
 
 import type { ResolvedToken } from './management-token.service.js';
 import type { CanActivate, ExecutionContext } from '@nestjs/common';
 import type { Request } from 'express';
 
-/** Marks a route as reachable with a management token. Read by the global AuthGuard. */
-export const MANAGEMENT_TOKEN_ROUTE = 'auth:management-token';
+export { MANAGEMENT_TOKEN_ROUTE };
 
+/**
+ * Marks a route as reachable with a management token, and binds the guard that checks one.
+ *
+ * Both in one decorator, deliberately. The metadata alone tells the global `AuthGuard` "this
+ * route has a way in" — so a route that set the metadata and forgot `@UseGuards` would be
+ * open to anyone. Composing them makes that combination unexpressible.
+ */
 export const ManagementToken = (): MethodDecorator & ClassDecorator =>
-  SetMetadata(MANAGEMENT_TOKEN_ROUTE, true);
+  applyDecorators(SetMetadata(MANAGEMENT_TOKEN_ROUTE, true), UseGuards(ManagementTokenGuard));
 
 /** Where the guard leaves what it resolved. */
 export const MANAGED_BOOKING = 'managedBooking';

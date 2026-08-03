@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, useId } from 'vue';
+import { computed } from 'vue';
 
+import { useFieldIds } from './field-ids.js';
 import { useFieldTestId } from './field-test-id.js';
 
 /**
@@ -24,28 +25,18 @@ const props = withDefaults(
 
 defineEmits<{ 'update:modelValue': [string] }>();
 
-const id = useId();
-const descriptionId = `${id}-description`;
-const errorId = `${id}-error`;
-const counterId = `${id}-counter`;
-
 const remaining = computed(() =>
   props.maxlength === undefined ? null : props.maxlength - props.modelValue.length,
 );
 
+const { describedBy, descriptionId, errorId, id } = useFieldIds(props, (fieldId) => [
+  remaining.value === null ? null : `${fieldId}-counter`,
+]);
+const counterId = `${id}-counter`;
+
 /** Only worth saying out loud once it is close. */
 const announceCounter = computed(
   () => remaining.value !== null && props.maxlength !== undefined && remaining.value <= 50,
-);
-
-const describedBy = computed(() =>
-  [
-    props.description === null ? null : descriptionId,
-    props.error === null ? null : errorId,
-    remaining.value === null ? null : counterId,
-  ]
-    .filter((value): value is string => value !== null)
-    .join(' '),
 );
 
 // The test id belongs on the control, not on the block around it.
@@ -63,7 +54,7 @@ const { testId, wrapperAttrs } = useFieldTestId();
       :value="modelValue"
       :rows="rows"
       :maxlength="maxlength"
-      :aria-describedby="describedBy === '' ? undefined : describedBy"
+      :aria-describedby="describedBy"
       :aria-invalid="error === null ? undefined : 'true'"
       class="rounded-sf border border-border bg-surface px-3 py-2.5 text-base text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring focus-visible:ring-offset-1"
       @input="$emit('update:modelValue', ($event.target as HTMLTextAreaElement).value)"

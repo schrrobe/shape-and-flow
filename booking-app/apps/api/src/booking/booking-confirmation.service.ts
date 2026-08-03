@@ -38,7 +38,30 @@ export interface MarkPaymentFailedInput {
   cause: ConfirmationCause;
 }
 
-export type ConfirmOutcome = 'CONFIRMED' | 'ALREADY_CONFIRMED';
+/**
+ * What `confirmPaid` did.
+ *
+ * `PAID_AFTER_TERMINAL` is the one that needs a human: Stripe reported a payment for a
+ * booking that is already expired or cancelled, so money was taken for an appointment
+ * nobody will keep. It is distinct from `ALREADY_CONFIRMED` because the two demand
+ * opposite responses — one is a duplicate event to ignore, the other is a refund to issue.
+ */
+export type ConfirmOutcome = 'CONFIRMED' | 'ALREADY_CONFIRMED' | 'PAID_AFTER_TERMINAL';
+
+/**
+ * One budget for every transaction in this service.
+ *
+ * `confirmPaid` and `markPaymentFailed` both take `FOR UPDATE` on the same booking row, so
+ * one waits behind the other. Prisma's defaults are 5 s timeout and 2 s max wait, and a
+ * timeout is not a serialization failure — `withSerializationRetry` would not retry it. So
+ * the paths that compete get the same, larger budget rather than one being able to abort
+ * while the other still has time left.
+ */
+const TRANSACTION_OPTIONS = {
+  isolationLevel: 'ReadCommitted',
+  timeout: 15_000,
+  maxWait: 10_000,
+} as const;
 
 /**
  * Moves a paid booking to CONFIRMED, exactly once.
@@ -72,106 +95,105 @@ export class BookingConfirmationService {
   private async confirmOnce(input: ConfirmPaidInput): Promise<ConfirmOutcome> {
     const now = this.clock.now();
 
-    return await this.prisma.$transaction(
-      async (tx) => {
-        // `FOR UPDATE` rather than a plain read: the whole point is that a second
-        // caller waits here instead of racing us to the same side effects.
-        const locked = await tx.$queryRaw<{ id: string; status: BookingStatus }[]>(
-          Prisma.sql`SELECT id, status FROM bookings WHERE id = ${input.bookingId} FOR UPDATE`,
+    return await this.prisma.$transaction(async (tx) => {
+      // `FOR UPDATE` rather than a plain read: the whole point is that a second
+      // caller waits here instead of racing us to the same side effects.
+      const locked = await tx.$queryRaw<{ id: string; status: BookingStatus }[]>(
+        Prisma.sql`SELECT id, status FROM bookings WHERE id = ${input.bookingId} FOR UPDATE`,
+      );
+
+      const current = locked[0];
+
+      if (current === undefined) {
+        throw new AppError('NOT_FOUND', { message: 'Booking not found.' });
+      }
+
+      if (current.status === BookingStatus.CONFIRMED) return 'ALREADY_CONFIRMED';
+
+      // A cancelled or expired booking that Stripe then reports as paid is a real
+      // situation — the money needs refunding — but it is not a confirmation, and
+      // forcing the transition would corrupt the history. Its own outcome, not
+      // `ALREADY_CONFIRMED`: the caller has to be able to tell "nothing to do" from
+      // "money arrived for an appointment that no longer exists".
+      if (isTerminal(current.status)) {
+        this.logger.error(
+          `payment.after_terminal booking=${input.bookingId} status=${current.status} session=${input.sessionId}`,
         );
+        return 'PAID_AFTER_TERMINAL';
+      }
 
-        const current = locked[0];
+      const booking = await tx.booking.findUniqueOrThrow({
+        where: { id: input.bookingId },
+        select: {
+          id: true,
+          organizationId: true,
+          priceCentsSnapshot: true,
+          currency: true,
+          endsAt: true,
+        },
+      });
 
-        if (current === undefined) {
-          throw new AppError('NOT_FOUND', { message: 'Booking not found.' });
-        }
-
-        if (current.status === BookingStatus.CONFIRMED) return 'ALREADY_CONFIRMED';
-
-        // A cancelled or expired booking that Stripe then reports as paid is a real
-        // situation — the money needs refunding, which Stage 6 handles — but it is not
-        // a confirmation, and forcing the transition would corrupt the history.
-        if (isTerminal(current.status)) {
-          this.logger.error(
-            `payment.after_terminal booking=${input.bookingId} status=${current.status} session=${input.sessionId}`,
-          );
-          return 'ALREADY_CONFIRMED';
-        }
-
-        const booking = await tx.booking.findUniqueOrThrow({
-          where: { id: input.bookingId },
-          select: {
-            id: true,
-            organizationId: true,
-            priceCentsSnapshot: true,
-            currency: true,
-            endsAt: true,
-          },
-        });
-
-        // The customer has paid, so we confirm even if the amount disagrees. Refusing
-        // would leave them charged and unbooked, which is strictly worse than a
-        // booking plus an alert somebody has to read.
-        if (input.amountTotalCents !== booking.priceCentsSnapshot) {
-          this.logger.error(
-            `payment.amount_mismatch booking=${booking.id} expected=${String(booking.priceCentsSnapshot)} received=${String(input.amountTotalCents)}`,
-          );
-        }
-
-        assertTransition(current.status, BookingStatus.CONFIRMED);
-
-        await tx.booking.update({
-          where: { id: booking.id },
-          data: {
-            status: BookingStatus.CONFIRMED,
-            confirmedAt: now,
-            // Cleared because the CHECK constraint requires it: expiresAt is non-null
-            // exactly while a booking is PENDING_PAYMENT or EXPIRING.
-            expiresAt: null,
-            stripeCheckoutSessionId: input.sessionId,
-          },
-        });
-
-        await this.upsertPayment(tx, booking, input);
-
-        // Minted through the shared service, so there is one place that decides how a
-        // management token is generated, hashed and expired.
-        const { token: managementToken } = await this.tokens.issue(
-          tx,
-          booking.id,
-          booking.organizationId,
-          booking.endsAt,
+      // The customer has paid, so we confirm even if the amount disagrees. Refusing
+      // would leave them charged and unbooked, which is strictly worse than a
+      // booking plus an alert somebody has to read.
+      if (input.amountTotalCents !== booking.priceCentsSnapshot) {
+        this.logger.error(
+          `payment.amount_mismatch booking=${booking.id} expected=${String(booking.priceCentsSnapshot)} received=${String(input.amountTotalCents)}`,
         );
+      }
 
-        await tx.bookingStatusHistory.create({
-          data: {
-            organizationId: booking.organizationId,
-            bookingId: booking.id,
-            fromStatus: current.status,
-            toStatus: BookingStatus.CONFIRMED,
-            actorType: 'SYSTEM',
-            reason: `${input.cause.kind}:${input.cause.reference}`,
-          },
-        });
+      assertTransition(current.status, BookingStatus.CONFIRMED);
 
-        await this.outbox.record(tx, {
+      await tx.booking.update({
+        where: { id: booking.id },
+        data: {
+          status: BookingStatus.CONFIRMED,
+          confirmedAt: now,
+          // Cleared because the CHECK constraint requires it: expiresAt is non-null
+          // exactly while a booking is PENDING_PAYMENT or EXPIRING.
+          expiresAt: null,
+          stripeCheckoutSessionId: input.sessionId,
+        },
+      });
+
+      await this.upsertPayment(tx, booking, input);
+
+      // Minted through the shared service, so there is one place that decides how a
+      // management token is generated, hashed and expired.
+      const { token: managementToken } = await this.tokens.issue(
+        tx,
+        booking.id,
+        booking.organizationId,
+        booking.endsAt,
+      );
+
+      await tx.bookingStatusHistory.create({
+        data: {
           organizationId: booking.organizationId,
-          aggregateType: 'Booking',
-          aggregateId: booking.id,
-          eventType: JOB.BOOKING_CONFIRMED,
-          // The plaintext travels here and nowhere else. It is redacted from logs and
-          // deleted with the outbox row.
-          payload: {
-            organizationId: booking.organizationId,
-            bookingId: booking.id,
-            managementToken,
-          },
-        });
+          bookingId: booking.id,
+          fromStatus: current.status,
+          toStatus: BookingStatus.CONFIRMED,
+          actorType: 'SYSTEM',
+          reason: `${input.cause.kind}:${input.cause.reference}`,
+        },
+      });
 
-        return 'CONFIRMED';
-      },
-      { isolationLevel: 'ReadCommitted', timeout: 15_000, maxWait: 10_000 },
-    );
+      await this.outbox.record(tx, {
+        organizationId: booking.organizationId,
+        aggregateType: 'Booking',
+        aggregateId: booking.id,
+        eventType: JOB.BOOKING_CONFIRMED,
+        // The plaintext travels here and nowhere else. It is redacted from logs and
+        // deleted with the outbox row.
+        payload: {
+          organizationId: booking.organizationId,
+          bookingId: booking.id,
+          managementToken,
+        },
+      });
+
+      return 'CONFIRMED';
+    }, TRANSACTION_OPTIONS);
   }
 
   /**
@@ -224,61 +246,72 @@ export class BookingConfirmationService {
   async markPaymentFailed(input: MarkPaymentFailedInput): Promise<void> {
     await withSerializationRetry(
       () =>
-        this.prisma.$transaction(async (tx) => {
-          const locked = await tx.$queryRaw<{ id: string; status: BookingStatus }[]>(
-            Prisma.sql`SELECT id, status FROM bookings WHERE id = ${input.bookingId} FOR UPDATE`,
-          );
+        this.prisma.$transaction(
+          async (tx) => {
+            const locked = await tx.$queryRaw<{ id: string; status: BookingStatus }[]>(
+              Prisma.sql`SELECT id, status FROM bookings WHERE id = ${input.bookingId} FOR UPDATE`,
+            );
 
-          const current = locked[0];
-          if (current === undefined) return;
+            const current = locked[0];
+            if (current === undefined) return;
 
-          // Nothing to do for a booking that already settled, in either direction. A
-          // failed payment after a successful one is Stripe reporting an earlier
-          // attempt.
-          if (current.status !== BookingStatus.PENDING_PAYMENT) return;
+            // Nothing to do for a booking that already settled, in either direction. A
+            // failed payment after a successful one is Stripe reporting an earlier
+            // attempt.
+            if (current.status !== BookingStatus.PENDING_PAYMENT) return;
 
-          const booking = await tx.booking.findUniqueOrThrow({
-            where: { id: input.bookingId },
-            select: { organizationId: true },
-          });
+            const booking = await tx.booking.findUniqueOrThrow({
+              where: { id: input.bookingId },
+              select: { organizationId: true },
+            });
 
-          assertTransition(current.status, BookingStatus.PAYMENT_FAILED);
+            assertTransition(current.status, BookingStatus.PAYMENT_FAILED);
 
-          await tx.booking.update({
-            where: { id: input.bookingId },
-            data: { status: BookingStatus.PAYMENT_FAILED, expiresAt: null },
-          });
+            await tx.booking.update({
+              where: { id: input.bookingId },
+              data: { status: BookingStatus.PAYMENT_FAILED, expiresAt: null },
+            });
 
-          await tx.payment.updateMany({
-            where: { bookingId: input.bookingId },
-            data: {
-              status: PaymentStatus.FAILED,
-              ...(input.failureCode === undefined ? {} : { failureCode: input.failureCode }),
-              ...(input.failureMessage === undefined
-                ? {}
-                : { failureMessage: input.failureMessage }),
-            },
-          });
+            // Only what is still pending. The guard above checks the *booking* status, which
+            // says nothing about a payment row: a late `payment_intent.payment_failed` about
+            // an earlier attempt would otherwise rewrite a SUCCEEDED or REFUNDED row to
+            // FAILED, and refund accounting reads those.
+            await tx.payment.updateMany({
+              where: { bookingId: input.bookingId, status: PaymentStatus.PENDING },
+              data: {
+                status: PaymentStatus.FAILED,
+                ...(input.failureCode === undefined ? {} : { failureCode: input.failureCode }),
+                ...(input.failureMessage === undefined
+                  ? {}
+                  : { failureMessage: input.failureMessage }),
+              },
+            });
 
-          await tx.bookingStatusHistory.create({
-            data: {
+            await tx.bookingStatusHistory.create({
+              data: {
+                organizationId: booking.organizationId,
+                bookingId: input.bookingId,
+                fromStatus: current.status,
+                toStatus: BookingStatus.PAYMENT_FAILED,
+                actorType: 'SYSTEM',
+                reason: `${input.cause.kind}:${input.cause.reference}`,
+              },
+            });
+
+            await this.outbox.record(tx, {
               organizationId: booking.organizationId,
-              bookingId: input.bookingId,
-              fromStatus: current.status,
-              toStatus: BookingStatus.PAYMENT_FAILED,
-              actorType: 'SYSTEM',
-              reason: `${input.cause.kind}:${input.cause.reference}`,
-            },
-          });
-
-          await this.outbox.record(tx, {
-            organizationId: booking.organizationId,
-            aggregateType: 'Booking',
-            aggregateId: input.bookingId,
-            eventType: JOB.BOOKING_PAYMENT_FAILED,
-            payload: { organizationId: booking.organizationId, bookingId: input.bookingId },
-          });
-        }),
+              aggregateType: 'Booking',
+              aggregateId: input.bookingId,
+              eventType: JOB.BOOKING_PAYMENT_FAILED,
+              payload: { organizationId: booking.organizationId, bookingId: input.bookingId },
+            });
+          },
+          // The same budget `confirmOnce` uses. Both paths take `FOR UPDATE` on the same
+          // booking row, so one of them waits on the other; leaving this on Prisma's 5 s
+          // timeout and 2 s max wait means the shorter-budgeted path aborts first under
+          // contention, and `withSerializationRetry` does not treat a timeout as retryable.
+          TRANSACTION_OPTIONS,
+        ),
       'mark-payment-failed',
     );
   }

@@ -9,7 +9,7 @@ import {
 } from '@shape-and-flow/booking-contracts';
 
 import { CsrfHeaderGuard } from '../auth/csrf-header.guard.js';
-import { OfficeRoute, OfficeSessionGuard } from '../auth/office-session.guard.js';
+import { OfficeRoute } from '../auth/office-session.guard.js';
 import { RefundCapabilityGuard } from '../auth/refund-capability.guard.js';
 import { Roles } from '../auth/roles.decorator.js';
 import { RolesGuard } from '../auth/roles.guard.js';
@@ -34,8 +34,8 @@ import type { Request } from 'express';
  * either way — but the join for the office's own detail view does not.
  */
 @Controller('office')
+@UseGuards(CsrfHeaderGuard, RolesGuard, RefundCapabilityGuard)
 @OfficeRoute()
-@UseGuards(OfficeSessionGuard, CsrfHeaderGuard, RolesGuard, RefundCapabilityGuard)
 export class CatalogController {
   constructor(private readonly catalog: CatalogService) {}
 

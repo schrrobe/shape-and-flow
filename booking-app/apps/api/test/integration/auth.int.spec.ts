@@ -1,5 +1,5 @@
 import request from 'supertest';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { MAX_FAILED_ATTEMPTS } from '../../src/auth/auth.controller.js';
 import { AuthModule } from '../../src/auth/auth.module.js';
@@ -183,9 +183,20 @@ describe('POST /api/auth/login', () => {
     expect(cookie).toContain('SameSite=Lax');
     // Not `/`: the browser then sends it to the API and to nothing else served here.
     expect(cookie).toContain('Path=/api');
+    // The server owns both idle and absolute expiry. A browser max-age fixed at login
+    // would discard an otherwise active sliding session.
+    expect(cookie).not.toContain('Max-Age');
+    expect(cookie).not.toContain('Expires');
     // Not Secure outside production, or a plain-HTTP development server would never
     // receive the cookie it just set.
     expect(cookie).not.toContain('Secure');
+  });
+
+  it('rejects a cross-site form login without the csrf header', async () => {
+    await request(server())
+      .post('/api/auth/login')
+      .send({ email: OWNER_EMAIL, password: OWNER_PASSWORD })
+      .expect(403);
   });
 
   it('returns the user without anything resembling a credential', async () => {
@@ -432,6 +443,20 @@ describe('POST /api/auth/password', () => {
 });
 
 describe('password reset', () => {
+  it('does not distinguish an unknown address by timing', async () => {
+    const time = async (email: string): Promise<number> => {
+      const started = process.hrtime.bigint();
+      await request(server()).post('/api/auth/password-reset/request').send({ email }).expect(202);
+      return Number(process.hrtime.bigint() - started) / 1e6;
+    };
+
+    await time(OWNER_EMAIL);
+    const unknown = Math.min(await time('nobody@example.com'), await time('nobody@example.com'));
+    const known = Math.min(await time(OWNER_EMAIL), await time(OWNER_EMAIL));
+
+    expect(Math.abs(unknown - known)).toBeLessThan(Math.max(unknown, known) * 0.5);
+  });
+
   it('answers 202 for an unknown address and sends nothing', async () => {
     await requestResetFor('nobody@example.com');
 
@@ -493,6 +518,21 @@ describe('password reset', () => {
     );
 
     await asUser(user).get('/api/auth/me').expect(401);
+  });
+
+  it('still succeeds when post-commit session revocation is unavailable', async () => {
+    await requestResetFor(OWNER_EMAIL);
+    const revoke = vi.spyOn(sessions, 'destroyAllForUser').mockRejectedValueOnce(new Error('down'));
+
+    try {
+      await confirmReset({ token: latestResetToken(), newPassword: 'a-new-long-password' }).expect(
+        204,
+      );
+    } finally {
+      revoke.mockRestore();
+    }
+
+    await login({ email: OWNER_EMAIL, password: 'a-new-long-password' }).expect(200);
   });
 
   it('clears a lockout, because the person proved they hold the mailbox', async () => {

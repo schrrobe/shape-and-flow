@@ -8,13 +8,15 @@ import type { JobName } from './job-contracts.js';
 /** The business timezone, so a nightly job runs at 03:00 local across DST changes. */
 export const SCHEDULE_ZONE = 'Europe/Berlin';
 
-interface Cadence {
+type Cadence = {
   job: JobName;
-  /** Milliseconds between runs, for the frequent sweeps. */
-  every?: number;
-  /** A cron pattern in `SCHEDULE_ZONE`, for the nightly ones. */
-  pattern?: string;
-}
+} & (
+  | { /** Milliseconds between runs, for the frequent sweeps. */ every: number; pattern?: never }
+  | {
+      /** A cron pattern in `SCHEDULE_ZONE`, for the nightly ones. */ pattern: string;
+      every?: never;
+    }
+);
 
 /**
  * The maintenance schedule.
@@ -61,7 +63,7 @@ export class SchedulerService {
       await queue.upsertJobScheduler(
         cadence.job,
         cadence.every === undefined
-          ? { pattern: cadence.pattern ?? '', tz: SCHEDULE_ZONE }
+          ? { pattern: cadence.pattern, tz: SCHEDULE_ZONE }
           : { every: cadence.every },
         // The job name has to be set explicitly: the scheduler id defaults to it, but the
         // router dispatches on the *job* name, and a job named after the scheduler id by
