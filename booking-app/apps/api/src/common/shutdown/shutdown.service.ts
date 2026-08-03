@@ -1,8 +1,11 @@
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { HttpAdapterHost } from '@nestjs/core';
+
+import { CLOCK } from '../../domain/time/clock.js';
 
 import { InFlightRequests } from './inflight.js';
 
+import type { Clock } from '../../domain/time/clock.js';
 import type { BeforeApplicationShutdown } from '@nestjs/common';
 
 /**
@@ -50,6 +53,7 @@ export class ShutdownService implements BeforeApplicationShutdown {
   constructor(
     private readonly adapterHost: HttpAdapterHost,
     private readonly inFlight: InFlightRequests,
+    @Inject(CLOCK) private readonly clock: Clock,
     @Optional() options?: ShutdownOptions,
   ) {
     this.options = options ?? {
@@ -96,12 +100,14 @@ export class ShutdownService implements BeforeApplicationShutdown {
 
   /** True when everything finished, false when the window ran out. */
   private async drain(): Promise<boolean> {
-    const deadline = this.options.drainTimeoutMs;
-    let waited = 0;
+    // Against the clock, not against a count of polls. `setTimeout` promises a lower
+    // bound only, and a shutting-down event loop is a busy one, so summing `pollMs`
+    // undercounts — by enough over 250 iterations to push the drain past the grace
+    // period and let SIGKILL arrive before `closeAllConnections()` ever runs.
+    const deadline = this.clock.now().getTime() + this.options.drainTimeoutMs;
 
-    while (this.inFlight.count > 0 && waited < deadline) {
+    while (this.inFlight.count > 0 && this.clock.now().getTime() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, this.options.pollMs));
-      waited += this.options.pollMs;
     }
 
     return this.inFlight.count === 0;

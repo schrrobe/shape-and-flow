@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import { SystemClock } from '../../domain/time/clock.js';
+
 import { InFlightRequests } from './inflight.js';
 import { ShutdownService } from './shutdown.service.js';
 
@@ -35,6 +37,14 @@ function hostFor(server: unknown): HttpAdapterHost {
 /** Short windows: this suite is about the decisions, not about waiting them out. */
 const FAST = { drainTimeoutMs: 200, pollMs: 5 };
 
+/**
+ * The real clock, on purpose.
+ *
+ * The drain measures its window against wall-clock time, which is the whole point of it —
+ * a frozen clock would never reach the deadline and the give-up test below would hang.
+ */
+const clock = new SystemClock();
+
 describe('ShutdownService', () => {
   it('stops the listener so no new connection is accepted', async () => {
     const { calls, server } = fakeServer();
@@ -42,6 +52,7 @@ describe('ShutdownService', () => {
     await new ShutdownService(
       hostFor(server),
       new InFlightRequests(),
+      clock,
       FAST,
     ).beforeApplicationShutdown('SIGTERM');
 
@@ -54,7 +65,7 @@ describe('ShutdownService', () => {
   it('waits for an in-flight request and lets it finish', async () => {
     const { calls, server } = fakeServer();
     const inFlight = new InFlightRequests();
-    const service = new ShutdownService(hostFor(server), inFlight, FAST);
+    const service = new ShutdownService(hostFor(server), inFlight, clock, FAST);
 
     inFlight.enter();
     const shutdown = service.beforeApplicationShutdown('SIGTERM');
@@ -75,7 +86,7 @@ describe('ShutdownService', () => {
     const inFlight = new InFlightRequests();
     inFlight.enter();
 
-    await new ShutdownService(hostFor(server), inFlight, {
+    await new ShutdownService(hostFor(server), inFlight, clock, {
       drainTimeoutMs: 30,
       pollMs: 5,
     }).beforeApplicationShutdown('SIGTERM');
@@ -90,7 +101,9 @@ describe('ShutdownService', () => {
     const host = { httpAdapter: undefined } as unknown as HttpAdapterHost;
 
     await expect(
-      new ShutdownService(host, new InFlightRequests(), FAST).beforeApplicationShutdown('SIGTERM'),
+      new ShutdownService(host, new InFlightRequests(), clock, FAST).beforeApplicationShutdown(
+        'SIGTERM',
+      ),
     ).resolves.toBeUndefined();
   });
 });

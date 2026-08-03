@@ -83,21 +83,30 @@ async function load(): Promise<void> {
   loading.value = true;
   error.value = null;
 
-  try {
-    const [cancelPage, reschedulePage] = await Promise.all([
-      session.can('cancellation.decide')
-        ? api.office.requests.cancellations({ decision: 'PENDING' })
-        : Promise.resolve({ items: [] }),
-      api.office.requests.reschedules({ decision: 'PENDING' }),
-    ]);
+  // Settled separately rather than through `Promise.all`. The two queues answer to two
+  // different capabilities, so one of them being refused is a normal outcome — and an
+  // admin who may decide cancellations must still get the cancellation queue when the
+  // reschedule call is the one that failed.
+  const [cancelResult, rescheduleResult] = await Promise.allSettled([
+    session.can('cancellation.decide')
+      ? api.office.requests.cancellations({ decision: 'PENDING' })
+      : Promise.resolve({ items: [] }),
+    session.can('reschedule.decide')
+      ? api.office.requests.reschedules({ decision: 'PENDING' })
+      : Promise.resolve({ items: [] }),
+  ]);
 
-    cancellations.value = cancelPage.items;
-    reschedules.value = reschedulePage.items;
-  } catch (caught) {
-    error.value = officeMessage(caught);
-  } finally {
-    loading.value = false;
-  }
+  cancellations.value = cancelResult.status === 'fulfilled' ? cancelResult.value.items : [];
+  reschedules.value = rescheduleResult.status === 'fulfilled' ? rescheduleResult.value.items : [];
+
+  // One message for either failure: the operator needs to know a queue is missing, and
+  // which of the two calls broke is a detail for the console, not for this alert.
+  const refused = [cancelResult, rescheduleResult].find(
+    (result): result is PromiseRejectedResult => result.status === 'rejected',
+  );
+  error.value = refused === undefined ? null : officeMessage(refused.reason);
+
+  loading.value = false;
 }
 
 async function decideCancellation(
@@ -168,9 +177,14 @@ async function decideReschedule(
   }
 }
 
-const empty = computed(
-  () => !loading.value && cancellations.value.length === 0 && reschedules.value.length === 0,
-);
+/**
+ * Both queues empty, whether or not they have been read yet.
+ *
+ * The loading flag deliberately stays out of it: the template combines the two, and
+ * `loading && empty` — the condition that shows the skeleton — can only ever be true if
+ * `empty` says nothing about loading.
+ */
+const empty = computed(() => cancellations.value.length === 0 && reschedules.value.length === 0);
 
 onMounted(load);
 </script>

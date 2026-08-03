@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { bookingStatusSchema } from '@shape-and-flow/booking-contracts';
+import { bookingSortSchema, bookingStatusSchema } from '@shape-and-flow/booking-contracts';
 import { SfAlert, SfButton, SfInput, SfSelect, SfSkeleton } from '@shape-and-flow/booking-ui';
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
@@ -11,7 +11,11 @@ import { dateTime, money, today } from '../../office/format.js';
 import { officeMessage } from '../../office/messages.js';
 import { useSession } from '../../stores/session.js';
 
-import type { OfficeBookingListItem } from '@shape-and-flow/booking-contracts';
+import type {
+  BookingSort,
+  BookingStatus,
+  OfficeBookingListItem,
+} from '@shape-and-flow/booking-contracts';
 
 /**
  * Bookings, filtered and paged.
@@ -51,12 +55,32 @@ const error = ref<string | null>(null);
 const queryString = (key: string): string =>
   typeof route.query[key] === 'string' ? route.query[key] : '';
 
+/**
+ * What the URL carries is input, not state.
+ *
+ * A link that was shared, bookmarked or edited by hand can name any sort key and any
+ * status. Both are closed sets the contracts package already owns, so an unknown value
+ * falls back here rather than reaching the API as a 400 the operator cannot read.
+ */
+function parsedSort(value: string): BookingSort {
+  const parsed = bookingSortSchema.safeParse(value);
+
+  return parsed.success ? parsed.data : 'startsAt:desc';
+}
+
+/** The empty string means "any status", which is why it is not a parse failure. */
+function parsedStatus(value: string): BookingStatus | '' {
+  const parsed = bookingStatusSchema.safeParse(value);
+
+  return parsed.success ? parsed.data : '';
+}
+
 const filters = computed(() => ({
-  status: queryString('status'),
+  status: parsedStatus(queryString('status')),
   q: queryString('q'),
   from: queryString('from'),
   to: queryString('to'),
-  sort: queryString('sort') === '' ? 'startsAt:desc' : queryString('sort'),
+  sort: parsedSort(queryString('sort')),
 }));
 
 /** Local mirrors, so typing does not rewrite the URL on every keystroke. */
@@ -79,8 +103,8 @@ function requestQuery(cursor?: string) {
 
   return {
     limit: 25,
-    sort: current.sort as 'startsAt:desc',
-    ...(current.status === '' ? {} : { status: [current.status] as never }),
+    sort: current.sort,
+    ...(current.status === '' ? {} : { status: [current.status] }),
     ...(current.q === '' ? {} : { q: current.q }),
     // `today` is a shorthand the dashboard tiles link with, resolved here rather than in
     // the URL so a bookmark taken today still means today next week.
@@ -94,18 +118,34 @@ function resolveDate(value: string): string {
   return value === 'today' ? today() : value;
 }
 
+/**
+ * Which request the rows on screen belong to.
+ *
+ * Every filter change starts a load and GET requests are retried, so two are easily in
+ * flight at once — and nothing about HTTP says the first one answers first. A late reply
+ * would otherwise paint rows for filters the operator has already left, together with a
+ * cursor that pages through a different result set.
+ */
+let requestToken = 0;
+
 async function load(): Promise<void> {
+  const token = (requestToken += 1);
+
   loading.value = true;
   error.value = null;
 
   try {
     const page = await api.office.bookings.list(requestQuery());
+    if (token !== requestToken) return;
+
     items.value = page.items;
     nextCursor.value = page.nextCursor;
   } catch (caught) {
+    if (token !== requestToken) return;
+
     error.value = officeMessage(caught);
   } finally {
-    loading.value = false;
+    if (token === requestToken) loading.value = false;
   }
 }
 
@@ -113,15 +153,23 @@ async function loadMore(): Promise<void> {
   const cursor = nextCursor.value;
   if (cursor === null || loadingMore.value) return;
 
+  // Read rather than bumped: only a fresh `load` invalidates what is on screen, and a page
+  // appended to rows the operator has already filtered away belongs to nobody.
+  const token = requestToken;
+
   loadingMore.value = true;
 
   try {
     const page = await api.office.bookings.list(requestQuery(cursor));
+    if (token !== requestToken) return;
+
     // Appended, not replaced: a cursor page is a continuation, and re-sorting the union
     // would undo the total order the server established.
     items.value = [...items.value, ...page.items];
     nextCursor.value = page.nextCursor;
   } catch (caught) {
+    if (token !== requestToken) return;
+
     error.value = officeMessage(caught);
   } finally {
     loadingMore.value = false;

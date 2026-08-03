@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { localDateSchema } from '@shape-and-flow/booking-contracts';
 import { SfAlert, SfButton, SfSelect, SfSkeleton } from '@shape-and-flow/booking-ui';
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
@@ -28,7 +29,19 @@ const session = useSession();
 
 useFocusStep('Calendar');
 
-const date = computed(() => (typeof route.query.date === 'string' ? route.query.date : today()));
+/**
+ * The day on screen, and it has to be a real one.
+ *
+ * `?date=` is hand-editable and survives a bookmark, so it is input rather than state.
+ * Anything that is not a `YYYY-MM-DD` calendar date falls back to today — without this,
+ * `shift()` calls `toISOString()` on an `Invalid Date` and the screen throws instead of
+ * showing the day the operator asked for.
+ */
+const date = computed(() => {
+  const parsed = localDateSchema.safeParse(route.query.date);
+
+  return parsed.success ? parsed.data : today();
+});
 
 const employeeFilter = computed(() =>
   typeof route.query.employeeId === 'string' ? route.query.employeeId : '',

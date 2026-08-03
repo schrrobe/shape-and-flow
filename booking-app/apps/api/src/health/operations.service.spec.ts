@@ -163,20 +163,22 @@ describe('OperationsService', () => {
   });
 
   it('degrades a figure it cannot read to -1 instead of failing the endpoint', async () => {
-    const service = serviceWith({});
     // The one dependency that is not the database: an unreachable Redis must not
     // take the endpoint that would explain it.
     const broken = Object.fromEntries(
       QUEUES.map((name) => [name, { name, getJobCounts: () => Promise.reject(new Error('down')) }]),
     ) as unknown as QueueRegistry;
 
-    const snapshot = await serviceWith({ queues: broken }).snapshot();
+    const service = serviceWith({ queues: broken });
+    const snapshot = await service.snapshot();
 
     expect(snapshot.failedJobs).toBe(-1);
     expect(snapshot.queues).toEqual({});
     // Everything else still answers.
     expect(snapshot.stuckOutboxRows).toBe(0);
-    expect(await service.snapshot()).toBeDefined();
+    // And it keeps answering: a dependency that stays broken degrades every read the
+    // same way rather than throwing once the cached snapshot expires.
+    expect((await service.snapshot()).failedJobs).toBe(-1);
   });
 
   it('serves a second read from cache, so a dashboard poll is not a load source', async () => {
