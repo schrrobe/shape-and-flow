@@ -60,6 +60,18 @@ describe('WorkingHoursEditor', () => {
     });
   });
 
+  it('refuses to save a start time with a minute past 59', async () => {
+    // `09:75` used to parse to a legal 615 minutes, so the shift saved silently as
+    // 09:00–10:15 — an hour the employee never agreed to work and customers were never
+    // offered, with nothing on screen to say so.
+    const wrapper = mount(WorkingHoursEditor, { props: { segments: [] } });
+
+    await addSegment(wrapper, { weekday: 'MONDAY', start: '09:75', end: '18:00' });
+
+    expect(wrapper.get('[data-test=save]').attributes('disabled')).toBeDefined();
+    expect(wrapper.emitted('save')).toBeUndefined();
+  });
+
   it('flags an overlap before submitting, so the round trip is not the first feedback', async () => {
     const wrapper = mount(WorkingHoursEditor, {
       props: { segments: [seg('MONDAY', 540, 720)] },

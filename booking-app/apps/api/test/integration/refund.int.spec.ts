@@ -177,6 +177,47 @@ describe('requesting a refund', () => {
   });
 });
 
+describe('the remaining balance', () => {
+  it('subtracts pending refunds, not only settled ones', async () => {
+    // Reserving against `refundedAmountCents` alone counts nothing until Stripe
+    // answers, so two requests in that window can each pass and together exceed the
+    // charge — and the second one fails at the provider, after the office was told it
+    // had gone through.
+    await service.request({ bookingId, amountCents: 4000, reason: 'GOODWILL' });
+
+    await expect(
+      service.request({ bookingId, amountCents: 1000, reason: 'GOODWILL' }),
+    ).rejects.toMatchObject({ code: 'PAYMENT_NOT_REFUNDABLE' });
+  });
+
+  it('serialises concurrent reservations onto one refund', async () => {
+    const results = await Promise.allSettled([
+      service.request({ bookingId, amountCents: 3000, reason: 'GOODWILL' }),
+      service.request({ bookingId, amountCents: 3000, reason: 'GOODWILL' }),
+    ]);
+
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+
+    const payment = await prisma.payment.findFirstOrThrow({ where: { bookingId } });
+    expect(
+      (
+        await prisma.refund.aggregate({
+          where: { paymentId: payment.id },
+          _sum: { amountCents: true },
+        })
+      )._sum.amountCents,
+    ).toBe(3000);
+  });
+
+  it('still allows what is genuinely left', async () => {
+    await service.request({ bookingId, amountCents: 4000, reason: 'GOODWILL' });
+
+    await expect(
+      service.request({ bookingId, amountCents: 500, reason: 'GOODWILL' }),
+    ).resolves.toMatchObject({ refundId: expect.any(String) as string });
+  });
+});
+
 describe('executing a refund', () => {
   it('passes the stored idempotency key to the provider', async () => {
     const { refundId } = await service.request({

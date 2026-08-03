@@ -46,6 +46,16 @@ const { data: organization, run: loadOrganization } = useAsyncData((signal) =>
 
 const confirmed = computed(() => booking.value?.status === 'CONFIRMED');
 
+/**
+ * The address the confirmation went to, captured before the draft is cleared.
+ *
+ * `onMounted` resets the draft — the attempt is over and the key must not be reused — and
+ * the sentence below is bound to this rather than to the store, which by then is empty.
+ * The one line that tells a customer where to look for their confirmation was rendering
+ * without an address.
+ */
+const confirmationEmail = ref(draft.email);
+
 let controller: AbortController | null = null;
 let timer: ReturnType<typeof setTimeout> | undefined;
 let attempt = 0;
@@ -112,7 +122,7 @@ onBeforeUnmount(() => {
         </h1>
 
         <p v-if="confirmed" class="mt-2 text-text-secondary">
-          {{ t('success.confirmedBody', { email: draft.email }) }}
+          {{ t('success.confirmedBody', { email: confirmationEmail }) }}
         </p>
 
         <!-- Three states, and the third never claims failure. A payment that has not been

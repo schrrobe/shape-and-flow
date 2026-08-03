@@ -7,6 +7,7 @@ import { api } from '../../api/client.js';
 import CalendarGrid from '../../components/office/CalendarGrid.vue';
 import { useAsyncData } from '../../composables/useAsyncData.js';
 import { useFocusStep } from '../../composables/useFocusStep.js';
+import { addDays } from '../../composables/useLocalDate.js';
 import { localDateLabel, today } from '../../office/format.js';
 import { officeMessage } from '../../office/messages.js';
 import { useSession } from '../../stores/session.js';
@@ -93,9 +94,7 @@ function goTo(next: Partial<{ date: string; employeeId: string }>): void {
 }
 
 function shift(days: number): void {
-  const anchored = new Date(`${date.value}T12:00:00Z`);
-  anchored.setUTCDate(anchored.getUTCDate() + days);
-  goTo({ date: anchored.toISOString().slice(0, 10) });
+  goTo({ date: addDays(date.value, days) });
 }
 
 onMounted(async () => {

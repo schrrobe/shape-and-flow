@@ -11,6 +11,7 @@ import { computed, onMounted, ref } from 'vue';
 
 import { api } from '../../api/client.js';
 import { useFocusStep } from '../../composables/useFocusStep.js';
+import { addDays } from '../../composables/useLocalDate.js';
 import { dateTime, localDateLabel, today } from '../../office/format.js';
 import { blockingBookingCount, useCrudResource } from '../../office/useCrudResource.js';
 import { useSession } from '../../stores/session.js';
@@ -39,12 +40,6 @@ const session = useSession();
 useFocusStep('Availability');
 
 const RANGE_DAYS = 90;
-
-function addDays(date: string, days: number): string {
-  const anchored = new Date(`${date}T12:00:00Z`);
-  anchored.setUTCDate(anchored.getUTCDate() + days);
-  return anchored.toISOString().slice(0, 10);
-}
 
 const from = ref(today());
 const to = computed(() => addDays(from.value, RANGE_DAYS));

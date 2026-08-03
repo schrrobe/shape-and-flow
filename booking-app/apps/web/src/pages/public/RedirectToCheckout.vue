@@ -59,11 +59,18 @@ onBeforeUnmount(() => {
   if (timer !== undefined) clearTimeout(timer);
 });
 
-/** The reservation lapsed before the redirect fired: do not send them to a dead session. */
+/**
+ * The reservation lapsed before the redirect fired: do not send them to a dead session.
+ *
+ * The key is rotated along with the slot. It is bound to the booking this attempt held, so
+ * the next submission under it would be a spent key with a different body — refused as
+ * `IDEMPOTENCY_KEY_REUSED`, which would block the customer at exactly the moment the alert
+ * below invites them to pick again.
+ */
 function onExpired(): void {
   expired.value = true;
   if (timer !== undefined) clearTimeout(timer);
-  draft.clearSlot();
+  draft.expireReservation();
 }
 </script>
 

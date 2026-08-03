@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 
 import { BookingModule } from '../booking/booking.module.js';
+import { PaymentModule } from '../payment/payment.module.js';
 import { PublicModule } from '../public/public.module.js';
 
 import { ManageCancelController } from './manage-cancel.controller.js';
@@ -17,7 +18,7 @@ import { ManageController } from './manage.controller.js';
  * The token service is deliberately *not* here; see ManagementTokenModule for why.
  */
 @Module({
-  imports: [PublicModule, BookingModule],
+  imports: [PublicModule, BookingModule, PaymentModule],
   controllers: [ManageController, ManageCancelController, ManageRescheduleController],
 })
 export class ManageModule {}

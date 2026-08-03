@@ -125,15 +125,23 @@ export class AuthController {
       // Counted even while locked, so a lockout that expires does not hand an attacker
       // a fresh budget of ten. Not counted when the password was right: the caller who
       // is being refused for being archived or locked is probably the legitimate owner.
-      if (user !== null && !verified) await this.recordFailure(user.id, user.failedLoginAttempts);
+      if (user !== null && !verified) await this.recordFailure(user.id);
       throw invalidCredentials();
     }
 
-    await this.prisma.officeUser.update({
-      where: { id: user.id },
+    // Conditional, and the condition is the same one checked above. Between that check
+    // and this write a parallel attempt can have locked the account, and an
+    // unconditional reset would clear the lock it just earned.
+    const reset = await this.prisma.officeUser.updateMany({
+      where: {
+        id: user.id,
+        archivedAt: null,
+        OR: [{ lockedUntil: null }, { lockedUntil: { lte: now } }],
+      },
       data: { failedLoginAttempts: 0, lockedUntil: null, lastLoginAt: now },
-      select: { id: true },
     });
+
+    if (reset.count !== 1) throw invalidCredentials();
 
     const sid = await this.sessions.create({
       id: user.id,
@@ -257,19 +265,33 @@ export class AuthController {
     await this.sessions.destroyOthersForUser(session.officeUserId, session.sid);
   }
 
-  /** Record a failed attempt, locking the account once there have been enough. */
-  private async recordFailure(officeUserId: string, previousAttempts: number): Promise<void> {
-    const attempts = previousAttempts + 1;
+  /**
+   * Record a failed attempt, locking the account once there have been enough.
+   *
+   * The counter is incremented by the database and the new value read back, rather than
+   * computed from the one this request happened to read. Two wrong passwords arriving
+   * together both read the same number and both stored it plus one, so ten attempts
+   * counted as nine and the account that should have locked stayed open — which is
+   * precisely the situation the lockout exists for.
+   *
+   * Both writes are one transaction, so a counter that crosses the threshold cannot
+   * commit without the lock that goes with it.
+   */
+  private async recordFailure(officeUserId: string): Promise<void> {
+    await this.prisma.$transaction(async (tx) => {
+      const user = await tx.officeUser.update({
+        where: { id: officeUserId },
+        data: { failedLoginAttempts: { increment: 1 } },
+        select: { failedLoginAttempts: true },
+      });
 
-    await this.prisma.officeUser.update({
-      where: { id: officeUserId },
-      data: {
-        failedLoginAttempts: attempts,
-        ...(attempts >= MAX_FAILED_ATTEMPTS
-          ? { lockedUntil: new Date(this.clock.now().getTime() + LOCKOUT_MINUTES * 60_000) }
-          : {}),
-      },
-      select: { id: true },
+      if (user.failedLoginAttempts < MAX_FAILED_ATTEMPTS) return;
+
+      await tx.officeUser.update({
+        where: { id: officeUserId },
+        data: { lockedUntil: new Date(this.clock.now().getTime() + LOCKOUT_MINUTES * 60_000) },
+        select: { id: true },
+      });
     });
   }
 

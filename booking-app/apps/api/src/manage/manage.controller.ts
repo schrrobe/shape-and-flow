@@ -8,7 +8,9 @@ import { Money } from '../domain/money/money.js';
 import { computeSuggestedRetainedAmount } from '../domain/pricing/cancellation-fee.js';
 import { CLOCK } from '../domain/time/clock.js';
 import { deriveDisplayStatus } from '../office/display-status.js';
+import { receivedFrom } from '../office/received.js';
 import { OrganizationContextService } from '../organization/organization-context.service.js';
+import { BookingFinancialsService } from '../payment/booking-financials.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { AvailabilitySnapshotService } from '../public/availability-snapshot.service.js';
 
@@ -52,7 +54,6 @@ const BOOKING_VIEW = {
   serviceId: true,
   employeeId: true,
   employee: { select: { displayName: true } },
-  payments: { select: { status: true, amountCents: true, refundedAmountCents: true } },
   cancellationRequests: { where: { decision: 'PENDING' as const }, select: { id: true } },
   rescheduleRequests: { where: { decision: 'PENDING' as const }, select: { id: true } },
 } as const;
@@ -66,6 +67,7 @@ export class ManageController {
     private readonly prisma: PrismaService,
     private readonly organizations: OrganizationContextService,
     private readonly snapshots: AvailabilitySnapshotService,
+    private readonly financials: BookingFinancialsService,
     @Inject(CLOCK) private readonly clock: Clock,
   ) {}
 
@@ -81,8 +83,12 @@ export class ManageController {
     const settings = this.organizations.getSettings();
     const now = this.clock.now();
 
-    const paid = this.paidTotal(booking.payments, booking.currency);
-    const refunded = this.refundedTotal(booking.payments, booking.currency);
+    // Through the chain's root. A rescheduled booking keeps its payment on the row that
+    // was paid, and reading this booking's own relation showed the customer a paid
+    // appointment as owing the full price.
+    const financials = await this.financials.load(managed.bookingId);
+    const paid = receivedFrom(financials, booking.currency);
+    const refunded = this.refundedTotal(financials.payments, booking.currency);
 
     const policy = computeSuggestedRetainedAmount({
       paid,
@@ -196,20 +202,6 @@ export class ManageController {
     });
   }
 
-  /** What has actually settled. A pending payment has not been received. */
-  private paidTotal(payments: readonly PaymentRow[], currency: string): Money {
-    // A refunded payment was still received: `paid` is what arrived, and `refunded` is
-    // what went back. Subtracting here would make both numbers say the same thing.
-    const settled: PaymentStatus[] = ['SUCCEEDED', 'PARTIALLY_REFUNDED', 'REFUNDED'];
-
-    return Money.sum(
-      payments
-        .filter((payment) => settled.includes(payment.status))
-        .map((payment) => Money.fromCents(payment.amountCents, currency)),
-      currency,
-    );
-  }
-
   private refundedTotal(payments: readonly PaymentRow[], currency: string): Money {
     return Money.sum(
       payments.map((payment) => Money.fromCents(payment.refundedAmountCents, currency)),
@@ -237,7 +229,6 @@ interface ManagedBookingRow {
   serviceId: string;
   employeeId: string;
   employee: { displayName: string };
-  payments: PaymentRow[];
   cancellationRequests: { id: string }[];
   rescheduleRequests: { id: string }[];
 }
