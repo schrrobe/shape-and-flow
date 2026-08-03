@@ -7,11 +7,17 @@ import type { RefundStatusValue } from '../providers/payment/payment-provider.js
 /**
  * Stripe refund events this application acts on.
  *
- * `charge.refunded` is the one that can arrive *before* the API response that created the
+ * `refund.created` is the one that can arrive *before* the API response that created the
  * refund, which is why settlement has to be able to match on our own idempotency key.
+ *
+ * `charge.refunded` is deliberately not here. Stripe stopped auto-expanding `refunds.data`
+ * on the Charge object in API version 2022-11-15, and from 2024-10-28 documents the
+ * `refund.*` family as the way to follow a refund's lifecycle. Subscribing to the charge
+ * event would mean receiving a charge with no refund inside it — which the previous code
+ * did: it read `refunds.data`, found nothing, and settled nothing while looking handled.
  */
 export const REFUND_EVENT_TYPES = {
-  CHARGE_REFUNDED: 'charge.refunded',
+  REFUND_CREATED: 'refund.created',
   REFUND_UPDATED: 'refund.updated',
   REFUND_FAILED: 'refund.failed',
 } as const;
@@ -22,7 +28,6 @@ interface RefundObjectShape {
   status?: unknown;
   amount?: unknown;
   metadata?: unknown;
-  refunds?: { data?: unknown[] };
 }
 
 function readString(value: unknown): string | undefined {
@@ -47,39 +52,36 @@ export class RefundWebhookHandler {
   }
 
   async handle(type: string, object: unknown): Promise<void> {
-    const refunds = this.refundObjectsFrom(type, object);
+    // Every event in REFUND_EVENT_TYPES carries the Refund object itself, so there is no
+    // per-type unwrapping left to do.
+    const refund = (object ?? {}) as RefundObjectShape;
 
-    if (refunds.length === 0) {
-      this.logger.debug(`${type} carried no refund object; nothing to apply`);
+    const stripeRefundId = readString(refund.id);
+
+    if (stripeRefundId === undefined) {
+      this.logger.debug(`${type} carried no refund id; nothing to apply`);
       return;
     }
 
-    for (const refund of refunds) {
-      const stripeRefundId = readString(refund.id);
-      if (stripeRefundId === undefined) continue;
+    // Our own key, read back out of the metadata we set when creating the refund. Without
+    // it the lookup can only match on `stripeRefundId`, and the whole reason settlement
+    // accepts a second handle is the case where the event beats the API response that
+    // stores that id — so the fallback would exist and never be reachable.
+    const idempotencyKey = readIdempotencyKey(refund.metadata);
 
-      await this.refunds.applyProviderUpdate({
-        stripeRefundId,
-        status: normaliseStatus(refund.status),
-        amountCents: typeof refund.amount === 'number' ? refund.amount : 0,
-      });
-    }
+    await this.refunds.applyProviderUpdate({
+      stripeRefundId,
+      ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
+      status: normaliseStatus(refund.status),
+      amountCents: typeof refund.amount === 'number' ? refund.amount : 0,
+    });
   }
+}
 
-  /**
-   * Where the refund objects live, which differs by event type.
-   *
-   * `charge.refunded` sends the *charge*, with its refunds nested; the refund events send
-   * the refund itself. Handling both here keeps the difference in one place.
-   */
-  private refundObjectsFrom(type: string, object: unknown): RefundObjectShape[] {
-    const shape = (object ?? {}) as RefundObjectShape;
-
-    if (type !== REFUND_EVENT_TYPES.CHARGE_REFUNDED) return [shape];
-
-    const nested = shape.refunds?.data;
-    return Array.isArray(nested) ? (nested as RefundObjectShape[]) : [];
-  }
+/** The idempotency key we stored on the provider's refund, if it is there. */
+function readIdempotencyKey(metadata: unknown): string | undefined {
+  if (typeof metadata !== 'object' || metadata === null) return undefined;
+  return readString((metadata as Record<string, unknown>).idempotencyKey);
 }
 
 /**

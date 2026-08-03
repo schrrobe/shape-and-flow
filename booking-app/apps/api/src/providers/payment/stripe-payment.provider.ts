@@ -212,7 +212,13 @@ export class StripePaymentProvider implements PaymentProvider {
       {
         charge: input.chargeId,
         amount: input.amount.amountCents,
-        ...(input.reason === undefined ? {} : { metadata: { reason: input.reason } }),
+        metadata: {
+          // Echoed back on every `refund.*` event, which is what lets settlement find the
+          // local row when the event arrives before the response below has stored
+          // Stripe's own id.
+          idempotencyKey: input.idempotencyKey,
+          ...(input.reason === undefined ? {} : { reason: input.reason }),
+        },
       },
       // Stripe's own idempotency key is the local Refund row's key, which is why a
       // retry after a lost response cannot produce a second refund.

@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 
+import { OrganizationContextService } from '../../organization/organization-context.service.js';
 import { RefundService } from '../refund.service.js';
 
 import type { JOB, JobPayload } from '../../messaging/queues/job-contracts.js';
@@ -17,9 +18,17 @@ import type { JOB, JobPayload } from '../../messaging/queues/job-contracts.js';
 export class RefundProcessor {
   private readonly logger = new Logger('RefundProcessor');
 
-  constructor(private readonly refunds: RefundService) {}
+  constructor(
+    private readonly refunds: RefundService,
+    private readonly organizations: OrganizationContextService,
+  ) {}
 
   async handle(payload: JobPayload<typeof JOB.REFUND_REQUESTED>): Promise<void> {
+    // The payload names the tenant and `execute` reads the Stripe account from context, so
+    // the two are checked against each other here. Refunding from the wrong account is not
+    // a mistake that can be taken back.
+    this.organizations.require(payload.organizationId);
+
     const outcome = await this.refunds.execute(payload.refundId);
     this.logger.debug(`refund ${payload.refundId} settled as ${outcome}`);
   }
