@@ -1,21 +1,38 @@
+import { PayloadTooLargeException } from '@nestjs/common';
+import { raw } from 'express';
+
 import { AppError } from '../common/errors/app-error.js';
 
 import type { RawBodyRequest } from '@nestjs/common';
-import type { Request } from 'express';
+import type { Request, RequestHandler } from 'express';
 
 /**
  * A webhook body is capped well below any plausible event, and far below what an
  * unauthenticated endpoint should be willing to buffer in memory.
  *
- * Nothing reads this yet. The cap the sentence above describes is not in force:
- * no body-parser limit is configured, so the webhook endpoints currently accept
- * whatever Express's default allows. Kept, and kept exported, so the intent
- * survives until it is wired into the parser rather than being quietly dropped
- * by a dead-code sweep.
- *
- * @knipignore
+ * The parser below is mounted on the webhook route before Nest registers its global
+ * JSON and form parsers, so the limit is enforced while the bytes are buffered.
  */
-export const WEBHOOK_BODY_LIMIT = '1mb';
+const WEBHOOK_BODY_LIMIT = '1mb';
+
+const parseWebhookBody = raw({
+  limit: WEBHOOK_BODY_LIMIT,
+  type: ['application/json', 'application/x-www-form-urlencoded'],
+});
+
+/**
+ * Buffer a webhook exactly once, with a route-specific upper bound.
+ *
+ * Providers use JSON (Stripe and Resend) or form encoding (Twilio), but every signature
+ * covers the bytes rather than the parsed value. Mounting one raw parser for both media
+ * types gives the controllers the same contract and prevents Nest's later global parser
+ * from consuming the stream first.
+ */
+export const webhookBodyParser: RequestHandler = (request, response, next) => {
+  parseWebhookBody(request, response, (error: unknown) => {
+    next(isEntityTooLarge(error) ? new PayloadTooLargeException() : error);
+  });
+};
 
 /**
  * The exact bytes the provider sent.
@@ -31,7 +48,8 @@ export const WEBHOOK_BODY_LIMIT = '1mb';
  * a parsed body and skips. That failure is silent, which is what makes it worth naming.
  */
 export function rawBodyOf(request: RawBodyRequest<Request>): Buffer {
-  const { rawBody } = request;
+  const parsedBody = (request as unknown as { body?: unknown }).body;
+  const rawBody = request.rawBody ?? (Buffer.isBuffer(parsedBody) ? parsedBody : undefined);
 
   if (rawBody === undefined) {
     throw new AppError('INTERNAL_ERROR', {
@@ -41,4 +59,13 @@ export function rawBodyOf(request: RawBodyRequest<Request>): Buffer {
   }
 
   return rawBody;
+}
+
+function isEntityTooLarge(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'type' in error &&
+    error.type === 'entity.too.large'
+  );
 }

@@ -111,6 +111,16 @@ beforeEach(async () => {
 });
 
 describe('POST /webhooks/stripe', () => {
+  it('accepts bodies below the webhook limit and rejects bodies above it', async () => {
+    const belowLimit = Buffer.from('x'.repeat(512 * 1024));
+    const aboveLimit = Buffer.from('x'.repeat(1024 * 1024 + 1));
+
+    // A body below the explicit webhook limit reaches signature verification. Express's
+    // default 100 kB JSON limit would reject it before the controller with 413 instead.
+    await postWebhook(belowLimit, 'nope').expect(400);
+    await postWebhook(aboveLimit, 'nope').expect(413);
+  });
+
   it('rejects a bad signature with 400 and stores nothing', async () => {
     const { raw } = rawEvent('checkout.session.completed', { id: 'cs_fake_x' });
 

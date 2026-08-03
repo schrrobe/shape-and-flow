@@ -519,7 +519,7 @@ function notFound(message: string): AppError {
   return new AppError('NOT_FOUND', { message });
 }
 
-/** Exported for the controllers, which map the same row shape. */
+/** Map database rows to the public office employee shape. */
 function toDto(employee: {
   id: string;
   firstName: string;

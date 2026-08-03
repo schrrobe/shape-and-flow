@@ -8,6 +8,7 @@ import { correlationMiddleware } from './common/correlation/correlation.middlewa
 import { InFlightRequests } from './common/shutdown/inflight.js';
 import { assertAppRole, loadConfig } from './config/env.schema.js';
 import { loadEnvFile } from './config/load-dotenv.js';
+import { webhookBodyParser } from './webhooks/raw-body.js';
 
 import type { NestExpressApplication } from '@nestjs/platform-express';
 
@@ -47,6 +48,10 @@ async function bootstrap(): Promise<void> {
   app.use(correlationMiddleware);
 
   app.setGlobalPrefix('api');
+  // Signature verification consumes the exact bytes. This route-specific parser runs
+  // before Nest's global JSON/form parsers and rejects oversized public requests while
+  // they are being buffered.
+  app.use('/api/webhooks', webhookBodyParser);
   app.use(helmet());
   // Rate limits and audit rows must record the real client IP, not the proxy's.
   app.set('trust proxy', 1);

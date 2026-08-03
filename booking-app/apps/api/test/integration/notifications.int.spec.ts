@@ -553,6 +553,26 @@ describe('other booking events', () => {
 });
 
 describe('POST /webhooks/resend', () => {
+  it('accepts bodies below the webhook limit and rejects bodies above it', async () => {
+    const belowLimit = 'x'.repeat(512 * 1024);
+    const aboveLimit = 'x'.repeat(1024 * 1024 + 1);
+
+    await request(server())
+      .post('/webhooks/resend')
+      .set('content-type', 'application/json')
+      .set('svix-id', 'msg_limit')
+      .set('svix-timestamp', '1786000000')
+      .set('svix-signature', 'v1,deadbeef')
+      .send(belowLimit)
+      .expect(400);
+
+    await request(server())
+      .post('/webhooks/resend')
+      .set('content-type', 'application/json')
+      .send(aboveLimit)
+      .expect(413);
+  });
+
   it('marks a delivered email DELIVERED', async () => {
     const { notificationId } = await queueConfirmation();
     await service.send(notificationId ?? '');
@@ -615,6 +635,23 @@ describe('POST /webhooks/resend', () => {
 });
 
 describe('POST /webhooks/twilio', () => {
+  it('accepts bodies below the webhook limit and rejects bodies above it', async () => {
+    const belowLimit = `MessageSid=${'x'.repeat(512 * 1024)}`;
+    const aboveLimit = `MessageSid=${'x'.repeat(1024 * 1024 + 1)}`;
+
+    await request(server())
+      .post('/webhooks/twilio')
+      .set('content-type', 'application/x-www-form-urlencoded')
+      .send(belowLimit)
+      .expect(400);
+
+    await request(server())
+      .post('/webhooks/twilio')
+      .set('content-type', 'application/x-www-form-urlencoded')
+      .send(aboveLimit)
+      .expect(413);
+  });
+
   it('marks an undelivered SMS FAILED with the error code', async () => {
     await withSettings({ smsRemindersEnabled: true });
     await bookingEvents.confirmed({
