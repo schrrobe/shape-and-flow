@@ -329,6 +329,28 @@ describe('PUT /api/office/employees/:id/working-hours', () => {
     const body = response.body as { conflictingBookings: { id: string }[] };
     expect(body.conflictingBookings.map((booking) => booking.id)).toContain(overrunning.id);
   });
+
+  it('uses persisted date exceptions when reporting conflicts after a rota change', async () => {
+    const owner = await signedInAs('OWNER');
+    const stranded = await bookingAt(berlin(NEXT_MONDAY, '09:00'));
+
+    await prisma.availabilityException.create({
+      data: {
+        organizationId: ctx.organization.id,
+        employeeId: ctx.employee1.id,
+        date: new Date(`${NEXT_MONDAY}T00:00:00.000Z`),
+        kind: 'CLOSED',
+      },
+    });
+
+    const response = await owner
+      .put(`/api/office/employees/${ctx.employee1.id}/working-hours`)
+      .send({ segments: [{ weekday: 'MONDAY', startMinute: 540, endMinute: 1080, breaks: [] }] })
+      .expect(200);
+
+    const body = response.body as { conflictingBookings: { id: string }[] };
+    expect(body.conflictingBookings.map((booking) => booking.id)).toContain(stranded.id);
+  });
 });
 
 describe('POST /api/office/employees/:id/archive', () => {
@@ -520,6 +542,26 @@ describe('blocked time and time off', () => {
         status: 'REQUESTED',
       })
       .expect(201);
+  });
+
+  it('clears decision metadata when approved leave returns to requested', async () => {
+    const owner = await signedInAs('OWNER');
+    const created = await owner
+      .post('/api/office/time-off')
+      .send({
+        employeeId: ctx.employee1.id,
+        startDate: '2026-09-14',
+        endDate: '2026-09-14',
+        status: 'APPROVED',
+      })
+      .expect(201);
+
+    const id = (created.body as { id: string }).id;
+    await owner.patch(`/api/office/time-off/${id}`).send({ status: 'REQUESTED' }).expect(200);
+
+    const row = await prisma.timeOff.findUniqueOrThrow({ where: { id } });
+    expect(row.decidedByOfficeUserId).toBeNull();
+    expect(row.decidedAt).toBeNull();
   });
 
   it('takes the days off the public calendar once approved', async () => {

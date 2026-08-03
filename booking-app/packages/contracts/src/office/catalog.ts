@@ -1,6 +1,12 @@
 import { z } from 'zod';
 
-import { booleanQuery, cuidSchema, isoInstantSchema, moneySchema } from '../primitives.js';
+import {
+  booleanQuery,
+  boundedInt,
+  cuidSchema,
+  isoInstantSchema,
+  moneySchema,
+} from '../primitives.js';
 
 /**
  * What the business sells, as the office edits it.
@@ -16,9 +22,6 @@ export const SERVICE_BOUNDS = {
   prepBufferMinutes: { min: 0, max: 120 },
   cleanupBufferMinutes: { min: 0, max: 120 },
 } as const;
-
-const bounded = (bounds: { min: number; max: number }) =>
-  z.number().int().min(bounds.min).max(bounds.max);
 
 /* ── categories ───────────────────────────────────────────────────────────────── */
 
@@ -88,9 +91,9 @@ export const createServiceSchema = z.object({
   name: z.string().trim().min(1).max(160),
   description: z.string().trim().max(4000).nullish(),
   serviceCategoryId: cuidSchema.nullish(),
-  durationMinutes: bounded(SERVICE_BOUNDS.durationMinutes),
-  prepBufferMinutes: bounded(SERVICE_BOUNDS.prepBufferMinutes).optional(),
-  cleanupBufferMinutes: bounded(SERVICE_BOUNDS.cleanupBufferMinutes).optional(),
+  durationMinutes: boundedInt(SERVICE_BOUNDS.durationMinutes),
+  prepBufferMinutes: boundedInt(SERVICE_BOUNDS.prepBufferMinutes).optional(),
+  cleanupBufferMinutes: boundedInt(SERVICE_BOUNDS.cleanupBufferMinutes).optional(),
   priceCents: z.number().int().min(0).max(10_000_000),
   isBookableOnline: z.boolean().optional(),
   displayOrder: z.number().int().min(0).max(9999).optional(),

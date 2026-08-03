@@ -27,7 +27,7 @@ import {
 export const MAX_CALENDAR_RANGE_DAYS = 62;
 
 /** Days between two `YYYY-MM-DD` strings, inclusive of both ends. */
-function inclusiveDaySpan(from: string, to: string): number {
+export function inclusiveDaySpan(from: string, to: string): number {
   const parse = (value: string): number => {
     const [year, month, day] = value.split('-').map(Number);
     return Date.UTC(year ?? 0, (month ?? 1) - 1, day ?? 1);

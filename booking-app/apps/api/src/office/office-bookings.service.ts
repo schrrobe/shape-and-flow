@@ -40,8 +40,8 @@ const LIST_FIELDS = {
   customerId: true,
   employee: { select: { displayName: true } },
   customer: { select: { firstName: true, lastName: true } },
-  payments: { select: { amountCents: true, status: true } },
-  manualPayments: { select: { amountCents: true } },
+  payments: { select: { amountCents: true, currency: true, status: true } },
+  manualPayments: { select: { amountCents: true, currency: true } },
   cancellationRequests: { where: { decision: 'PENDING' as const }, select: { id: true } },
   rescheduleRequests: { where: { decision: 'PENDING' as const }, select: { id: true } },
 } as const satisfies Prisma.BookingSelect;
@@ -158,10 +158,12 @@ export class OfficeBookingsService {
         ...(query.serviceId === undefined ? {} : { serviceId: query.serviceId }),
         ...(query.customerId === undefined ? {} : { customerId: query.customerId }),
         ...this.dateRange(query.from, query.to, zone),
-        ...search(query.q),
-        ...(query.cursor === undefined
-          ? {}
-          : keysetWhere(field, direction, decodeCursor(query.cursor))),
+        AND: [
+          search(query.q),
+          ...(query.cursor === undefined
+            ? []
+            : [keysetWhere(field, direction, decodeCursor(query.cursor))]),
+        ],
       },
       select: LIST_FIELDS,
       orderBy: keysetOrderBy(field, direction),

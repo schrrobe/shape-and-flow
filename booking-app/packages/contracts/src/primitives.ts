@@ -68,6 +68,10 @@ export const booleanQuery = (fallback: boolean) =>
     .default(fallback ? 'true' : 'false')
     .transform((value) => value === 'true');
 
+/** A database-backed integer range, shared by settings and catalog contracts. */
+export const boundedInt = (bounds: { min: number; max: number }) =>
+  z.number().int().min(bounds.min).max(bounds.max);
+
 /** A customer-facing locale. Lowercase, because it appears in URLs and paths. */
 export const localeSchema = z.enum(['de', 'en']);
 export type Locale = z.infer<typeof localeSchema>;

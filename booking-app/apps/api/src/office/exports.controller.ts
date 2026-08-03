@@ -1,3 +1,5 @@
+import { pipeline } from 'node:stream';
+
 import { Controller, Get, Query, Res, UseGuards } from '@nestjs/common';
 import { exportQuerySchema } from '@shape-and-flow/booking-contracts';
 
@@ -42,22 +44,22 @@ export class ExportsController {
   ): void {
     const query = exportQuerySchema.parse(rawQuery);
 
-    send(response, `bookings-${query.from}-${query.to}.csv`, () =>
+    sendCsv(response, `bookings-${query.from}-${query.to}.csv`, () =>
       this.exports.bookings(session.organizationId, query),
     );
   }
 
   @Get('payments.csv')
   @Roles('OWNER', 'ADMIN')
-  async payments(
+  payments(
     @CurrentUser() session: OfficeSession,
     @Query() rawQuery: unknown,
     @Res() response: Response,
-  ): Promise<void> {
+  ): void {
     const query = exportQuerySchema.parse(rawQuery);
-    const stream = await this.exports.payments(session.organizationId, query);
+    const stream = this.exports.payments(session.organizationId, query);
 
-    send(response, `payments-${query.from}-${query.to}.csv`, () => stream);
+    sendCsv(response, `payments-${query.from}-${query.to}.csv`, () => stream);
   }
 }
 
@@ -68,20 +70,13 @@ export class ExportsController {
  * that reads over HTTP, the BOM is for Excel, which reads the file from disk after the
  * header is long gone.
  */
-function send(response: Response, filename: string, open: () => Readable): void {
+export function sendCsv(response: Response, filename: string, open: () => Readable): void {
   response.setHeader('Content-Type', 'text/csv; charset=utf-8');
   response.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
   // The length is unknown until the last row, which is the point of streaming.
   response.setHeader('Cache-Control', 'no-store');
 
-  const stream = open();
-
-  stream.on('error', () => {
-    // The headers are already sent, so there is no envelope to send instead. Destroying
-    // the socket makes the client's download fail loudly rather than arrive truncated
-    // and look complete.
-    response.destroy();
+  pipeline(open(), response, (error) => {
+    if (error !== null && !response.destroyed) response.destroy(error);
   });
-
-  stream.pipe(response);
 }

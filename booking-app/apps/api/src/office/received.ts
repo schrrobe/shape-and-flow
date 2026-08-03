@@ -20,8 +20,8 @@ const RECEIVED_PAYMENT_STATUSES = ['SUCCEEDED', 'PARTIALLY_REFUNDED', 'REFUNDED'
 const SETTLED_REFUND_STATUS = 'SUCCEEDED';
 
 export interface PaidSources {
-  payments: readonly { amountCents: number; status: string }[];
-  manualPayments: readonly { amountCents: number }[];
+  payments: readonly { amountCents: number; currency: string; status: string }[];
+  manualPayments: readonly { amountCents: number; currency: string }[];
 }
 
 /**
@@ -38,7 +38,7 @@ export function receivedFrom(booking: PaidSources, currency: string): Money {
   const card = booking.payments
     .filter((payment) => RECEIVED_PAYMENT_STATUSES.includes(payment.status))
     .reduce<Money>(
-      (total, payment) => total.plus(Money.fromCents(payment.amountCents, currency)),
+      (total, payment) => total.plus(Money.fromCents(payment.amountCents, payment.currency)),
       Money.zero(currency),
     );
 
@@ -46,20 +46,20 @@ export function receivedFrom(booking: PaidSources, currency: string): Money {
   // `{ amountCents: number }`, so without it TypeScript picks the non-generic `reduce`
   // overload and the accumulator degrades to the element type.
   return booking.manualPayments.reduce<Money>(
-    (total, payment) => total.plus(Money.fromCents(payment.amountCents, currency)),
+    (total, payment) => total.plus(Money.fromCents(payment.amountCents, payment.currency)),
     card,
   );
 }
 
 /** Refunds that have settled, which is the only money that has actually gone back. */
 export function refundedFrom(
-  booking: { refunds: readonly { amountCents: number; status: string }[] },
+  booking: { refunds: readonly { amountCents: number; currency: string; status: string }[] },
   currency: string,
 ): Money {
   return booking.refunds
     .filter((refund) => refund.status === SETTLED_REFUND_STATUS)
     .reduce<Money>(
-      (total, refund) => total.plus(Money.fromCents(refund.amountCents, currency)),
+      (total, refund) => total.plus(Money.fromCents(refund.amountCents, refund.currency)),
       Money.zero(currency),
     );
 }

@@ -53,10 +53,12 @@ export class CustomersService {
     const rows = await this.prisma.customer.findMany({
       where: {
         organizationId: this.organizationId(),
-        ...search(query.q),
-        ...(query.cursor === undefined
-          ? {}
-          : keysetWhere('createdAt', 'desc', decodeCursor(query.cursor))),
+        AND: [
+          search(query.q),
+          ...(query.cursor === undefined
+            ? []
+            : [keysetWhere('createdAt', 'desc', decodeCursor(query.cursor))]),
+        ],
       },
       orderBy: keysetOrderBy('createdAt', 'desc'),
       take: query.limit + 1,
@@ -81,9 +83,9 @@ export class CustomersService {
         employeeId: true,
         priceCentsSnapshot: true,
         currency: true,
-        payments: { select: { amountCents: true, status: true } },
-        manualPayments: { select: { amountCents: true } },
-        refunds: { select: { amountCents: true, status: true } },
+        payments: { select: { amountCents: true, currency: true, status: true } },
+        manualPayments: { select: { amountCents: true, currency: true } },
+        refunds: { select: { amountCents: true, currency: true, status: true } },
       },
       orderBy: { startsAt: 'desc' },
     });

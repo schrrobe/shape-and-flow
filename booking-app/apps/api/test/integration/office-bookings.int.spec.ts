@@ -244,9 +244,10 @@ describe('POST /api/office/bookings', () => {
 
   it('may ignore the minimum-notice window, which the public route may not', async () => {
     const owner = await signedInAs('OWNER');
-    // Two hours from now, inside the seeded 24-hour notice. The office is allowed to
-    // take a booking somebody just phoned about.
-    const soon = berlin('2026-08-17', '09:00');
+    // Monday 09:00 is 59 hours away, so widen the notice window first. The office is
+    // allowed to take a booking somebody just phoned about even though a customer is not.
+    await owner.patch('/api/office/settings').send({ minimumNoticeHours: 72 }).expect(200);
+    const soon = berlin(NEXT_MONDAY, '09:00');
 
     await owner
       .post('/api/office/bookings')
@@ -492,6 +493,7 @@ describe('cancel, complete and no-show', () => {
     // admin who may not move money also may not free a slot.
     await admin
       .post(`/api/office/bookings/${booking.id}/cancel`)
+      .set('Idempotency-Key', randomUUID())
       .send({ reason: 'Mitarbeiterin krank' })
       .expect(201);
 
@@ -506,12 +508,40 @@ describe('cancel, complete and no-show', () => {
 
     await admin
       .post(`/api/office/bookings/${booking.id}/cancel`)
+      .set('Idempotency-Key', randomUUID())
       .send({ reason: 'Mitarbeiterin krank', refund: { amountCents: 4500 } })
       .expect(403);
 
     // Refused before anything happened, not half-way through.
     const after = await prisma.booking.findUniqueOrThrow({ where: { id: booking.id } });
     expect(after.status).toBe('CONFIRMED');
+  });
+
+  it('replays a refunding cancellation without creating a second money move', async () => {
+    const owner = await signedInAs('OWNER');
+    const booking = await bookingAt(berlin(NEXT_MONDAY, '10:00'));
+    await paidWithCard(booking.id, ctx.service30.priceCents);
+    const key = randomUUID();
+    const body = { reason: 'Mitarbeiterin krank', refund: { amountCents: 4500 } };
+
+    const first = await owner
+      .post(`/api/office/bookings/${booking.id}/cancel`)
+      .set('Idempotency-Key', key)
+      .send(body)
+      .expect(201);
+    const second = await owner
+      .post(`/api/office/bookings/${booking.id}/cancel`)
+      .set('Idempotency-Key', key)
+      .send(body)
+      .expect(201);
+
+    expect(second.body).toEqual(first.body);
+    expect(await prisma.refund.count({ where: { bookingId: booking.id } })).toBe(1);
+    expect(
+      await prisma.outboxEvent.count({
+        where: { aggregateType: 'Refund', eventType: 'refund.requested' },
+      }),
+    ).toBe(1);
   });
 
   it('completes a past appointment and refuses a future one', async () => {
@@ -650,6 +680,46 @@ describe('listing, filtering, pagination', () => {
     }
   });
 
+  it('keeps the booking search filter on later cursor pages', async () => {
+    const owner = await signedInAs('OWNER');
+    const otherCustomer = await prisma.customer.create({
+      data: {
+        organizationId: ctx.organization.id,
+        email: 'other@example.com',
+        emailNormalized: 'other@example.com',
+        firstName: 'Other',
+        lastName: 'Person',
+        locale: 'de',
+      },
+    });
+
+    const matchingFirst = await bookingAt(berlin(NEXT_MONDAY, '09:00'));
+    await prisma.booking.create({
+      data: makeBooking(ctx, {
+        status: 'CONFIRMED',
+        startsAt: berlin(NEXT_MONDAY, '10:00'),
+        customerId: otherCustomer.id,
+        expiresAt: null,
+      }),
+    });
+    const matchingSecond = await bookingAt(berlin(NEXT_MONDAY, '11:00'));
+
+    const first = await owner
+      .get('/api/office/bookings')
+      .query({ q: 'Becker', limit: 1, sort: 'startsAt:asc' })
+      .expect(200);
+    const page1 = first.body as { items: { id: string }[]; nextCursor: string | null };
+
+    const second = await owner
+      .get('/api/office/bookings')
+      .query({ q: 'Becker', limit: 1, sort: 'startsAt:asc', cursor: page1.nextCursor ?? '' })
+      .expect(200);
+    const page2 = second.body as { items: { id: string }[] };
+
+    expect(page1.items.map((row) => row.id)).toEqual([matchingFirst.id]);
+    expect(page2.items.map((row) => row.id)).toEqual([matchingSecond.id]);
+  });
+
   it('shows an EMPLOYEE only their own bookings', async () => {
     const employee = await signedInAs('EMPLOYEE', { employeeId: ctx.employee1.id });
     await bookingAt(berlin(NEXT_MONDAY, '10:00'), { employeeId: ctx.employee1.id });
@@ -682,6 +752,57 @@ describe('customers', () => {
 
     expect(body.bookings.map((row) => row.id)).toContain(booking.id);
     expect(body.lifetimeValue.amountCents).toBe(4500);
+  });
+
+  it('keeps the customer search filter on later cursor pages', async () => {
+    const owner = await signedInAs('OWNER');
+    const base = NOW.getTime();
+
+    await prisma.customer.createMany({
+      data: [
+        {
+          organizationId: ctx.organization.id,
+          email: 'match-new@example.com',
+          emailNormalized: 'match-new@example.com',
+          firstName: 'Match',
+          lastName: 'Newest',
+          locale: 'de',
+          createdAt: new Date(base + 3_000),
+        },
+        {
+          organizationId: ctx.organization.id,
+          email: 'other-middle@example.com',
+          emailNormalized: 'other-middle@example.com',
+          firstName: 'Other',
+          lastName: 'Middle',
+          locale: 'de',
+          createdAt: new Date(base + 2_000),
+        },
+        {
+          organizationId: ctx.organization.id,
+          email: 'match-old@example.com',
+          emailNormalized: 'match-old@example.com',
+          firstName: 'Match',
+          lastName: 'Oldest',
+          locale: 'de',
+          createdAt: new Date(base + 1_000),
+        },
+      ],
+    });
+
+    const first = await owner
+      .get('/api/office/customers')
+      .query({ q: 'match', limit: 1 })
+      .expect(200);
+    const page1 = first.body as { items: { email: string }[]; nextCursor: string | null };
+    const second = await owner
+      .get('/api/office/customers')
+      .query({ q: 'match', limit: 1, cursor: page1.nextCursor ?? '' })
+      .expect(200);
+    const page2 = second.body as { items: { email: string }[] };
+
+    expect(page1.items[0]?.email).toBe('match-new@example.com');
+    expect(page2.items[0]?.email).toBe('match-old@example.com');
   });
 
   it('pseudonymises on erase, keeping the bookings', async () => {

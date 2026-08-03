@@ -25,8 +25,8 @@ const REQUEST_BOOKING = {
   priceCentsSnapshot: true,
   currency: true,
   customer: { select: { firstName: true, lastName: true } },
-  payments: { select: { amountCents: true, status: true } },
-  manualPayments: { select: { amountCents: true } },
+  payments: { select: { amountCents: true, currency: true, status: true } },
+  manualPayments: { select: { amountCents: true, currency: true } },
 } as const;
 
 /**
@@ -122,8 +122,8 @@ export class RequestsService {
           select: {
             employeeId: true,
             currency: true,
-            payments: { select: { amountCents: true, status: true } },
-            manualPayments: { select: { amountCents: true } },
+            payments: { select: { amountCents: true, currency: true, status: true } },
+            manualPayments: { select: { amountCents: true, currency: true } },
           },
         },
       },
@@ -155,8 +155,8 @@ function toRequestBooking(booking: {
   priceCentsSnapshot: number;
   currency: string;
   customer: { firstName: string; lastName: string };
-  payments: { amountCents: number; status: string }[];
-  manualPayments: { amountCents: number }[];
+  payments: { amountCents: number; currency: string; status: string }[];
+  manualPayments: { amountCents: number; currency: string }[];
 }): OfficeCancellationRequest['booking'] {
   return {
     id: booking.id,

@@ -10,7 +10,8 @@ export const IDEMPOTENCY_SCOPE = 'idempotency:scope';
  * whether a stored response may be replayed: a key minted for a booking must never
  * replay a refund. A typo in a string would silently create a scope of one.
  */
-export type IdempotencyScope = 'booking.create' | 'refund.create' | 'manual-payment.create';
+export type IdempotencyScope =
+  'booking.create' | 'booking.cancel' | 'refund.create' | 'manual-payment.create';
 
 /**
  * Require and honour an `Idempotency-Key` header on this route.
