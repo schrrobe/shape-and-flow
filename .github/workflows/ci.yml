@@ -52,15 +52,8 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
-      - name: Unit tests with coverage
-        run: pnpm api test --coverage
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        if: always()
-        with:
-          name: coverage
-          path: booking-app/apps/api/coverage
-          if-no-files-found: ignore
-          retention-days: 7
+      - name: Unit tests
+        run: pnpm api test
 
   integration:
     name: Integration tests
@@ -98,7 +91,15 @@ jobs:
       - uses: ./.github/actions/setup
       - name: Apply migrations
         run: pnpm api prisma:migrate:deploy
-      - run: pnpm test:integration
+      - name: Unit and integration tests with coverage
+        run: pnpm api test:coverage
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: coverage
+          path: booking-app/apps/api/coverage
+          if-no-files-found: ignore
+          retention-days: 7
 
   e2e:
     name: End-to-end tests
