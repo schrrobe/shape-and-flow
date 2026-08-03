@@ -19,6 +19,15 @@ permissions:
 # pnpm's filter and --if-present semantics make its step a no-op that exits 0
 # rather than a red job, so CI stays green as the stages land and no later task
 # has to come back and edit this file.
+#
+# `pnpm install` runs the API's postinstall `prisma generate`, and prisma.config.ts
+# refuses to load without DATABASE_URL — so every job that installs needs one, even the
+# jobs that never touch a database. This value is deliberately a dead address: it lets
+# the schema resolve and would fail loudly rather than quietly reach something real. The
+# jobs that do use Postgres override it with their service container's URL.
+env:
+  DATABASE_URL: postgresql://ci:ci@127.0.0.1:1/unused?schema=public
+
 jobs:
   lint:
     name: Lint, format and typecheck

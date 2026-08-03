@@ -11,6 +11,8 @@ import { ref } from 'vue';
 
 import { api } from '../../api/client.js';
 import { useFocusStep } from '../../composables/useFocusStep.js';
+import { today } from '../../office/format.js';
+import { officeMessage } from '../../office/messages.js';
 import { blockingBookingCount, useCrudResource } from '../../office/useCrudResource.js';
 
 import WorkingHoursEditor from './WorkingHoursEditor.vue';
@@ -111,31 +113,41 @@ async function confirmArchive(): Promise<void> {
 
 async function openHours(employee: OfficeEmployee): Promise<void> {
   conflicts.value = [];
-  hours.value = { employee, segments: [] };
+  employees.clearError();
 
   // The calendar carries the stored week, which is the only endpoint that returns it —
-  // a one-day range is enough, because working hours are a rule rather than a day.
-  const calendar = await api.office.calendar({
-    from: '2026-01-01',
-    to: '2026-01-01',
-    employeeId: employee.id,
-  });
+  // a one-day range is enough, because working hours are a rule rather than a day. Today
+  // rather than a fixed date: a hardcoded day says nothing about why it was chosen and
+  // will eventually fall outside whatever range the server accepts.
+  try {
+    const calendar = await api.office.calendar({
+      from: today(),
+      to: today(),
+      employeeId: employee.id,
+    });
 
-  hours.value = {
-    employee,
-    segments: calendar.workingHours
-      .filter((segment) => segment.employeeId === employee.id)
-      .map((segment) => ({
-        weekday: segment.weekday,
-        startMinute: segment.startMinute,
-        endMinute: segment.endMinute,
-        breaks: segment.breaks.map((rest) => ({
-          startMinute: rest.startMinute,
-          endMinute: rest.endMinute,
-          ...(rest.label === null ? {} : { label: rest.label }),
+    hours.value = {
+      employee,
+      segments: calendar.workingHours
+        .filter((segment) => segment.employeeId === employee.id)
+        .map((segment) => ({
+          weekday: segment.weekday,
+          startMinute: segment.startMinute,
+          endMinute: segment.endMinute,
+          breaks: segment.breaks.map((rest) => ({
+            startMinute: rest.startMinute,
+            endMinute: rest.endMinute,
+            ...(rest.label === null ? {} : { label: rest.label }),
+          })),
         })),
-      })),
-  };
+    };
+  } catch (caught) {
+    // The editor stays shut, rather than opening on an empty week. An empty editor is not
+    // "no hours yet", it is a rota nobody stored — and "Save week" pressed from there
+    // replaces the real week with nothing.
+    hours.value = null;
+    employees.error.value = officeMessage(caught);
+  }
 }
 
 async function saveHours(next: ReplaceWorkingHoursRequest): Promise<void> {

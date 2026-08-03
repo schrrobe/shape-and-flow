@@ -8,7 +8,7 @@ import {
   SfSelect,
   SfSkeleton,
 } from '@shape-and-flow/booking-ui';
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 
 import { api } from '../../api/client.js';
@@ -120,18 +120,32 @@ const cancelValid = computed(
 );
 
 /**
- * A fresh idempotency key per attempt, minted when the dialog is confirmed.
+ * One idempotency key per intended operation, held across retries of it.
  *
- * Per attempt rather than per dialog: if the first try failed with a network error the
- * operator is deciding again, and reusing the key would replay whatever the server did
- * with it — including a refusal.
+ * Not per attempt. Retries here are always the operator's, and the usual reason to retry
+ * is exactly the case the key exists for: the server took the payment or sent the refund
+ * and the response never arrived. A fresh key on the second click makes that a second
+ * operation, and the money moves twice. Replaying the server's stored answer — including
+ * a refusal — is the correct outcome, because the server has already decided.
+ *
+ * A changed amount, method, note or reason *is* a different operation, so the key is
+ * dropped whenever one of them changes, and again once a dialog closes.
  */
-function newKey(): string {
-  return crypto.randomUUID();
+const attemptKey = ref<string | null>(null);
+
+function currentKey(): string {
+  attemptKey.value ??= crypto.randomUUID();
+
+  return attemptKey.value;
 }
+
+watch([paymentEuros, paymentMethod, paymentNote, refundEuros, refundReason], () => {
+  attemptKey.value = null;
+});
 
 function close(): void {
   dialog.value = null;
+  attemptKey.value = null;
   action.clearError();
 }
 
@@ -174,7 +188,7 @@ async function confirmPayment(): Promise<void> {
         method: paymentMethod.value,
         ...(paymentNote.value.trim() === '' ? {} : { note: paymentNote.value.trim() }),
       },
-      newKey(),
+      currentKey(),
     ),
   );
 
@@ -193,7 +207,7 @@ async function confirmRefund(): Promise<void> {
     api.office.bookings.refund(
       id.value,
       { amountCents: cents, reason: refundReason.value },
-      newKey(),
+      currentKey(),
     ),
   );
 
@@ -459,6 +473,7 @@ onMounted(run);
       confirm-label="Cancel booking"
       confirm-variant="danger"
       :busy="action.busy.value"
+      :confirm-disabled="!cancelValid"
       @close="close"
       @confirm="cancelValid ? confirmCancel() : undefined"
     >
@@ -486,6 +501,21 @@ onMounted(run);
         <p v-if="cancelRefundCents !== null && cancelRefundCents > 0" data-test="cancel-preview">
           {{ money(cancelRefundCents) }} will go back to the customer.
         </p>
+
+        <!-- Said rather than only enforced: a confirm button that ignores the click leaves
+             the operator looking for what they did wrong. -->
+        <p v-if="cancelReason.trim() === ''" class="text-danger text-sm" data-test="cancel-invalid">
+          A reason is required. The customer reads it.
+        </p>
+        <p
+          v-else-if="
+            cancelRefundEuros.trim() !== '' && (cancelRefundCents === null || cancelRefundCents < 0)
+          "
+          class="text-danger text-sm"
+          data-test="cancel-invalid"
+        >
+          The refund has to be an amount in euros, like 12,50 — or empty for none.
+        </p>
       </div>
     </SfModal>
 
@@ -494,6 +524,7 @@ onMounted(run);
       title="Record a payment"
       confirm-label="Record payment"
       :busy="action.busy.value"
+      :confirm-disabled="!paymentValid"
       @close="close"
       @confirm="paymentValid ? confirmPayment() : undefined"
     >
@@ -522,7 +553,22 @@ onMounted(run);
           :required="(paymentCents ?? 0) < 0"
         />
 
-        <p v-if="(paymentCents ?? 0) < 0 && paymentNote.trim() === ''" class="text-danger text-sm">
+        <!-- Empty is not wrong, it is unfilled: nothing is said until something is typed. -->
+        <p
+          v-if="paymentEuros.trim() !== '' && paymentCents === null"
+          class="text-danger text-sm"
+          data-test="payment-invalid"
+        >
+          That is not an amount in euros. Try something like 12,50.
+        </p>
+        <p v-else-if="paymentCents === 0" class="text-danger text-sm" data-test="payment-invalid">
+          Zero is not a payment.
+        </p>
+        <p
+          v-else-if="(paymentCents ?? 0) < 0 && paymentNote.trim() === ''"
+          class="text-danger text-sm"
+          data-test="payment-invalid"
+        >
           A correction needs a note explaining it.
         </p>
       </div>
@@ -534,6 +580,7 @@ onMounted(run);
       confirm-label="Send refund"
       confirm-variant="danger"
       :busy="action.busy.value"
+      :confirm-disabled="!refundValid"
       @close="close"
       @confirm="refundValid ? confirmRefund() : undefined"
     >
@@ -562,8 +609,23 @@ onMounted(run);
         <p
           v-else-if="refundCents !== null && data !== null && refundCents > data.paid.amountCents"
           class="text-danger text-sm"
+          data-test="refund-invalid"
         >
           That is more than they paid.
+        </p>
+        <p
+          v-else-if="refundEuros.trim() !== '' && refundCents === null"
+          class="text-danger text-sm"
+          data-test="refund-invalid"
+        >
+          That is not an amount in euros. Try something like 12,50.
+        </p>
+        <p
+          v-else-if="refundCents !== null && refundCents <= 0"
+          class="text-danger text-sm"
+          data-test="refund-invalid"
+        >
+          A refund has to be more than nothing.
         </p>
       </div>
     </SfModal>

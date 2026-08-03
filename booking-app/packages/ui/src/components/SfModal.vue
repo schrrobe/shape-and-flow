@@ -28,12 +28,20 @@ const props = withDefaults(
     cancelLabel?: string;
     confirmVariant?: 'primary' | 'danger';
     busy?: boolean;
+    /**
+     * Confirm is not available yet, because what the dialog holds is incomplete.
+     *
+     * A caller that ignores its own `@confirm` when the form is invalid produces a button
+     * that looks live and does nothing — no message, no focus change, nothing to correct.
+     */
+    confirmDisabled?: boolean;
   }>(),
   {
     confirmLabel: 'OK',
     cancelLabel: 'Cancel',
     confirmVariant: 'primary',
     busy: false,
+    confirmDisabled: false,
   },
 );
 
@@ -124,7 +132,12 @@ onBeforeUnmount(() => {
           <SfButton variant="secondary" :disabled="busy" @click="emit('close')">
             {{ cancelLabel }}
           </SfButton>
-          <SfButton :variant="confirmVariant" :loading="busy" @click="emit('confirm')">
+          <SfButton
+            :variant="confirmVariant"
+            :loading="busy"
+            :disabled="confirmDisabled"
+            @click="emit('confirm')"
+          >
             {{ confirmLabel }}
           </SfButton>
         </div>

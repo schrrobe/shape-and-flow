@@ -110,7 +110,9 @@ BEGIN
   -- nothing about overlap.
   SELECT array_agg(c.conname ORDER BY c.conname) INTO wrong_kind
   FROM pg_constraint c
-  WHERE c.conname IN ('bookings_no_overlap', 'blocked_times_no_overlap')
+  JOIN pg_namespace n ON n.oid = c.connamespace
+  WHERE n.nspname = 'public'
+    AND c.conname IN ('bookings_no_overlap', 'blocked_times_no_overlap')
     AND c.contype <> 'x';
 
   IF wrong_kind IS NOT NULL THEN
@@ -121,8 +123,13 @@ BEGIN
   -- The predicate is the part that decides *which* bookings block each other. A
   -- migration that added a status without adding it here would leave that status
   -- freely double-bookable, and nothing else in the system would notice.
-  SELECT pg_get_constraintdef(oid) INTO predicate
-  FROM pg_constraint WHERE conname = 'bookings_no_overlap';
+  -- Schema-qualified like the presence checks above: a same-named constraint in another
+  -- schema would otherwise satisfy the kind test or supply the definition read here, and
+  -- `SELECT ... INTO` takes an arbitrary row when more than one matches.
+  SELECT pg_get_constraintdef(c.oid) INTO predicate
+  FROM pg_constraint c
+  JOIN pg_namespace n ON n.oid = c.connamespace
+  WHERE n.nspname = 'public' AND c.conname = 'bookings_no_overlap';
 
   IF predicate NOT LIKE '%PENDING_PAYMENT%'
      OR predicate NOT LIKE '%EXPIRING%'

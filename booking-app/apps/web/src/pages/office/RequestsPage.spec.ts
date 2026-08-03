@@ -1,3 +1,4 @@
+import { SfSkeleton } from '@shape-and-flow/booking-ui';
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -249,5 +250,67 @@ describe('RequestsPage', () => {
     // §10.5 gives an employee `cancellation.decide: none`, so asking would be a request
     // that 403s on every load and an error banner on a screen that is working correctly.
     expect(calls.some((call) => call.url.includes('cancellation-requests'))).toBe(false);
+  });
+
+  it('keeps the cancellation queue when the reschedule queue fails', async () => {
+    cancellationItems = [cancellationRequest()];
+
+    vi.stubGlobal('fetch', (url: string) => {
+      if (url.includes('/office/reschedule-requests')) {
+        return Promise.resolve(json({ code: 'FORBIDDEN', correlationId: 'c1' }, 403));
+      }
+      if (url.includes('/office/cancellation-requests')) {
+        return Promise.resolve(json({ items: cancellationItems }));
+      }
+
+      return Promise.resolve(json({ code: 'NOT_FOUND', correlationId: 'c1' }, 404));
+    });
+
+    const session = useSession(pinia);
+    session.user = OWNER;
+
+    const wrapper = mount(RequestsPage, { global: { plugins: [pinia] } });
+    await flushPromises();
+
+    // Two queues, two capabilities, two outcomes. One failing call used to take the other
+    // queue with it, leaving a decider with nothing to decide and no reason why.
+    expect(wrapper.find('[data-test=cancellation-req-cancel-1]').exists()).toBe(true);
+    expect(wrapper.get('[data-test=error]').text()).not.toBe('');
+  });
+
+  it('shows the skeleton while the first load is in flight', async () => {
+    let release = (): void => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    vi.stubGlobal('fetch', (url: string) => {
+      if (
+        url.includes('/office/cancellation-requests') ||
+        url.includes('/office/reschedule-requests')
+      ) {
+        return held.then(() => json({ items: [] }));
+      }
+
+      return Promise.resolve(json({ code: 'NOT_FOUND', correlationId: 'c1' }, 404));
+    });
+
+    const session = useSession(pinia);
+    session.user = OWNER;
+
+    const wrapper = mount(RequestsPage, { global: { plugins: [pinia] } });
+    await flushPromises();
+
+    // The skeleton, not the empty message: "nothing is waiting for a decision" is a claim
+    // about the queues, and nobody has answered yet. `empty` used to include the loading
+    // flag, which made `loading && empty` a contradiction and the skeleton dead markup.
+    expect(wrapper.findComponent(SfSkeleton).exists()).toBe(true);
+    expect(wrapper.find('[data-test=empty]').exists()).toBe(false);
+
+    release();
+    await flushPromises();
+
+    expect(wrapper.findComponent(SfSkeleton).exists()).toBe(false);
+    expect(wrapper.find('[data-test=empty]').exists()).toBe(true);
   });
 });

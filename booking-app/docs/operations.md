@@ -186,9 +186,33 @@ Five containers running, the sixth exited 0, and `ready` reporting `database`, `
 ```bash
 sudo cp booking-app/infrastructure/nginx/booking.conf /etc/nginx/sites-available/
 sudo sed -i 's/buchung.example.com/<your hostname>/g' /etc/nginx/sites-available/booking.conf
+sudo mkdir -p /var/www/certbot
+
+# The certificate first, and the site enabled only afterwards. The order is not a
+# preference: the vhost's 443 block names `fullchain.pem`, so `nginx -t` fails while that
+# file does not exist, and enabling the site before the certificate exists leaves a broken
+# configuration that no reload will accept.
+#
+# `--standalone` rather than `--webroot` for this first issue, which is why nginx stops for
+# the length of one challenge. Webroot mode hands the challenge to whichever server block
+# currently owns `/.well-known/acme-challenge/`, and on a fresh machine that is the default
+# site serving `/var/www/html` — the challenge 404s and the reason is not obvious.
+sudo systemctl stop nginx
+sudo certbot certonly --standalone -d <your hostname>
+sudo systemctl start nginx
+
 sudo ln -s /etc/nginx/sites-available/booking.conf /etc/nginx/sites-enabled/
-sudo certbot certonly --webroot -w /var/www/certbot -d <your hostname>
 sudo nginx -t && sudo systemctl reload nginx
+
+# Renewals go back through the webroot, which this vhost now serves on port 80, so nginx
+# keeps running for every renewal after the first. Certbot rewrites the stored authenticator
+# only when it actually issues, which is what `--force-renewal` is for here — leave it out
+# and the renewal config keeps saying `standalone`, and the first unattended `certbot renew`
+# fails on a port nginx is holding.
+sudo certbot certonly --webroot -w /var/www/certbot -d <your hostname> \
+                      --cert-name <your hostname> --force-renewal
+sudo systemctl reload nginx
+sudo systemctl list-timers 'certbot*'
 ```
 
 TLS is not decoration here: the office session cookie is issued `Secure` whenever
@@ -256,10 +280,20 @@ docker compose --env-file booking-app/.env.production \
                -f booking-app/docker-compose.prod.yml up -d --wait
 ```
 
-This works whenever the newer migration was **additive** — a new column, a new table, a new
-enum value — because the older code simply does not use it. Design migrations that way and
-rollback stays a one-line change. Expand first, contract in a later release, once no running
-image needs the old shape.
+This works whenever the newer migration was **additive** — a new column, a new table —
+because the older code simply does not use it. Design migrations that way and rollback stays
+a one-line change. Expand first, contract in a later release, once no running image needs the
+old shape.
+
+**A new enum value is the exception.** It is additive in the schema and not additive in the
+data: while the newer image ran it wrote rows carrying that value, and the older image has no
+branch for it. Depending on how the value reaches the old code that is a Prisma validation
+error on read, or worse, a `switch` falling through to a default that treats a cancelled
+booking as a live one. So before treating an enum addition as rollback-safe, check what the
+previous image does with a row holding the new value. If the answer is not "handles it
+correctly", the rollback is the destructive case below: restore the pre-deploy backup, or
+avoid the situation in the first place by adding the value in one release and only writing it
+in the next.
 
 ### When a migration really must be reversed
 
@@ -299,20 +333,28 @@ rejected `checkout.session.completed` is a customer who paid and has no booking.
 Stripe allows several endpoints, each with its own secret. That is the whole trick — rotate by
 moving to a new endpoint, not by re-keying the old one.
 
+**There is a gap, and the swap is planned around it rather than pretended away.** The API
+verifies against exactly one `STRIPE_WEBHOOK_SECRET`, so whichever endpoint is not the one
+that secret belongs to has its deliveries rejected with a 4xx. Gapless rotation would need
+the verifier to accept either secret for the length of the window, and it does not. So do
+this at a quiet minute, keep the two steps close together, and replay what fell in between.
+
 1. In Stripe, add a **second** endpoint pointing at the same URL, subscribed to the same
-   events. Note its signing secret.
-2. Disable the **old** endpoint. Stripe stops sending to it; anything already in flight is
-   still signed with the old secret.
-3. Set `STRIPE_WEBHOOK_SECRET` to the new one and recreate the API.
+   events. Note its signing secret. Stripe starts delivering to it immediately, and those
+   deliveries are rejected until step 2 — expected, and replayed in step 5.
+2. Set `STRIPE_WEBHOOK_SECRET` to the new one and recreate the API. From here it is the
+   **old** endpoint's deliveries that are rejected instead.
+3. Disable the old endpoint. Stripe stops sending to it.
 4. Watch for rejected webhooks for a few minutes:
 
    ```bash
    curl -fsS -b <office session cookie> http://127.0.0.1:3001/api/health/detail | jq .unprocessedWebhooks
    ```
 
-5. Anything signed with the old secret and rejected during the swap is replayed from the
-   Stripe dashboard: **Developers → Events → Resend**. The API is idempotent per Stripe event
-   id, so replaying an event that did land changes nothing.
+5. Replay everything rejected during the swap from the Stripe dashboard: **Developers →
+   Events → Resend**. That means both directions — the new endpoint's deliveries from before
+   step 2, and the old endpoint's from between steps 2 and 3. The API is idempotent per
+   Stripe event id, so replaying an event that did land changes nothing.
 6. Delete the old endpoint.
 
 Rotating `RESEND_WEBHOOK_SECRET` and `TWILIO_AUTH_TOKEN` follows the same shape: add the new
