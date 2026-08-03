@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 
+import { addDays } from '../../composables/useLocalDate.js';
 import { minuteOfDay, money, time } from '../../office/format.js';
 
 import {
@@ -91,10 +92,7 @@ const gridStyle = computed(() => ({
 }));
 
 function shiftDate(days: number): void {
-  const anchored = new Date(`${props.date}T12:00:00Z`);
-  anchored.setUTCDate(anchored.getUTCDate() + days);
-
-  emit('changeDate', anchored.toISOString().slice(0, 10));
+  emit('changeDate', addDays(props.date, days));
 }
 
 /**

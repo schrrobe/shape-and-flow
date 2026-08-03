@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, useId } from 'vue';
 
+import { useFieldTestId } from './field-test-id.js';
+
 /**
  * A labelled text field that describes itself correctly.
  *
@@ -51,10 +53,14 @@ const describedBy = computed(() => {
 
   return ids.length === 0 ? undefined : ids.join(' ');
 });
+
+// The test id belongs on the control, not on the block around it.
+defineOptions({ inheritAttrs: false });
+const { testId, wrapperAttrs } = useFieldTestId();
 </script>
 
 <template>
-  <div class="flex flex-col gap-1.5">
+  <div class="flex flex-col gap-1.5" v-bind="wrapperAttrs">
     <label :for="id" class="text-sm font-medium text-text-primary">
       {{ label }}
       <span v-if="required" aria-hidden="true" class="text-primary">*</span>
@@ -62,6 +68,7 @@ const describedBy = computed(() => {
 
     <input
       :id="id"
+      :data-test="testId"
       :type="type"
       :value="modelValue"
       :required="required"

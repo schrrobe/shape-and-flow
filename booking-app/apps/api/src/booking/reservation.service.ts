@@ -4,10 +4,16 @@ import { AppError } from '../common/errors/app-error.js';
 import { isExclusionViolation, isUniqueViolation } from '../common/prisma-errors/prisma-errors.js';
 import { withSerializationRetry } from '../common/prisma-errors/serialization-retry.js';
 import { isSlotBookable } from '../domain/availability/engine.js';
+import { asOfficeSnapshot } from '../domain/availability/office-view.js';
 import { selectEmployee } from '../domain/employee-selection/select-employee.js';
 import { Money } from '../domain/money/money.js';
+import { resolveEffectivePrice } from '../domain/pricing/pricing.js';
 import { CLOCK } from '../domain/time/clock.js';
-import { instantToLocalDate } from '../domain/time/local-time.js';
+import {
+  addLocalDays,
+  instantToLocalDate,
+  wallClockToInstantOrThrow,
+} from '../domain/time/local-time.js';
 import { ManagementTokenService } from '../manage/management-token.service.js';
 import { OutboxRecorder } from '../messaging/outbox/outbox.recorder.js';
 import { JOB } from '../messaging/queues/job-contracts.js';
@@ -25,7 +31,7 @@ import type { CustomerInput } from './customer-upsert.service.js';
 import type { AvailabilitySnapshot } from '../domain/availability/types.js';
 import type { EmployeeCandidate } from '../domain/employee-selection/select-employee.js';
 import type { Clock } from '../domain/time/clock.js';
-import type { Booking, BookingOrigin } from '../prisma/client.js';
+import type { Booking, BookingOrigin, Prisma } from '../prisma/client.js';
 import type { Locale } from '@shape-and-flow/booking-contracts';
 
 /** How many references to try before giving up. Each collision is a 1-in-a-billion event. */
@@ -67,6 +73,14 @@ export interface ReserveInput {
   origin?: BookingOrigin | undefined;
   /** Absent means a customer, which is what every pre-Stage-8 caller meant. */
   actor?: ReserveActor | undefined;
+  /**
+   * The request's idempotency key, bound to the booking in the same transaction.
+   *
+   * Present only for the public route, which is the only caller whose retry has to
+   * find the reservation its previous attempt made. Absent leaves the booking
+   * unbound, exactly as before.
+   */
+  idempotencyKey?: string | undefined;
 }
 
 export interface ReserveResult {
@@ -143,15 +157,67 @@ export class ReservationService {
     );
   }
 
-  /** The service, with the buffers and price the booking will snapshot. */
+  /**
+   * The reservation a previous attempt at this key already made, if it is still live.
+   *
+   * The public route calls this before reserving. Without it the sequence that
+   * follows a Checkout failure is self-defeating: the first attempt committed a
+   * reservation and then failed at the provider, so the retry the 502 asked the
+   * customer for reserves the same slot again and is refused SLOT_UNAVAILABLE — by
+   * the customer's own hold. The only way out was to wait five minutes for the
+   * reservation to expire.
+   *
+   * `null` for anything not resumable — no claim, a booking that has since expired,
+   * been paid, or belongs to another tenant — and the caller reserves normally. The
+   * status and expiry conditions are the same ones `reserve()` would establish, so a
+   * resumed booking is indistinguishable from a fresh one.
+   */
+  async resume(idempotencyKey: string): Promise<ReserveResult | null> {
+    const organizationId = this.organizations.getOrganizationId();
+
+    const claimed = await this.prisma.idempotencyKey.findFirst({
+      where: { key: idempotencyKey, scope: 'booking.create', bookingId: { not: null } },
+      select: { bookingId: true },
+    });
+
+    if (claimed?.bookingId === null || claimed?.bookingId === undefined) return null;
+
+    // The whole row plus the employee, not a projection: `ReserveResult.booking` is a
+    // generated `Booking`, and a hand-listed set of scalars would have to be revisited
+    // every time the model gains a column.
+    const booking = await this.prisma.booking.findFirst({
+      where: {
+        id: claimed.bookingId,
+        organizationId,
+        status: BookingStatus.PENDING_PAYMENT,
+        expiresAt: { gt: this.clock.now() },
+      },
+      include: { employee: { select: { id: true, displayName: true } } },
+    });
+
+    if (booking === null) return null;
+
+    const { employee, ...reserved } = booking;
+
+    return {
+      booking: reserved,
+      employee,
+      price: Money.fromCents(reserved.priceCentsSnapshot, reserved.currency),
+    };
+  }
+
+  /**
+   * The service, with the buffers and name the booking will snapshot.
+   *
+   * Not the price: that depends on which employee performs it, so it is read with the
+   * assignment inside the transaction — see `loadEffectiveAssignment`.
+   */
   private async loadService(serviceId: string): Promise<{
     id: string;
     name: string;
     durationMinutes: number;
     prepBufferMinutes: number;
     cleanupBufferMinutes: number;
-    priceCents: number;
-    currency: string;
   }> {
     const organizationId = this.organizations.getOrganizationId();
 
@@ -163,8 +229,6 @@ export class ReservationService {
         durationMinutes: true,
         prepBufferMinutes: true,
         cleanupBufferMinutes: true,
-        priceCents: true,
-        currency: true,
       },
     });
 
@@ -239,10 +303,12 @@ export class ReservationService {
     const zone = this.organizations.getTimezone();
     const date = instantToLocalDate(startsAt, zone);
 
-    // The local day, as an instant range. Padded like the snapshot window for the same
-    // reason: local midnight is not UTC midnight.
-    const dayStart = new Date(`${date}T00:00:00.000Z`);
-    const dayEnd = new Date(dayStart.getTime() + 86_400_000);
+    // The local day, as an instant range, through the time primitives. Taking UTC
+    // midnight and adding 24 hours shifts the window by the zone's offset, so "how many
+    // bookings does this employee have today" counted part of the neighbouring day — and
+    // load balancing then handed the appointment to the busier person.
+    const dayStart = wallClockToInstantOrThrow(date, 0, zone);
+    const dayEnd = wallClockToInstantOrThrow(addLocalDays(date, 1, zone), 0, zone);
 
     const [employees, counts] = await Promise.all([
       this.prisma.employee.findMany({
@@ -270,6 +336,99 @@ export class ReservationService {
     }));
   }
 
+  /**
+   * The employee-service pairing, and the price that pairing actually costs.
+   *
+   * Two things the reservation cannot take on trust, resolved by one row read inside
+   * the transaction that will do the insert:
+   *
+   *  - **That this employee performs this service at all.** An explicitly requested
+   *    employee never passes through the availability snapshot's assignment filter —
+   *    `resolveEmployee` hands the id straight back — and the slot re-check only asks
+   *    whether the calendar is free. Without this read, naming an employee who was
+   *    never assigned the service, was hidden from online booking, or was archived
+   *    books them anyway.
+   *  - **What it costs.** `EmployeeService.priceOverrideCents` is what the public
+   *    catalog quotes; the booking has to snapshot the same number, or the customer is
+   *    shown one price and charged another.
+   *
+   * A missing pairing is a `NOT_FOUND` with the service's own message, deliberately
+   * indistinguishable from an unknown service: whether a particular employee exists,
+   * is hidden or is archived is not something a public caller gets to learn by probing.
+   * The office may book somebody who is not offered online — that is what
+   * `isBookableOnline` means — but nobody may book an archived one.
+   */
+  private async loadEffectiveAssignment(
+    tx: Prisma.TransactionClient,
+    input: { organizationId: string; serviceId: string; employeeId: string; actor: ReserveActor },
+  ): Promise<{ employee: { id: string; displayName: string }; price: Money }> {
+    const assignment = await tx.employeeService.findFirst({
+      where: {
+        organizationId: input.organizationId,
+        serviceId: input.serviceId,
+        employeeId: input.employeeId,
+        employee: {
+          archivedAt: null,
+          ...(input.actor.type === 'CUSTOMER' ? { isBookableOnline: true } : {}),
+        },
+        service: { archivedAt: null },
+      },
+      select: {
+        priceOverrideCents: true,
+        employee: { select: { id: true, displayName: true } },
+        service: { select: { priceCents: true, currency: true } },
+      },
+    });
+
+    if (assignment === null) {
+      throw new AppError('NOT_FOUND', { message: 'Service not found.' });
+    }
+
+    return {
+      employee: assignment.employee,
+      price: resolveEffectivePrice(assignment.service, assignment),
+    };
+  }
+
+  /**
+   * Take ownership of the in-flight idempotency key, so the retry can find this row.
+   *
+   * The claim is what turns a key from "this request ran" into "this request holds a
+   * reservation". `ReservationService.resume()` reads it back, and
+   * `IdempotencyService.abandon()` keeps a bound key alive for exactly that reason.
+   *
+   * A key that is not claimable — swept, completed, or never begun — is refused
+   * rather than ignored: reserving without a claim would produce a hold nothing can
+   * find again, which is the failure this exists to remove.
+   */
+  private async claimIdempotencyKey(
+    tx: Prisma.TransactionClient,
+    key: string | undefined,
+  ): Promise<string | null> {
+    if (key === undefined) return null;
+
+    const claimed = await tx.idempotencyKey.findFirst({
+      where: { key, scope: 'booking.create', state: 'IN_PROGRESS' },
+      select: { id: true },
+    });
+
+    if (claimed === null) {
+      throw new AppError('IDEMPOTENCY_KEY_REUSED', {
+        message: 'Booking attempt is not claimable.',
+      });
+    }
+
+    // `Booking.idempotencyKeyId` is unique, and a previous attempt at this key may
+    // still be holding it on a reservation that has since lapsed. That booking is
+    // finished with; the live attempt is the one that needs the claim.
+    await tx.booking.updateMany({
+      where: { idempotencyKeyId: claimed.id },
+      data: { idempotencyKeyId: null },
+    });
+
+    return claimed.id;
+  }
+
   /** The transaction: lock, re-check, upsert the customer, insert, record history. */
   private async insert(
     input: ReserveInput & { employeeId: string; actor: ReserveActor },
@@ -279,8 +438,6 @@ export class ReservationService {
       durationMinutes: number;
       prepBufferMinutes: number;
       cleanupBufferMinutes: number;
-      priceCents: number;
-      currency: string;
     },
     expiresAt: Date | null,
   ): Promise<ReserveResult> {
@@ -328,8 +485,6 @@ export class ReservationService {
       durationMinutes: number;
       prepBufferMinutes: number;
       cleanupBufferMinutes: number;
-      priceCents: number;
-      currency: string;
     },
     expiresAt: Date | null,
     organizationId: string,
@@ -352,10 +507,14 @@ export class ReservationService {
             });
           }
 
-          const employee = await tx.employee.findFirstOrThrow({
-            where: { id: employeeId, organizationId },
-            select: { id: true, displayName: true },
+          const { employee, price } = await this.loadEffectiveAssignment(tx, {
+            organizationId,
+            serviceId: service.id,
+            employeeId,
+            actor: input.actor,
           });
+
+          const claimedKeyId = await this.claimIdempotencyKey(tx, input.idempotencyKey);
 
           const customer = await this.customers.upsert(tx, organizationId, input.customer);
 
@@ -392,11 +551,12 @@ export class ReservationService {
               durationMinutesSnapshot: snapshot.service.durationMinutes,
               prepBufferMinutesSnapshot: snapshot.service.prepBufferMinutes,
               cleanupBufferMinutesSnapshot: snapshot.service.cleanupBufferMinutes,
-              priceCentsSnapshot: service.priceCents,
-              currency: service.currency,
+              priceCentsSnapshot: price.amountCents,
+              currency: price.currency,
               status,
               expiresAt,
               locale: input.locale,
+              ...(claimedKeyId === null ? {} : { idempotencyKeyId: claimedKeyId }),
               ...(input.customerNote === undefined ? {} : { customerNote: input.customerNote }),
               ...(office === null
                 ? {}
@@ -406,6 +566,29 @@ export class ReservationService {
                   }),
             },
           });
+
+          if (claimedKeyId !== null) {
+            await tx.idempotencyKey.update({
+              where: { id: claimedKeyId },
+              data: { bookingId: booking.id },
+            });
+          }
+
+          // Armed here rather than when the Checkout session is attached, because the
+          // reservation commits before the provider is called: a failure at the
+          // provider would otherwise leave a held slot with nothing scheduled to
+          // release it. Recorded rather than enqueued, so "the reservation exists" and
+          // "something will let it go" commit together.
+          if (expiresAt !== null) {
+            await this.outbox.record(tx, {
+              organizationId,
+              aggregateType: 'Booking',
+              aggregateId: booking.id,
+              eventType: JOB.BOOKING_EXPIRY_REQUESTED,
+              payload: { organizationId, bookingId: booking.id },
+              availableAt: expiresAt,
+            });
+          }
 
           // In the same transaction, so a booking can never exist without the row
           // that explains how it got its status.
@@ -439,19 +622,10 @@ export class ReservationService {
               payload: { organizationId, bookingId: booking.id, managementToken: token },
             });
 
-            return {
-              booking,
-              employee,
-              price: Money.fromCents(service.priceCents, service.currency),
-              managementToken: token,
-            };
+            return { booking, employee, price, managementToken: token };
           }
 
-          return {
-            booking,
-            employee,
-            price: Money.fromCents(service.priceCents, service.currency),
-          };
+          return { booking, employee, price };
         }),
       // Generous but bounded. The lock is held for the whole transaction, so a
       // stuck one delays other reservations for the same employee.
@@ -468,22 +642,10 @@ export class ReservationService {
  * office those are not the question being asked: an office booking somebody in two
  * hours is the normal case, and the check that matters is whether the slot is *free*.
  *
- * Expressed by overriding two settings rather than by branching around the check, so
- * everything else the engine enforces — the rota, breaks, closed days, approved leave,
- * and every existing booking — still applies to both paths from the same code.
+ * The relaxation itself lives in `asOfficeSnapshot`, which is also what
+ * `GET /office/availability` offers slots from — so what the office is shown and what it
+ * is allowed to book are the same set by construction.
  */
 function forActor(snapshot: AvailabilitySnapshot, actor: ReserveActor): AvailabilitySnapshot {
-  if (actor.type === 'CUSTOMER') return snapshot;
-
-  return {
-    ...snapshot,
-    settings: {
-      ...snapshot.settings,
-      minimumNoticeHours: 0,
-      // Far enough that the engine's clamp cannot cut off a date the office typed. The
-      // horizon exists to bound what a customer is *offered*, not what the business may
-      // write down.
-      bookingHorizonDays: 3650,
-    },
-  };
+  return actor.type === 'CUSTOMER' ? snapshot : asOfficeSnapshot(snapshot);
 }

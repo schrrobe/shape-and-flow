@@ -64,14 +64,14 @@ async function paidBooking(
   );
 
   const withCharge = options.withCharge !== false;
-  if (withCharge) payments.markPaid(session.sessionId);
+  if (withCharge) await payments.markPaid(session.sessionId);
 
   await prisma.payment.create({
     data: {
       organizationId: ctx.organization.id,
       bookingId: booking.id,
       stripeCheckoutSessionId: session.sessionId,
-      ...(withCharge ? { stripeChargeId: payments.chargeIdFor(session.sessionId) } : {}),
+      ...(withCharge ? { stripeChargeId: await payments.chargeIdFor(session.sessionId) } : {}),
       amountCents: PRICE,
       currency: 'EUR',
       status: 'SUCCEEDED',
@@ -138,7 +138,7 @@ describe('requesting a refund', () => {
     });
 
     // The money never moves without something durable saying it was supposed to.
-    expect(payments.refundCalls()).toHaveLength(0);
+    expect(await payments.refundCalls()).toHaveLength(0);
   });
 
   it('asks a worker to do the moving', async () => {
@@ -177,6 +177,47 @@ describe('requesting a refund', () => {
   });
 });
 
+describe('the remaining balance', () => {
+  it('subtracts pending refunds, not only settled ones', async () => {
+    // Reserving against `refundedAmountCents` alone counts nothing until Stripe
+    // answers, so two requests in that window can each pass and together exceed the
+    // charge — and the second one fails at the provider, after the office was told it
+    // had gone through.
+    await service.request({ bookingId, amountCents: 4000, reason: 'GOODWILL' });
+
+    await expect(
+      service.request({ bookingId, amountCents: 1000, reason: 'GOODWILL' }),
+    ).rejects.toMatchObject({ code: 'PAYMENT_NOT_REFUNDABLE' });
+  });
+
+  it('serialises concurrent reservations onto one refund', async () => {
+    const results = await Promise.allSettled([
+      service.request({ bookingId, amountCents: 3000, reason: 'GOODWILL' }),
+      service.request({ bookingId, amountCents: 3000, reason: 'GOODWILL' }),
+    ]);
+
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+
+    const payment = await prisma.payment.findFirstOrThrow({ where: { bookingId } });
+    expect(
+      (
+        await prisma.refund.aggregate({
+          where: { paymentId: payment.id },
+          _sum: { amountCents: true },
+        })
+      )._sum.amountCents,
+    ).toBe(3000);
+  });
+
+  it('still allows what is genuinely left', async () => {
+    await service.request({ bookingId, amountCents: 4000, reason: 'GOODWILL' });
+
+    await expect(
+      service.request({ bookingId, amountCents: 500, reason: 'GOODWILL' }),
+    ).resolves.toMatchObject({ refundId: expect.any(String) as string });
+  });
+});
+
 describe('executing a refund', () => {
   it('passes the stored idempotency key to the provider', async () => {
     const { refundId } = await service.request({
@@ -190,7 +231,7 @@ describe('executing a refund', () => {
 
     // The stored key, not a fresh one: a retry after a lost response must reach Stripe
     // with the same key and get the original refund back.
-    expect(payments.refundCalls()[0]?.idempotencyKey).toBe(row.idempotencyKey);
+    expect((await payments.refundCalls())[0]?.idempotencyKey).toBe(row.idempotencyKey);
   });
 
   it('settles the refund and records the provider id', async () => {
@@ -217,7 +258,7 @@ describe('executing a refund', () => {
 
     await Promise.all([service.execute(refundId), service.execute(refundId)]);
 
-    expect(payments.refundCalls()).toHaveLength(1);
+    expect(await payments.refundCalls()).toHaveLength(1);
     expect(await prisma.refund.count({ where: { bookingId } })).toBe(1);
   });
 
@@ -230,7 +271,7 @@ describe('executing a refund', () => {
     await service.execute(refundId);
 
     expect(await service.execute(refundId)).toBe('SUCCEEDED');
-    expect(payments.refundCalls()).toHaveLength(1);
+    expect(await payments.refundCalls()).toHaveLength(1);
   });
 
   it('records FAILED with the reason when the provider rejects', async () => {
@@ -260,7 +301,7 @@ describe('executing a refund', () => {
 
     // The charge id will not appear on its own, so retrying would never succeed.
     expect(await service.execute(refundId)).toBe('FAILED');
-    expect(payments.refundCalls()).toHaveLength(0);
+    expect(await payments.refundCalls()).toHaveLength(0);
   });
 });
 
@@ -346,7 +387,7 @@ describe('webhooks arriving out of order', () => {
       'SUCCEEDED',
     );
     // Already settled, so no provider call was made.
-    expect(payments.refundCalls()).toHaveLength(0);
+    expect(await payments.refundCalls()).toHaveLength(0);
   });
 
   it('never downgrades a settled refund on a late refund.updated', async () => {

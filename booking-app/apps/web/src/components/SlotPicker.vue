@@ -47,10 +47,15 @@ function isSelected(startsAt: string): boolean {
 <template>
   <div class="flex flex-col gap-4">
     <div class="flex items-center justify-between gap-2">
-      <SfButton variant="secondary" :disabled="!canGoBack" @click="emit('previousWeek')">
+      <SfButton
+        variant="secondary"
+        data-test="previous-week"
+        :disabled="!canGoBack"
+        @click="emit('previousWeek')"
+      >
         {{ t('booking.slotWeekPrevious') }}
       </SfButton>
-      <SfButton variant="secondary" @click="emit('nextWeek')">
+      <SfButton variant="secondary" data-test="next-week" @click="emit('nextWeek')">
         {{ t('booking.slotWeekNext') }}
       </SfButton>
     </div>
@@ -64,12 +69,12 @@ function isSelected(startsAt: string): boolean {
       </div>
     </SfAlert>
 
-    <SfAlert v-else-if="totalSlots === 0" tone="info">
+    <SfAlert v-else-if="totalSlots === 0" tone="info" data-test="no-slots">
       {{ t('booking.slotNoneInRange') }}
     </SfAlert>
 
     <div v-else class="flex flex-col gap-4">
-      <section v-for="day in days" :key="day.date">
+      <section v-for="day in days" :key="day.date" data-test="day" :data-date="day.date">
         <h2 class="text-sm font-semibold text-text-primary">
           <!-- Berlin local, from the response's own timezone. A customer booking from abroad must
                see the clock on the wall at the address they are coming to. -->
@@ -96,6 +101,7 @@ function isSelected(startsAt: string): boolean {
           <li v-for="slot in day.slots" :key="slot.startsAt">
             <button
               type="button"
+              data-test="slot"
               :aria-pressed="isSelected(slot.startsAt) ? 'true' : 'false'"
               class="rounded-sf border px-3 py-2 font-mono tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
               :class="

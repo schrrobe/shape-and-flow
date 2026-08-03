@@ -7,6 +7,8 @@ import { CLOCK } from '../domain/time/clock.js';
 import { OrganizationContextService } from '../organization/organization-context.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
+import { BookingFinancialsService } from './booking-financials.service.js';
+
 import type { Clock } from '../domain/time/clock.js';
 import type {
   BookingManualPayment,
@@ -34,6 +36,7 @@ export class ManualPaymentService {
     private readonly prisma: PrismaService,
     private readonly organizations: OrganizationContextService,
     private readonly audit: AuditService,
+    private readonly financials: BookingFinancialsService,
     @Inject(CLOCK) private readonly clock: Clock,
   ) {}
 
@@ -69,11 +72,16 @@ export class ManualPaymentService {
     const amount = Money.fromCents(input.amountCents, booking.currency);
     const paidAt = input.paidAt === undefined ? this.clock.now() : new Date(input.paidAt);
 
+    // Recorded against the booking the rest of the money is on, not the replacement the
+    // office happened to be looking at. Otherwise a chain's cash is split across rows
+    // and every reader has to reassemble it.
+    const rootBookingId = await this.financials.rootBookingId(booking.id);
+
     const row = await this.prisma.$transaction(async (tx) => {
       const created = await tx.manualPayment.create({
         data: {
           organizationId,
-          bookingId: booking.id,
+          bookingId: rootBookingId,
           amountCents: amount.amountCents,
           currency: amount.currency,
           method: input.method,
@@ -95,7 +103,10 @@ export class ManualPaymentService {
           `${amount.toString()} ${input.method} recorded against ${booking.reference}` +
           (input.amountCents < 0 ? ' (correction)' : ''),
         after: {
+          // The booking the office acted on, which is what an auditor is looking for.
+          // Where the row actually landed is recorded beside it.
           bookingId: booking.id,
+          financialRootBookingId: rootBookingId,
           amountCents: created.amountCents,
           method: created.method,
           paidAt: created.paidAt.toISOString(),

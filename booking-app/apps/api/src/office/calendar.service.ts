@@ -2,7 +2,12 @@ import { Injectable } from '@nestjs/common';
 
 import { EmployeeScopeService } from '../auth/employee-scope.service.js';
 import { BLOCKING_BOOKING_STATUSES } from '../booking/booking-status.machine.js';
-import { addLocalDays, wallClockToInstantOrThrow } from '../domain/time/local-time.js';
+import {
+  addLocalDays,
+  dateColumnToLocalDate,
+  localDateToDateColumn,
+  wallClockToInstantOrThrow,
+} from '../domain/time/local-time.js';
 import { OrganizationContextService } from '../organization/organization-context.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
@@ -100,8 +105,8 @@ export class CalendarService {
           ...employees,
           status: 'APPROVED',
           // Inclusive local dates, so an absence ending on `from` still covers that day.
-          startDate: { lte: this.dateOnly(query.to) },
-          endDate: { gte: this.dateOnly(query.from) },
+          startDate: { lte: localDateToDateColumn(query.to) },
+          endDate: { gte: localDateToDateColumn(query.from) },
         },
         select: {
           id: true,
@@ -115,7 +120,7 @@ export class CalendarService {
       this.prisma.closedDay.findMany({
         where: {
           organizationId,
-          date: { gte: this.dateOnly(query.from), lte: this.dateOnly(query.to) },
+          date: { gte: localDateToDateColumn(query.from), lte: localDateToDateColumn(query.to) },
         },
         select: { date: true, reason: true },
         orderBy: { date: 'asc' },
@@ -163,11 +168,14 @@ export class CalendarService {
       timeOff: timeOff.map((absence) => ({
         id: absence.id,
         employeeId: absence.employeeId,
-        startDate: toLocalDate(absence.startDate),
-        endDate: toLocalDate(absence.endDate),
+        startDate: dateColumnToLocalDate(absence.startDate),
+        endDate: dateColumnToLocalDate(absence.endDate),
         reason: absence.reason,
       })),
-      closedDays: closedDays.map((day) => ({ date: toLocalDate(day.date), reason: day.reason })),
+      closedDays: closedDays.map((day) => ({
+        date: dateColumnToLocalDate(day.date),
+        reason: day.reason,
+      })),
       workingHours: workingHours.map((segment) => ({
         employeeId: segment.employeeId,
         weekday: segment.weekday,
@@ -204,14 +212,4 @@ export class CalendarService {
   private startOfLocalDay(date: LocalDate, zone: string): Date {
     return wallClockToInstantOrThrow(date, 0, zone);
   }
-
-  /** A `YYYY-MM-DD` as the UTC midnight a Postgres `date` column compares against. */
-  private dateOnly(date: LocalDate): Date {
-    return new Date(`${date}T00:00:00.000Z`);
-  }
-}
-
-/** A `date` column comes back as UTC midnight, so the calendar part is the whole value. */
-function toLocalDate(value: Date): string {
-  return value.toISOString().slice(0, 10);
 }

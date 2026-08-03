@@ -22,7 +22,7 @@
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
     "test:integration": "pnpm api test:integration",
-    "test:e2e": "pnpm web test:e2e",
+    "test:e2e": "pnpm build && pnpm web test:e2e",
     "build": "pnpm -r --if-present build",
     "dev": "pnpm --parallel --filter @shape-and-flow/booking-api --filter @shape-and-flow/booking-web dev"
   }

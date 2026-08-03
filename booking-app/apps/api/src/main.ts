@@ -4,7 +4,6 @@ import { NestFactory } from '@nestjs/core';
 import helmet from 'helmet';
 import { Logger as PinoLogger } from 'nestjs-pino';
 
-import { AppModule } from './app.module.js';
 import { correlationMiddleware } from './common/correlation/correlation.middleware.js';
 import { InFlightRequests } from './common/shutdown/inflight.js';
 import { assertAppRole, loadConfig } from './config/env.schema.js';
@@ -20,6 +19,12 @@ async function bootstrap(): Promise<void> {
   // exiting. loadConfig is memoised, so the Nest provider reuses this result.
   const config = loadConfig();
   assertAppRole(config, 'api');
+
+  // Imported here rather than at the top of the file, and it has to be: AppModule
+  // decides at decorator-evaluation time whether the test-support router is part of
+  // the container, and a static import is hoisted above `loadEnvFile()` — so it
+  // would read an environment the .env file had not been applied to yet.
+  const { AppModule } = await import('./app.module.js');
 
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     bufferLogs: true,

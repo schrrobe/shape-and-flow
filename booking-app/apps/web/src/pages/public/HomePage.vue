@@ -50,7 +50,9 @@ onMounted(async () => {
     </ul>
 
     <div class="mt-6">
-      <SfButton @click="router.push({ name: 'booking-service' })">{{ t('home.start') }}</SfButton>
+      <SfButton data-test="start-booking" @click="router.push({ name: 'booking-service' })">
+        {{ t('home.start') }}
+      </SfButton>
     </div>
   </SfCard>
 </template>

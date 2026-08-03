@@ -28,7 +28,10 @@ const PROCESS_ENV_ALLOWED = [
   '**/*.config.ts',
   '**/*.config.js',
   '**/*.config.mjs',
-  '**/prisma/seed.ts',
+  // The seed's entrypoint. It lives under `src` so `nest build` compiles it —
+  // the e2e stack and a first deployment both run `node dist/seed.main.js` — and
+  // it reads DATABASE_URL before any container exists to read it from.
+  '**/src/seed.main.ts',
   '**/test/**',
   '**/e2e/**',
 ];
@@ -195,7 +198,7 @@ export function createEslintConfig(options = {}) {
         '**/test/**',
         '**/e2e/**',
         '**/*.config.{ts,js,mjs}',
-        '**/prisma/seed.ts',
+        '**/src/seed.main.ts',
       ],
       rules: { 'no-restricted-syntax': 'off' },
     },

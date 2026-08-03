@@ -39,4 +39,19 @@ export default defineConfig({
       '/api': { target: API_TARGET, changeOrigin: true },
     },
   },
+  /**
+   * What the end-to-end suite drives: the built bundle, proxied the same way.
+   *
+   * A production build rather than the dev server, because that is what ships — the
+   * chunking above, the minified templates, the router's lazy office chunk. The proxy
+   * has to be repeated here because `server` and `preview` are separate configurations
+   * in Vite, and a same-origin dev server with a cross-origin preview would mean the
+   * suite proving the cookie behaviour of a setup nobody deploys.
+   */
+  preview: {
+    port: 4173,
+    proxy: {
+      '/api': { target: API_TARGET, changeOrigin: true },
+    },
+  },
 });

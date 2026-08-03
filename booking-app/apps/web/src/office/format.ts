@@ -97,20 +97,6 @@ export function localDateLabel(value: string): string {
 }
 
 /**
- * A `YYYY-MM-DD` shifted by whole days.
- *
- * Anchored at noon UTC for the same reason `localDateLabel` is: midnight plus a DST
- * transition lands on the wrong side of a day boundary, and noon has eleven hours of
- * margin either way. Lives here rather than in each screen that needs a range end.
- */
-export function addDays(value: string, days: number): string {
-  const anchored = new Date(`${value}T12:00:00Z`);
-  anchored.setUTCDate(anchored.getUTCDate() + days);
-
-  return anchored.toISOString().slice(0, 10);
-}
-
-/**
  * Minutes from local midnight as a wall clock.
  *
  * `1440` is a legal value and means the next midnight, which renders as `24:00` — a
@@ -131,9 +117,14 @@ export function parseMinuteOfDay(value: string): number | null {
 
   const hour = Number(match[1]);
   const minute = Number(match[2]);
+
+  // Checked separately from the total, because a total is not enough: `09:75` sums to a
+  // legal 615 and would be saved back as a silent `10:15` nobody typed.
+  if (minute > 59) return null;
+
   const total = hour * 60 + minute;
 
-  return total >= 0 && total <= 1440 ? total : null;
+  return total <= 1440 ? total : null;
 }
 
 /**

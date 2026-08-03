@@ -159,7 +159,7 @@ async function openRefundFor(amount: string) {
 
   await wrapper.get('[data-test=action-refund]').trigger('click');
 
-  const input = inputInDialog('[data-test=refund-amount] input');
+  const input = inputInDialog('[data-test=refund-amount]');
   input.value = amount;
   input.dispatchEvent(new Event('input'));
   await flushPromises();
@@ -203,7 +203,7 @@ describe('BookingDetail refunds', () => {
 
     await confirm();
 
-    const input = inputInDialog('[data-test=refund-amount] input');
+    const input = inputInDialog('[data-test=refund-amount]');
     input.value = '20.00';
     input.dispatchEvent(new Event('input'));
     await flushPromises();

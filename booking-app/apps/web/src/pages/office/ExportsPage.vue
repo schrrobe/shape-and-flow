@@ -5,7 +5,8 @@ import { computed, ref } from 'vue';
 
 import { api } from '../../api/client.js';
 import { useFocusStep } from '../../composables/useFocusStep.js';
-import { addDays, localDateLabel, today } from '../../office/format.js';
+import { addDays } from '../../composables/useLocalDate.js';
+import { localDateLabel, today } from '../../office/format.js';
 
 /**
  * The accounting hand-off.

@@ -2,11 +2,16 @@ import { Injectable } from '@nestjs/common';
 
 import { EmployeeScopeService } from '../auth/employee-scope.service.js';
 import { AppError } from '../common/errors/app-error.js';
+import {
+  BookingFinancialsService,
+  emptyFinancials,
+} from '../payment/booking-financials.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
 import { receivedFrom } from './received.js';
 
 import type { OfficeSession } from '../auth/session.store.js';
+import type { BookingFinancials } from '../payment/booking-financials.service.js';
 import type {
   CancellationRequestListResponse,
   OfficeCancellationRequest,
@@ -25,8 +30,6 @@ const REQUEST_BOOKING = {
   priceCentsSnapshot: true,
   currency: true,
   customer: { select: { firstName: true, lastName: true } },
-  payments: { select: { amountCents: true, status: true } },
-  manualPayments: { select: { amountCents: true } },
 } as const;
 
 /**
@@ -43,6 +46,7 @@ export class RequestsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly scope: EmployeeScopeService,
+    private readonly financials: BookingFinancialsService,
   ) {}
 
   async listCancellations(
@@ -60,10 +64,12 @@ export class RequestsService {
       take: query.limit,
     });
 
+    const financials = await this.financials.loadMany(rows.map((row) => row.booking.id));
+
     return {
       items: rows.map((row): OfficeCancellationRequest => ({
         id: row.id,
-        booking: toRequestBooking(row.booking),
+        booking: toRequestBooking(row.booking, financials.get(row.booking.id)),
         reason: row.reason,
         requestedAt: row.requestedAt.toISOString(),
         decision: row.decision,
@@ -92,10 +98,12 @@ export class RequestsService {
       take: query.limit,
     });
 
+    const financials = await this.financials.loadMany(rows.map((row) => row.booking.id));
+
     return {
       items: rows.map((row): OfficeRescheduleRequest => ({
         id: row.id,
-        booking: toRequestBooking(row.booking),
+        booking: toRequestBooking(row.booking, financials.get(row.booking.id)),
         requestedStartsAt: row.requestedStartsAt.toISOString(),
         requestedEmployeeId: row.requestedEmployeeId,
         reason: row.reason,
@@ -110,29 +118,15 @@ export class RequestsService {
 
   /**
    * The request is this tenant's and this session may decide it.
-   *
-   * Returns what the customer has paid, which the caller needs in order to know whether
-   * the decision moves money — and therefore whether it needs the refund capability.
    */
-  async assertCancellationReachable(session: OfficeSession, id: string): Promise<number> {
+  async assertCancellationReachable(session: OfficeSession, id: string): Promise<void> {
     const request = await this.prisma.cancellationRequest.findFirst({
       where: { id, organizationId: session.organizationId },
-      select: {
-        booking: {
-          select: {
-            employeeId: true,
-            currency: true,
-            payments: { select: { amountCents: true, status: true } },
-            manualPayments: { select: { amountCents: true } },
-          },
-        },
-      },
+      select: { booking: { select: { employeeId: true } } },
     });
 
     if (request === null) throw notFound('Cancellation request not found.');
     this.scope.assertMayAccessEmployee(session, request.booking.employeeId);
-
-    return receivedFrom(request.booking, request.booking.currency).amountCents;
   }
 
   async assertRescheduleReachable(session: OfficeSession, id: string): Promise<void> {
@@ -146,18 +140,19 @@ export class RequestsService {
   }
 }
 
-function toRequestBooking(booking: {
-  id: string;
-  reference: string;
-  startsAt: Date;
-  employeeId: string;
-  serviceNameSnapshot: string;
-  priceCentsSnapshot: number;
-  currency: string;
-  customer: { firstName: string; lastName: string };
-  payments: { amountCents: number; status: string }[];
-  manualPayments: { amountCents: number }[];
-}): OfficeCancellationRequest['booking'] {
+function toRequestBooking(
+  booking: {
+    id: string;
+    reference: string;
+    startsAt: Date;
+    employeeId: string;
+    serviceNameSnapshot: string;
+    priceCentsSnapshot: number;
+    currency: string;
+    customer: { firstName: string; lastName: string };
+  },
+  financials: BookingFinancials | undefined,
+): OfficeCancellationRequest['booking'] {
   return {
     id: booking.id,
     reference: booking.reference,
@@ -166,7 +161,7 @@ function toRequestBooking(booking: {
     serviceName: booking.serviceNameSnapshot,
     customerName: `${booking.customer.firstName} ${booking.customer.lastName}`,
     price: { amountCents: booking.priceCentsSnapshot, currency: booking.currency },
-    paid: receivedFrom(booking, booking.currency).toJSON(),
+    paid: receivedFrom(financials ?? emptyFinancials(booking.id), booking.currency).toJSON(),
   };
 }
 

@@ -11,7 +11,8 @@ import { computed, onMounted, ref } from 'vue';
 
 import { api } from '../../api/client.js';
 import { useFocusStep } from '../../composables/useFocusStep.js';
-import { addDays, dateTime, localDateLabel, today } from '../../office/format.js';
+import { addDays } from '../../composables/useLocalDate.js';
+import { dateTime, localDateLabel, today } from '../../office/format.js';
 import { officeMessage } from '../../office/messages.js';
 import { blockingBookingCount, useCrudResource } from '../../office/useCrudResource.js';
 import { useSession } from '../../stores/session.js';

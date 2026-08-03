@@ -1,5 +1,9 @@
 <script setup lang="ts">
-import { SETTINGS_BOUNDS, updateOfficeSettingsSchema } from '@shape-and-flow/booking-contracts';
+import {
+  SETTINGS_BOUNDS,
+  cancellationFeePolicySchema,
+  updateOfficeSettingsSchema,
+} from '@shape-and-flow/booking-contracts';
 import {
   SfAlert,
   SfButton,
@@ -13,9 +17,13 @@ import { computed, onMounted, ref } from 'vue';
 import { api } from '../../api/client.js';
 import { useAsyncData } from '../../composables/useAsyncData.js';
 import { useFocusStep } from '../../composables/useFocusStep.js';
+import { euros } from '../../office/format.js';
 import { officeMessage } from '../../office/messages.js';
 
-import type { OfficeSettingsResponse } from '@shape-and-flow/booking-contracts';
+import type {
+  CancellationFeePolicy,
+  OfficeSettingsResponse,
+} from '@shape-and-flow/booking-contracts';
 
 /**
  * Every policy the domain reads, in one form.
@@ -42,7 +50,9 @@ const form = ref({
   minimumNoticeHours: '24',
   reservationTtlMinutes: '5',
   freeCancellationHours: '72',
+  cancellationFeePolicy: 'NONE',
   cancellationFeePercent: '0',
+  cancellationFeeAmountEuros: '0.00',
   dataRetentionDays: '1095',
   officeNotificationEmail: '',
   reminderOffsetsMinutes: '1440',
@@ -60,6 +70,40 @@ const BOOLEAN_OPTIONS = [
   { value: 'false', label: 'No' },
 ];
 
+/**
+ * Built from the enum, so a fourth policy cannot be added to the domain and quietly stay
+ * unreachable from the only screen that sets it — which is how the percentage below came
+ * to be inert for as long as it was.
+ */
+const FEE_POLICY_LABELS: Record<string, string> = {
+  NONE: 'Nothing is kept',
+  PERCENTAGE: 'A share of what was paid',
+  FIXED_AMOUNT: 'A fixed amount',
+};
+
+const FEE_POLICY_OPTIONS = cancellationFeePolicySchema.options.map((policy) => ({
+  value: policy,
+  label: FEE_POLICY_LABELS[policy] ?? policy,
+}));
+
+/** Euros as typed, in cents. Comma or point, because a German keyboard offers both. */
+function toCents(value: string): number {
+  return Math.round(Number(value.trim().replace(',', '.')) * 100);
+}
+
+/**
+ * The select hands back a string; the contract decides whether it is a policy.
+ *
+ * Every other field in this form is text on its way to a number, and this one is text on
+ * its way to an enum — narrowed where the body is built rather than held as a typed value
+ * the `<select>` would have to promise.
+ */
+function policyFrom(value: string): CancellationFeePolicy {
+  const parsed = cancellationFeePolicySchema.safeParse(value);
+
+  return parsed.success ? parsed.data : 'NONE';
+}
+
 function fill(settings: OfficeSettingsResponse): void {
   form.value = {
     schedulingIntervalMinutes: String(settings.schedulingIntervalMinutes),
@@ -67,7 +111,9 @@ function fill(settings: OfficeSettingsResponse): void {
     minimumNoticeHours: String(settings.minimumNoticeHours),
     reservationTtlMinutes: String(settings.reservationTtlMinutes),
     freeCancellationHours: String(settings.freeCancellationHours),
+    cancellationFeePolicy: settings.cancellationFeePolicy,
     cancellationFeePercent: String(settings.cancellationFeePercent),
+    cancellationFeeAmountEuros: euros(settings.cancellationFeeAmountCents),
     dataRetentionDays: String(settings.dataRetentionDays),
     officeNotificationEmail: settings.officeNotificationEmail,
     reminderOffsetsMinutes: settings.reminderOffsetsMinutes.join(', '),
@@ -82,7 +128,12 @@ const body = computed(() => ({
   minimumNoticeHours: Number(form.value.minimumNoticeHours),
   reservationTtlMinutes: Number(form.value.reservationTtlMinutes),
   freeCancellationHours: Number(form.value.freeCancellationHours),
+  // All three go every time, whichever policy is chosen. The two amounts are bounded
+  // values the API validates either way, and keeping them means switching the policy back
+  // does not silently lose the number that was set with it.
+  cancellationFeePolicy: policyFrom(form.value.cancellationFeePolicy),
   cancellationFeePercent: Number(form.value.cancellationFeePercent),
+  cancellationFeeAmountCents: toCents(form.value.cancellationFeeAmountEuros),
   dataRetentionDays: Number(form.value.dataRetentionDays),
   officeNotificationEmail: form.value.officeNotificationEmail.trim(),
   reminderOffsetsMinutes: form.value.reminderOffsetsMinutes
@@ -145,7 +196,12 @@ onMounted(async () => {
 
     <SfSkeleton v-if="loading && data === null" class="h-96" />
 
-    <form v-else class="space-y-4" @submit.prevent="submit">
+    <!--
+      On the settings the form appears only once the settings have been read. Settings are
+      owner-only, and hanging the form off "not loading" put an editable form with a save
+      button in front of anybody the API had just refused.
+    -->
+    <form v-else-if="data !== null" class="space-y-4" @submit.prevent="submit">
       <SfCard as="section" aria-labelledby="booking-heading">
         <h2 id="booking-heading" class="text-lg font-medium">Booking rules</h2>
 
@@ -191,6 +247,13 @@ onMounted(async () => {
       <SfCard as="section" aria-labelledby="cancellation-heading">
         <h2 id="cancellation-heading" class="text-lg font-medium">Cancellation</h2>
 
+        <p class="mt-1 text-sm text-text-secondary">
+          Inside the free window the fee is only a <em>suggestion</em>: an owner or admin decides
+          the amount when they answer the request, and the decision is recorded beside it. A fixed
+          amount is capped at what the customer actually paid, and nothing is kept from someone who
+          paid nothing.
+        </p>
+
         <div class="mt-3 grid gap-3 sm:grid-cols-2">
           <SfInput
             v-model="form.freeCancellationHours"
@@ -201,13 +264,30 @@ onMounted(async () => {
             data-test="free-cancellation"
           />
 
+          <SfSelect
+            :model-value="form.cancellationFeePolicy"
+            label="Fee inside that window"
+            :options="FEE_POLICY_OPTIONS"
+            data-test="fee-policy"
+            @update:model-value="(value) => (form.cancellationFeePolicy = value)"
+          />
+
           <SfInput
+            v-if="form.cancellationFeePolicy === 'PERCENTAGE'"
             v-model="form.cancellationFeePercent"
             type="number"
-            label="Fee inside that window (%)"
+            label="Share of what was paid (%)"
             :min="SETTINGS_BOUNDS.cancellationFeePercent.min"
             :max="SETTINGS_BOUNDS.cancellationFeePercent.max"
             data-test="fee-percent"
+          />
+
+          <SfInput
+            v-if="form.cancellationFeePolicy === 'FIXED_AMOUNT'"
+            v-model="form.cancellationFeeAmountEuros"
+            inputmode="decimal"
+            label="Amount kept (€)"
+            data-test="fee-amount"
           />
         </div>
       </SfCard>

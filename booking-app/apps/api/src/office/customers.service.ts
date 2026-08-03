@@ -6,6 +6,7 @@ import { isUniqueViolation } from '../common/prisma-errors/prisma-errors.js';
 import { Money } from '../domain/money/money.js';
 import { CLOCK } from '../domain/time/clock.js';
 import { OrganizationContextService } from '../organization/organization-context.service.js';
+import { BookingFinancialsService } from '../payment/booking-financials.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
 import { decodeCursor, keysetOrderBy, keysetWhere, toPage } from './cursor.js';
@@ -46,6 +47,7 @@ export class CustomersService {
     private readonly prisma: PrismaService,
     private readonly organizations: OrganizationContextService,
     private readonly audit: AuditService,
+    private readonly financials: BookingFinancialsService,
     @Inject(CLOCK) private readonly clock: Clock,
   ) {}
 
@@ -81,9 +83,6 @@ export class CustomersService {
         employeeId: true,
         priceCentsSnapshot: true,
         currency: true,
-        payments: { select: { amountCents: true, status: true } },
-        manualPayments: { select: { amountCents: true } },
-        refunds: { select: { amountCents: true, status: true } },
       },
       orderBy: { startsAt: 'desc' },
     });
@@ -92,9 +91,16 @@ export class CustomersService {
     // is money still with the business, and counting it as returned would understate the
     // relationship until Stripe answers.
     const currency = this.organizations.get().currency;
-    const lifetimeValue = bookings.reduce(
-      (total, booking) =>
-        total.plus(receivedFrom(booking, currency)).minus(refundedFrom(booking, currency)),
+    const financials = await this.financials.loadMany(bookings.map((booking) => booking.id));
+
+    // Summed per financial root, not per booking. Every link in a reschedule chain
+    // reports the same payment, so summing them would count one appointment's money
+    // three times for a customer who moved twice.
+    const roots = new Map([...financials.values()].map((entry) => [entry.rootBookingId, entry]));
+
+    const lifetimeValue = [...roots.values()].reduce(
+      (total, entry) =>
+        total.plus(receivedFrom(entry, currency)).minus(refundedFrom(entry, currency)),
       Money.zero(currency),
     );
 

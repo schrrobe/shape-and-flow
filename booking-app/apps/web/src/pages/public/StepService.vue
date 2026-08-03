@@ -43,14 +43,21 @@ function choose(service: { id: string; name: string; price: { amountCents: numbe
 
     <SfSkeleton v-if="loading" :lines="4" />
 
-    <SfAlert v-else-if="errorKey !== null" tone="danger" :title="t('errors.title')">
+    <SfAlert
+      v-else-if="errorKey !== null"
+      tone="danger"
+      data-test="error"
+      :title="t('errors.title')"
+    >
       {{ t(errorKey) }}
       <div class="mt-3">
         <SfButton variant="secondary" @click="run">{{ t('common.retry') }}</SfButton>
       </div>
     </SfAlert>
 
-    <SfAlert v-else-if="empty" tone="info">{{ t('booking.serviceEmpty') }}</SfAlert>
+    <SfAlert v-else-if="empty" tone="info" data-test="empty">
+      {{ t('booking.serviceEmpty') }}
+    </SfAlert>
 
     <div v-else class="flex flex-col gap-5">
       <section v-for="category in categories" :key="category.id">
@@ -62,6 +69,7 @@ function choose(service: { id: string; name: string; price: { amountCents: numbe
           <SfCard v-for="service in category.services" :key="service.id" as="li" :padded="false">
             <button
               type="button"
+              data-test="service-card"
               class="flex w-full items-baseline justify-between gap-4 rounded-sf p-4 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring hover:bg-surface-muted"
               @click="choose(service)"
             >

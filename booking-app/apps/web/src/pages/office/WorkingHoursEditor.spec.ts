@@ -19,9 +19,9 @@ async function addSegment(
   await wrapper.get('[data-test=add-segment]').trigger('click');
 
   const index = wrapper.findAll('[data-test^=start-]').length - 1;
-  await wrapper.get(`[data-test=weekday-${String(index)}] select`).setValue(input.weekday);
-  await wrapper.get(`[data-test=start-${String(index)}] input`).setValue(input.start);
-  await wrapper.get(`[data-test=end-${String(index)}] input`).setValue(input.end);
+  await wrapper.get(`[data-test=weekday-${String(index)}]`).setValue(input.weekday);
+  await wrapper.get(`[data-test=start-${String(index)}]`).setValue(input.start);
+  await wrapper.get(`[data-test=end-${String(index)}]`).setValue(input.end);
 }
 
 async function addBreak(
@@ -34,10 +34,10 @@ async function addBreak(
   const breakIndex =
     wrapper.findAll(`[data-test^=break-start-${String(segmentIndex)}-]`).length - 1;
   await wrapper
-    .get(`[data-test=break-start-${String(segmentIndex)}-${String(breakIndex)}] input`)
+    .get(`[data-test=break-start-${String(segmentIndex)}-${String(breakIndex)}]`)
     .setValue(input.start);
   await wrapper
-    .get(`[data-test=break-end-${String(segmentIndex)}-${String(breakIndex)}] input`)
+    .get(`[data-test=break-end-${String(segmentIndex)}-${String(breakIndex)}]`)
     .setValue(input.end);
 }
 
@@ -58,6 +58,18 @@ describe('WorkingHoursEditor', () => {
     expect(savedBody(wrapper)).toMatchObject({
       segments: [{ weekday: 'MONDAY', startMinute: 540, endMinute: 1080, breaks: [] }],
     });
+  });
+
+  it('refuses to save a start time with a minute past 59', async () => {
+    // `09:75` used to parse to a legal 615 minutes, so the shift saved silently as
+    // 09:00–10:15 — an hour the employee never agreed to work and customers were never
+    // offered, with nothing on screen to say so.
+    const wrapper = mount(WorkingHoursEditor, { props: { segments: [] } });
+
+    await addSegment(wrapper, { weekday: 'MONDAY', start: '09:75', end: '18:00' });
+
+    expect(wrapper.get('[data-test=save]').attributes('disabled')).toBeDefined();
+    expect(wrapper.emitted('save')).toBeUndefined();
   });
 
   it('flags an overlap before submitting, so the round trip is not the first feedback', async () => {
@@ -154,12 +166,10 @@ describe('WorkingHoursEditor', () => {
       },
     });
 
-    expect((wrapper.get('[data-test=start-0] input').element as HTMLInputElement).value).toBe(
-      '09:00',
+    expect((wrapper.get('[data-test=start-0]').element as HTMLInputElement).value).toBe('09:00');
+    expect((wrapper.get('[data-test=break-start-0-0]').element as HTMLInputElement).value).toBe(
+      '12:00',
     );
-    expect(
-      (wrapper.get('[data-test=break-start-0-0] input').element as HTMLInputElement).value,
-    ).toBe('12:00');
   });
 
   it('submits an empty week, which is how a shift is removed', async () => {

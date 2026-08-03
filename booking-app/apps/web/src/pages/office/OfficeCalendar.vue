@@ -8,6 +8,7 @@ import { api } from '../../api/client.js';
 import CalendarGrid from '../../components/office/CalendarGrid.vue';
 import { useAsyncData } from '../../composables/useAsyncData.js';
 import { useFocusStep } from '../../composables/useFocusStep.js';
+import { addDays } from '../../composables/useLocalDate.js';
 import { localDateLabel, today } from '../../office/format.js';
 import { officeMessage } from '../../office/messages.js';
 import { useSession } from '../../stores/session.js';
@@ -106,9 +107,7 @@ function goTo(next: Partial<{ date: string; employeeId: string }>): void {
 }
 
 function shift(days: number): void {
-  const anchored = new Date(`${date.value}T12:00:00Z`);
-  anchored.setUTCDate(anchored.getUTCDate() + days);
-  goTo({ date: anchored.toISOString().slice(0, 10) });
+  goTo({ date: addDays(date.value, days) });
 }
 
 onMounted(async () => {
@@ -136,6 +135,26 @@ watch([date, employeeFilter], run);
         <SfButton variant="secondary" data-test="next-day" @click="shift(1)">Next</SfButton>
         <SfButton variant="ghost" data-test="today" @click="goTo({ date: today() })">
           Today
+        </SfButton>
+
+        <!--
+          The day and the person on screen are carried into the form: the operator who
+          clicks this is looking at the gap they mean to fill.
+        -->
+        <SfButton
+          v-if="session.can('booking.create')"
+          data-test="new-booking"
+          @click="
+            router.push({
+              name: 'office-booking-new',
+              query: {
+                date,
+                ...(employeeFilter === '' ? {} : { employeeId: employeeFilter }),
+              },
+            })
+          "
+        >
+          New booking
         </SfButton>
       </div>
     </div>
