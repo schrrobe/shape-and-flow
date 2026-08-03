@@ -120,6 +120,7 @@ export class OfficeBookingsController {
       bookingId: id,
       officeUserId: session.officeUserId,
       reason: input.reason,
+      mayIssueRefunds: session.role === 'OWNER' || session.canIssueRefunds,
       ...(input.refund === undefined ? {} : { refundAmountCents: input.refund.amountCents }),
     });
 

@@ -10,7 +10,7 @@ while implementing that the plan could not have known.
 | Tasks complete    | 48 of 49 — only Task 3.4 remains; the 11-task review remediation is done          |
 | Unit tests        | 854 passing (489 api + 220 web + 37 contracts + 41 ui + 67 templates)             |
 | Integration tests | 739 passing                                                                       |
-| End-to-end tests  | 40 passing (20 scenarios × desktop and 360-pixel mobile)                           |
+| End-to-end tests  | 40 passing (18 scenarios × 2 projects + 4 desktop-only accessibility scenarios)   |
 | Gates             | `pnpm lint`, `format`, `typecheck`, `test`, `test:integration`, `test:e2e`, `build` all green |
 
 ## Execution order — vertical slice
@@ -178,10 +178,12 @@ closed: `NewBooking.vue` calls `POST /office/bookings`, and the settings card se
   form and its idempotency key alone — throwing those away would turn a retriable failure
   into a re-typed booking, and the key exists precisely so that a second attempt is safe.
 
-**Task 11.1 is complete.** Sixteen scenarios run against a real browser, a real API
+**Task 11.1 is complete.** Twenty-two scenarios run against a real browser, a real API
 process, a real worker process, real Postgres and real Redis, with only the payment, mail
-and SMS providers faked — and the built bundle behind `vite preview`, not a dev server. A
-customer books in German and gets a reference and a management link; the slot they hold
+and SMS providers faked — and the built bundle behind `vite preview`, not a dev server.
+Eighteen scenarios run in both the desktop and 360-pixel mobile projects; four
+accessibility scenarios are desktop-only, for 40 passing project runs in total. A customer
+books in German and gets a reference and a management link; the slot they hold
 vanishes for the next visitor; an English visitor gets English copy and an English email;
 a double-clicked submit produces one booking; an abandoned checkout blocks the slot and
 the expiry job gives it back; paying after the deadline keeps the appointment; cancelling

@@ -12,6 +12,7 @@ import { prisma, resetDatabase } from '../database.harness.js';
 import { SLOT_FRIDAY_0900, makeBooking, seedOrganization } from '../factories/index.js';
 import { loadOrganization } from '../public-app.harness.js';
 
+import type { DecideRequestInput } from '../../src/booking/cancellation.service.js';
 import type { ReserveInput } from '../../src/booking/reservation.service.js';
 import type { BookingStatus } from '../../src/prisma/client.js';
 import type { BookingTestApp } from '../booking-app.harness.js';
@@ -440,6 +441,7 @@ describe('the notifications a request produces', () => {
       requestId,
       officeUserId: ctx.owner.id,
       decision: 'REJECTED',
+      mayIssueRefunds: true,
       note: 'zu kurzfristig',
     });
 
@@ -452,7 +454,12 @@ describe('the notifications a request produces', () => {
   it('tells the customer once when their request is approved', async () => {
     const { booking, requestId } = await openRequest();
 
-    await service.decideRequest({ requestId, officeUserId: ctx.owner.id, decision: 'APPROVED' });
+    await service.decideRequest({
+      requestId,
+      officeUserId: ctx.owner.id,
+      decision: 'APPROVED',
+      mayIssueRefunds: true,
+    });
 
     expect(
       await prisma.notification.count({
@@ -469,6 +476,27 @@ describe('the notifications a request produces', () => {
       (event.payload as { customerNotificationAlreadyQueued?: boolean })
         .customerNotificationAlreadyQueued,
     ).toBe(true);
+  });
+});
+
+describe('business cancellation', () => {
+  it('keeps an unpaid booking confirmed when an explicit refund cannot be made', async () => {
+    const booking = await confirmedUnpaid();
+
+    await expect(
+      service.cancelByBusiness({
+        bookingId: booking.id,
+        officeUserId: ctx.owner.id,
+        reason: 'Krankheit',
+        refundAmountCents: 100,
+        mayIssueRefunds: true,
+      }),
+    ).rejects.toMatchObject({ code: 'PAYMENT_NOT_REFUNDABLE' });
+
+    expect((await prisma.booking.findUniqueOrThrow({ where: { id: booking.id } })).status).toBe(
+      'CONFIRMED',
+    );
+    expect(await prisma.refund.count({ where: { bookingId: booking.id } })).toBe(0);
   });
 });
 
@@ -573,6 +601,26 @@ describe('bookings that cannot be cancelled', () => {
 });
 
 describe('deciding a request', () => {
+  it('denies a refund when the capability decision is missing', async () => {
+    const { booking, requestId } = await openRequest();
+
+    await expect(
+      service.decideRequest({
+        requestId,
+        officeUserId: ctx.owner.id,
+        decision: 'APPROVED',
+      } as unknown as DecideRequestInput),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN_ROLE' });
+
+    expect((await prisma.booking.findUniqueOrThrow({ where: { id: booking.id } })).status).toBe(
+      'CONFIRMED',
+    );
+    expect(
+      (await prisma.cancellationRequest.findUniqueOrThrow({ where: { id: requestId } })).decision,
+    ).toBe('PENDING');
+    expect(await prisma.refund.count({ where: { bookingId: booking.id } })).toBe(0);
+  });
+
   it('approving cancels, refunds paid minus retained, and audits it', async () => {
     const { booking, requestId } = await openRequest();
 
@@ -580,6 +628,7 @@ describe('deciding a request', () => {
       requestId,
       officeUserId: ctx.owner.id,
       decision: 'APPROVED',
+      mayIssueRefunds: true,
       retainedAmountCents: 1000,
       note: 'Kulanz',
     });
@@ -611,7 +660,12 @@ describe('deciding a request', () => {
   it('falls back to the frozen suggestion when no amount is given', async () => {
     const { booking, requestId } = await openRequest();
 
-    await service.decideRequest({ requestId, officeUserId: ctx.owner.id, decision: 'APPROVED' });
+    await service.decideRequest({
+      requestId,
+      officeUserId: ctx.owner.id,
+      decision: 'APPROVED',
+      mayIssueRefunds: true,
+    });
 
     const refund = await prisma.refund.findFirstOrThrow({ where: { bookingId: booking.id } });
     expect(refund.amountCents).toBe(ctx.service30.priceCents / 2);
@@ -620,7 +674,12 @@ describe('deciding a request', () => {
   it('releases the slot once approved', async () => {
     const { requestId } = await openRequest();
 
-    await service.decideRequest({ requestId, officeUserId: ctx.owner.id, decision: 'APPROVED' });
+    await service.decideRequest({
+      requestId,
+      officeUserId: ctx.owner.id,
+      decision: 'APPROVED',
+      mayIssueRefunds: true,
+    });
 
     await expect(reservations.reserve(sameSlot())).resolves.toBeDefined();
   });
@@ -632,6 +691,7 @@ describe('deciding a request', () => {
       requestId,
       officeUserId: ctx.owner.id,
       decision: 'REJECTED',
+      mayIssueRefunds: true,
       note: 'zu kurzfristig',
     });
 
@@ -656,6 +716,7 @@ describe('deciding a request', () => {
         requestId,
         officeUserId: ctx.owner.id,
         decision: 'APPROVED',
+        mayIssueRefunds: true,
         retainedAmountCents: ctx.service30.priceCents + 500,
       }),
     ).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
@@ -664,10 +725,20 @@ describe('deciding a request', () => {
   it('refuses a second decision', async () => {
     const { requestId } = await openRequest();
 
-    await service.decideRequest({ requestId, officeUserId: ctx.owner.id, decision: 'REJECTED' });
+    await service.decideRequest({
+      requestId,
+      officeUserId: ctx.owner.id,
+      decision: 'REJECTED',
+      mayIssueRefunds: true,
+    });
 
     await expect(
-      service.decideRequest({ requestId, officeUserId: ctx.owner.id, decision: 'APPROVED' }),
+      service.decideRequest({
+        requestId,
+        officeUserId: ctx.owner.id,
+        decision: 'APPROVED',
+        mayIssueRefunds: true,
+      }),
     ).rejects.toMatchObject({ code: 'REQUEST_ALREADY_DECIDED' });
   });
 
@@ -679,6 +750,7 @@ describe('deciding a request', () => {
         requestId,
         officeUserId: ctx.owner.id,
         decision: 'APPROVED',
+        mayIssueRefunds: true,
         retainedAmountCents: -1,
       }),
     ).rejects.toThrow();

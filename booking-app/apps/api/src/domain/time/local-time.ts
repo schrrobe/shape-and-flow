@@ -188,9 +188,7 @@ export function addLocalDays(date: LocalDate, days: number, zone: string): Local
  * answers a *different question* and gets the day before for zones east of UTC.
  */
 export function localDateToDateColumn(date: LocalDate): Date {
-  if (!LOCAL_DATE_PATTERN.test(date)) {
-    invalid(`Local date must be YYYY-MM-DD, received "${date}".`);
-  }
+  parseLocalDate(date, 'UTC');
 
   return new Date(`${date}T00:00:00.000Z`);
 }

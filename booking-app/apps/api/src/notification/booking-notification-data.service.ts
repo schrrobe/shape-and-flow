@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 
+import { isAppError } from '../common/errors/app-error.js';
 import { ENV } from '../config/env.schema.js';
 import { OrganizationContextService } from '../organization/organization-context.service.js';
 import { BookingFinancialsService } from '../payment/booking-financials.service.js';
@@ -68,8 +69,8 @@ export class BookingNotificationData {
    * on a fresh connection would not see it.
    */
   async load(bookingId: string, tx?: Prisma.TransactionClient): Promise<BookingRow | null> {
-    const booking = await (tx ?? this.prisma).booking.findUnique({
-      where: { id: bookingId },
+    const booking = await (tx ?? this.prisma).booking.findFirst({
+      where: { id: bookingId, organizationId: this.organizations.getOrganizationId() },
       select: BOOKING_FOR_NOTIFICATION,
     });
 
@@ -78,7 +79,18 @@ export class BookingNotificationData {
       return null;
     }
 
-    return { ...booking, financials: await this.financials.load(bookingId, tx) };
+    try {
+      return { ...booking, financials: await this.financials.load(bookingId, tx) };
+    } catch (error) {
+      // The row can disappear between the two reads. That is the same harmless outcome
+      // as finding no booking initially; every other financial failure must still retry.
+      if (isAppError(error, 'NOT_FOUND')) {
+        this.logger.warn(`booking ${bookingId} no longer exists; no notification sent`);
+        return null;
+      }
+
+      throw error;
+    }
   }
 
   /** The fields every appointment template shares. */

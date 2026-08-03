@@ -3,9 +3,9 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { BookingFinancialsService } from '../../src/payment/booking-financials.service.js';
 import { prisma, resetDatabase } from '../database.harness.js';
 import { SLOT_FRIDAY_0900, makeBooking, seedOrganization } from '../factories/index.js';
+import { countingPrisma, queryCounter } from '../public-app.harness.js';
 
 import type { OrganizationContextService } from '../../src/organization/organization-context.service.js';
-import type { PrismaService } from '../../src/prisma/prisma.service.js';
 import type { SeedContext } from '../factories/index.js';
 
 /**
@@ -17,7 +17,7 @@ import type { SeedContext } from '../factories/index.js';
  * they all share now, so "which booking was paid" is answered in exactly one place.
  */
 
-const db = prisma as unknown as PrismaService;
+const db = countingPrisma;
 const NOW = new Date('2026-08-10T06:00:00.000Z');
 
 let ctx: SeedContext;
@@ -158,13 +158,20 @@ describe('load', () => {
 
 describe('loadMany', () => {
   it('groups a whole page onto its roots in a constant number of queries', async () => {
+    queryCounter.reset();
+    await service.loadMany([rootId]);
+    const oneBooking = queryCounter.total();
+
+    queryCounter.reset();
     const financials = await service.loadMany([rootId, firstChildId, secondChildId]);
+    const threeBookings = queryCounter.total();
 
     expect([...financials.keys()].sort()).toEqual([rootId, firstChildId, secondChildId].sort());
     for (const entry of financials.values()) {
       expect(entry.rootBookingId).toBe(rootId);
       expect(entry.payments).toHaveLength(1);
     }
+    expect(threeBookings).toBe(oneBooking);
   });
 
   it('returns an empty map for no ids at all', async () => {

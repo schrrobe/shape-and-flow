@@ -30,6 +30,7 @@ export interface CancelByBusinessInput {
   bookingId: string;
   officeUserId: string;
   reason: string;
+  mayIssueRefunds: boolean;
   /** Absent means no refund. Zero and absent are different: one is a decision. */
   refundAmountCents?: number | undefined;
 }
@@ -49,7 +50,7 @@ export interface DecideRequestInput {
    * both read inside the transaction, and comparing them outside it was what made
    * "accept the suggestion" — an omitted amount — look like a full refund.
    */
-  mayIssueRefunds?: boolean | undefined;
+  mayIssueRefunds: boolean;
 }
 
 /**
@@ -176,7 +177,7 @@ export class CancellationService {
             tx,
             booking,
             { kind: 'CUMULATIVE_TARGET', targetAmountCents: paid.amountCents },
-            { reason: RefundReason.CUSTOMER_CANCELLATION },
+            { reason: RefundReason.CUSTOMER_CANCELLATION, mayIssueRefunds: true },
           );
 
           const refundId = reserved.refundId;
@@ -389,7 +390,7 @@ export class CancellationService {
       {
         reason: RefundReason.CUSTOMER_CANCELLATION,
         officeUserId: input.officeUserId,
-        ...(input.mayIssueRefunds === undefined ? {} : { mayIssueRefunds: input.mayIssueRefunds }),
+        mayIssueRefunds: input.mayIssueRefunds,
       },
     );
 
@@ -473,6 +474,8 @@ export class CancellationService {
                     {
                       reason: RefundReason.BUSINESS_CANCELLATION,
                       officeUserId: input.officeUserId,
+                      mayIssueRefunds: input.mayIssueRefunds,
+                      ...(input.refundAmountCents > 0 ? { lenient: false } : {}),
                     },
                   )
                 ).refundId;
@@ -558,20 +561,25 @@ export class CancellationService {
     tx: Prisma.TransactionClient,
     booking: CancellableBooking,
     amount: RefundAmount,
-    options: { reason: RefundReason; officeUserId?: string; mayIssueRefunds?: boolean },
+    options: {
+      reason: RefundReason;
+      mayIssueRefunds: boolean;
+      officeUserId?: string;
+      lenient?: boolean;
+    },
   ): Promise<RefundReservationResult> {
     const reserved = await this.refunds.reserveInTransaction(tx, {
       bookingId: booking.id,
       amount,
       reason: options.reason,
-      lenient: true,
+      lenient: options.lenient ?? true,
       ...(options.officeUserId === undefined ? {} : { officeUserId: options.officeUserId }),
     });
 
     // Checked against what the reservation *actually* moves, not against what the
     // request asked for. Keeping everything moves nothing and needs no capability;
     // anything else does, and only the arithmetic above knows which this is.
-    if (reserved.additionalAmountCents > 0 && options.mayIssueRefunds === false) {
+    if (reserved.additionalAmountCents > 0 && !options.mayIssueRefunds) {
       // The same code and wording every other capability refusal uses, so a client
       // cannot tell a guard-level refusal from this one.
       throw new AppError('FORBIDDEN_ROLE', {

@@ -213,7 +213,12 @@ export class WorkerRegistrarService {
     fn: () => Promise<T>,
   ): Promise<T> {
     return await runWithCorrelation(payload.correlationId ?? newCorrelationId(), async () => {
-      await this.organizations.refresh();
+      try {
+        await this.organizations.refresh();
+      } catch (error) {
+        const detail = error instanceof Error ? error.stack : String(error);
+        this.logger.error('organization refresh failed; using last known settings', detail);
+      }
       return await fn();
     });
   }

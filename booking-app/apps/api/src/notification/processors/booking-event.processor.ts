@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 
 import { withSerializationRetry } from '../../common/prisma-errors/serialization-retry.js';
 import { Money } from '../../domain/money/money.js';
-import { receivedFrom, refundedFrom } from '../../office/received.js';
+import { receivedFrom } from '../../office/received.js';
 import { OrganizationContextService } from '../../organization/organization-context.service.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import { BookingNotificationData } from '../booking-notification-data.service.js';
@@ -138,7 +138,7 @@ export class BookingEventProcessor {
     if (booking === null) return;
 
     const byBusiness = booking.status === 'CANCELED_BY_BUSINESS';
-    const refunded = refundedFrom(booking.financials, booking.currency);
+    const refunded = this.promisedRefunds(booking);
 
     await withSerializationRetry(
       () =>
@@ -300,5 +300,15 @@ export class BookingEventProcessor {
    */
   private paidTotal(booking: BookingRow): Money {
     return receivedFrom(booking.financials, booking.currency);
+  }
+
+  /** Money already returned or reserved as part of the cancellation promise. */
+  private promisedRefunds(booking: BookingRow): Money {
+    return Money.sum(
+      booking.financials.refunds
+        .filter((refund) => refund.status === 'PENDING' || refund.status === 'SUCCEEDED')
+        .map((refund) => Money.fromCents(refund.amountCents, booking.currency)),
+      booking.currency,
+    );
   }
 }

@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 
 import { NestFactory } from '@nestjs/core';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { AppModule } from '../../src/app.module.js';
 import { correlationId, hasCorrelation } from '../../src/common/correlation/correlation.store.js';
@@ -94,15 +94,36 @@ describe('the correlation scope', () => {
     // literal: the seeded default is `false`, so asserting `false` would pass against a
     // worker that never refreshed anything.
     const cached = organizations.getSettings().smsRemindersEnabled;
-    await prisma.organizationSettings.updateMany({ data: { smsRemindersEnabled: !cached } });
+    try {
+      await prisma.organizationSettings.updateMany({ data: { smsRemindersEnabled: !cached } });
 
-    const enabled = await registrar.runWithJobScope({}, () =>
-      Promise.resolve(organizations.getSettings().smsRemindersEnabled),
-    );
+      const enabled = await registrar.runWithJobScope({}, () =>
+        Promise.resolve(organizations.getSettings().smsRemindersEnabled),
+      );
 
-    expect(enabled).toBe(!cached);
+      expect(enabled).toBe(!cached);
+    } finally {
+      await prisma.organizationSettings.updateMany({ data: { smsRemindersEnabled: cached } });
+      await organizations.refresh();
+    }
+  });
 
-    await prisma.organizationSettings.updateMany({ data: { smsRemindersEnabled: cached } });
+  it('runs with the last known settings when refresh fails', async () => {
+    const organizations = context.get(OrganizationContextService);
+    const cached = organizations.getSettings().smsRemindersEnabled;
+    const refresh = vi
+      .spyOn(organizations, 'refresh')
+      .mockRejectedValueOnce(new Error('database temporarily unavailable'));
+
+    try {
+      const enabled = await registrar.runWithJobScope({}, () =>
+        Promise.resolve(organizations.getSettings().smsRemindersEnabled),
+      );
+
+      expect(enabled).toBe(cached);
+    } finally {
+      refresh.mockRestore();
+    }
   });
 
   it('does not leak the scope outside the job', async () => {

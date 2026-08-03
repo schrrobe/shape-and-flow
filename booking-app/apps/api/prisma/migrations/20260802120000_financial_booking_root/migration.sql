@@ -26,7 +26,12 @@ WHERE booking.id = booking_roots.booking_id
 ALTER TABLE "bookings"
   ADD CONSTRAINT "bookings_financial_root_booking_id_fkey"
   FOREIGN KEY ("financial_root_booking_id") REFERENCES "bookings"("id")
-  ON DELETE RESTRICT ON UPDATE CASCADE;
+  ON DELETE RESTRICT ON UPDATE CASCADE
+  NOT VALID;
 
-CREATE INDEX "bookings_financial_root_booking_id_idx"
+ALTER TABLE "bookings"
+  VALIDATE CONSTRAINT "bookings_financial_root_booking_id_fkey";
+
+-- Prisma 7 does not wrap PostgreSQL custom migrations in a transaction.
+CREATE INDEX CONCURRENTLY "bookings_financial_root_booking_id_idx"
   ON "bookings"("financial_root_booking_id");
