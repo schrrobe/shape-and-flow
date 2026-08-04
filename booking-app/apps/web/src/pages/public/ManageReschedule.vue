@@ -9,7 +9,7 @@ import SlotPicker from '../../components/SlotPicker.vue';
 import WhatsAppButton from '../../components/WhatsAppButton.vue';
 import { useAsyncData } from '../../composables/useAsyncData.js';
 import { useFocusStep } from '../../composables/useFocusStep.js';
-import { addDays, localDate } from '../../composables/useLocalDate.js';
+import { addMonths, endOfMonth, localDate, startOfMonth } from '../../composables/useLocalDate.js';
 import { useManagementToken } from '../../composables/useManagementToken.js';
 
 const { t } = useI18n();
@@ -17,17 +17,20 @@ useFocusStep(t('manage.rescheduleTitle'));
 
 const { token, missing } = useManagementToken();
 
-/** A week at a time, like the booking flow — the same picker, the same rhythm. */
-const WINDOW_DAYS = 7;
-
 // eslint-disable-next-line no-restricted-syntax -- the reader's real today; see StepSlot
 const today = localDate(new Date());
-const from = ref(today);
+const monthAnchor = ref(startOfMonth(today));
+const selectedDate = ref(today);
 
 const selected = ref<Date | null>(null);
 const submitting = ref(false);
 const submitError = ref<string | null>(null);
 const requested = ref(false);
+
+/** Never asks for a day before today, even when the displayed month starts earlier. */
+function clampToToday(date: string): string {
+  return date < today ? today : date;
+}
 
 const {
   data: booking,
@@ -43,7 +46,7 @@ const {
 } = useAsyncData((signal) =>
   api.manage.availability(
     token.value ?? '',
-    { from: from.value, to: addDays(from.value, WINDOW_DAYS - 1) },
+    { from: clampToToday(monthAnchor.value), to: endOfMonth(monthAnchor.value) },
     signal,
   ),
 );
@@ -64,26 +67,33 @@ onMounted(() => {
   void run();
 });
 
-watch(from, () => {
-  // A slot belongs to the week it was offered in. Left standing across a range change it is a
+watch(monthAnchor, run);
+
+// Same fallback as StepSlot: freshly loaded data jumps the selection to the first day that has
+// something free, so paging to a month never lands the reader on an empty day by default.
+watch(availability, (value) => {
+  if (value === null) return;
+
+  const selectedHasSlots = value.days.some(
+    (day) => day.date === selectedDate.value && day.slots.length > 0,
+  );
+  if (selectedHasSlots) return;
+
+  const firstWithSlots = value.days.find((day) => day.slots.length > 0);
+  if (firstWithSlots !== undefined) selectedDate.value = firstWithSlots.date;
+});
+
+watch(selectedDate, () => {
+  // A slot belongs to the day it was offered in. Left standing across a day change it is a
   // highlighted choice the customer can no longer see, with the submit button still enabled —
   // and on a page that moves a real appointment, submitting an invisible time is a silent
   // wrong action rather than a cosmetic slip.
   selected.value = null;
-  void run();
 });
 
-/**
- * A week back, but never before today.
- *
- * `canGoBack` only asks whether `from` is past today, and `jumpTo` can leave `from` on any day
- * inside the loaded range — so from `today + 3` a full week back lands in the past and the
- * picker offers slots that have already happened. Clamping here rather than tightening the
- * button also covers the page that stays open across midnight, where `today` is stale.
- */
-function previousWeek(): void {
-  const candidate = addDays(from.value, -WINDOW_DAYS);
-  from.value = candidate < today ? today : candidate;
+function goToMonth(months: number): void {
+  monthAnchor.value = addMonths(monthAnchor.value, months);
+  selectedDate.value = clampToToday(monthAnchor.value);
 }
 
 async function submit(): Promise<void> {
@@ -139,11 +149,15 @@ async function submit(): Promise<void> {
           :loading="loading"
           :error-key="errorKey"
           :selected="selected"
-          :can-go-back="from > today"
+          :month-anchor="monthAnchor"
+          :selected-date="selectedDate"
+          :today="today"
+          :can-go-back="monthAnchor > startOfMonth(today)"
           @select="selected = $event"
-          @previous-week="previousWeek"
-          @next-week="from = addDays(from, WINDOW_DAYS)"
-          @jump-to="from = $event"
+          @select-date="selectedDate = $event"
+          @previous-month="goToMonth(-1)"
+          @next-month="goToMonth(1)"
+          @jump-to="selectedDate = $event"
           @retry="run"
         />
 

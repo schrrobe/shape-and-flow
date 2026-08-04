@@ -26,3 +26,19 @@ export function addDays(date: string, days: number): string {
   anchored.setUTCDate(anchored.getUTCDate() + days);
   return anchored.toISOString().slice(0, 10);
 }
+
+/** The first of the month `date` falls in. */
+export function startOfMonth(date: string): string {
+  return `${date.slice(0, 7)}-01`;
+}
+
+export function addMonths(date: string, months: number): string {
+  const anchored = new Date(`${date}T12:00:00Z`);
+  anchored.setUTCMonth(anchored.getUTCMonth() + months);
+  return anchored.toISOString().slice(0, 10);
+}
+
+/** The last day of the month `date` falls in. */
+export function endOfMonth(date: string): string {
+  return addDays(addMonths(startOfMonth(date), 1), -1);
+}

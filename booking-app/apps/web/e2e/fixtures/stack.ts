@@ -19,6 +19,26 @@ import type { APIRequestContext, Page } from '@playwright/test';
 /** Where the fake payment provider sends a customer instead of Stripe. */
 const FAKE_CHECKOUT_HOST = 'https://checkout.fake.local';
 
+/** Matches `DISPLAY_ZONE` in the web app — "today" has to mean today there, not here. */
+const BUSINESS_ZONE = 'Europe/Berlin';
+
+const isoDateFormatter = new Intl.DateTimeFormat('en-CA', {
+  timeZone: BUSINESS_ZONE,
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+});
+
+function todayIso(): string {
+  return isoDateFormatter.format(new Date());
+}
+
+function addDaysIso(date: string, days: number): string {
+  const anchored = new Date(`${date}T12:00:00Z`);
+  anchored.setUTCDate(anchored.getUTCDate() + days);
+  return anchored.toISOString().slice(0, 10);
+}
+
 /** Matches the seed and what playwright.config.ts hands the reset. */
 const OWNER = { email: 'owner@shape-and-flow.example', password: 'e2e-owner-password' };
 const STAFF = { email: 'mara@shape-and-flow.example', password: 'e2e-staff-password' };
@@ -259,12 +279,45 @@ export interface BookedSlot extends ChosenSlot {
 /**
  * One day's slots.
  *
- * Scoped by day because the picker shows a week at a time and "09:00" is on every
- * working day in it: an unscoped `hasText: '09:00'` matches five buttons, and the
- * assertion that a reserved slot has disappeared passes or fails for the wrong reason.
+ * Scoped by day because the picker's time list is for whichever single date the calendar
+ * has selected, and "09:00" is on every working day: an unscoped `hasText: '09:00'`
+ * matches five buttons, and the assertion that a reserved slot has disappeared passes or
+ * fails for the wrong reason.
  */
 export function slotsOn(page: Page, date: string) {
   return page.locator(`[data-test="day"][data-date="${date}"]`).getByTestId('slot');
+}
+
+/**
+ * Clicks the calendar to the first day, on or after `onOrAfter`, that has a slot.
+ *
+ * Paging "next month" until the header matches, rather than computing month deltas here:
+ * the calendar's own idea of what its next button does is the one that matters.
+ */
+export async function selectDateWithSlots(page: Page, onOrAfter: string): Promise<string> {
+  const targetMonth = onOrAfter.slice(0, 7);
+  const monthLabel = page.getByTestId('calendar-month');
+
+  for (let guard = 0; guard < 12; guard += 1) {
+    if ((await monthLabel.getAttribute('data-month')) === targetMonth) break;
+    await page.getByTestId('next-month').click();
+  }
+
+  // The calendar renders on first paint, before its availability fetch resolves — reading
+  // `data-has-slots` while that request is still in flight sees every day as slot-less.
+  await expect(page.getByTestId('calendar')).toHaveAttribute('data-loading', 'false');
+
+  const dates = await page
+    .locator('[data-test="calendar-day"][data-has-slots="true"]')
+    .evaluateAll((elements) => elements.map((element) => element.getAttribute('data-date') ?? ''));
+
+  const chosen = dates.filter((date) => date >= onOrAfter).sort().at(0);
+  if (chosen === undefined) {
+    throw new Error(`No day with a slot on or after ${onOrAfter} in ${targetMonth}.`);
+  }
+
+  await page.locator(`[data-test="calendar-day"][data-date="${chosen}"]`).click();
+  return chosen;
 }
 
 /**
@@ -277,7 +330,7 @@ export function slotsOn(page: Page, date: string) {
 export interface SlotPickerOptions {
   serviceName?: string;
   skipEmployeeChoice?: boolean;
-  /** Click "next week" this many times before reading the slots. */
+  /** Move the calendar this many weeks out before reading the slots. */
   weeksAhead?: number;
 }
 
@@ -311,8 +364,8 @@ export async function openSlotPicker(page: Page, options: SlotPickerOptions = {}
   await expect(page.getByTestId('slot').first()).toBeVisible();
 
   // Further out than the default free-cancellation window, when a test needs it.
-  for (let week = 0; week < (options.weeksAhead ?? 0); week += 1) {
-    await page.getByTestId('next-week').click();
+  if (options.weeksAhead !== undefined && options.weeksAhead > 0) {
+    await selectDateWithSlots(page, addDaysIso(todayIso(), options.weeksAhead * 7));
     await expect(page.getByTestId('slot').first()).toBeVisible();
   }
 }

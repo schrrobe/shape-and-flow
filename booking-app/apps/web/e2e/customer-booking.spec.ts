@@ -10,6 +10,7 @@ import {
   manageUrlFrom,
   reserveSlot,
   resetStack,
+  selectDateWithSlots,
   slotsOn,
   stubCheckout,
 } from './fixtures/stack.js';
@@ -91,8 +92,9 @@ test('a reserved slot disappears for the next visitor while the first is still p
     if ((await any.count()) > 0) await any.click();
     else await second.getByTestId('employee-card').first().click();
 
-    // The same week the first visitor booked in, one click along like they did.
-    await second.getByTestId('next-week').click();
+    // The same date the first visitor booked, found the same way: the earliest day, at
+    // or after that day, that still has something free.
+    await selectDateWithSlots(second, reserved.date);
     await expect(second.getByTestId('slot').first()).toBeVisible();
     // The held slot is gone even though nobody has paid: PENDING_PAYMENT blocks.
     await expect(slotsOn(second, reserved.date).filter({ hasText: reserved.label })).toHaveCount(0);
