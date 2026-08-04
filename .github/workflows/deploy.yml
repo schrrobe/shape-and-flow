@@ -312,12 +312,20 @@ jobs:
 
           # A separate step rather than a dependency of `up`: migrate has `restart: 'no'`
           # and exits, and `up --wait` treats a container that is gone as a failure.
+          #
+          # `-T </dev/null` is not decoration. This script *is* the remote shell's stdin —
+          # it arrives over the heredoc and bash reads it as it goes — and `compose run`
+          # attaches stdin to the container by default. Without this it read the rest of
+          # this file into the migrate container: the seed and the `up` below never ran,
+          # bash hit end-of-input, and the step exited 0. A deployment with no application
+          # containers reported success, and the first thing to notice was the smoke test
+          # failing to connect. Every stdin-reading command in here needs the same guard.
           echo "==> migrating"
-          $COMPOSE run --rm migrate
+          $COMPOSE run --rm -T migrate </dev/null
 
           if [ "$SEED" = "true" ]; then
             echo "==> seeding"
-            $COMPOSE run --rm migrate pnpm prisma:seed
+            $COMPOSE run --rm -T migrate pnpm prisma:seed </dev/null
           fi
 
           echo "==> starting"
