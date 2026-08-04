@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { MAX_CALENDAR_RANGE_DAYS } from '@shape-and-flow/booking-contracts';
 import {
   SfAlert,
   SfButton,
@@ -16,8 +17,6 @@ import { dateTime, localDateLabel, today } from '../../office/format.js';
 import { officeMessage } from '../../office/messages.js';
 import { blockingBookingCount, useCrudResource } from '../../office/useCrudResource.js';
 import { useSession } from '../../stores/session.js';
-
-import { MAX_CALENDAR_RANGE_DAYS } from '@shape-and-flow/booking-contracts';
 
 import type {
   BlockedTime,
