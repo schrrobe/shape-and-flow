@@ -101,16 +101,22 @@ export async function seedDemoOrganization(
   });
 
   // ── employees ───────────────────────────────────────────────────────────────
+  // Ids are left to Prisma, which generates cuids.
+  //
+  // Readable ids like `seed-employee-mara-vogt` were convenient to grep for, but every
+  // employee id in the contracts is validated with `cuidSchema` — including the
+  // `employeeId` query parameter of `GET /public/availability`. A seeded id that is not a
+  // cuid is therefore rejected by the very API the seed exists to demonstrate: the office
+  // UI reads the employee, sends its id back, and the request fails validation. Nothing
+  // outside this file referred to those literals.
   const employeeSeeds = [
     {
-      id: 'seed-employee-mara-vogt',
       firstName: 'Mara',
       lastName: 'Vogt',
       displayOrder: 0,
       worksSaturday: true,
     },
     {
-      id: 'seed-employee-jonas-reit',
       firstName: 'Jonas',
       lastName: 'Reit',
       displayOrder: 1,
@@ -121,16 +127,16 @@ export async function seedDemoOrganization(
   const employees = [];
   for (const seed of employeeSeeds) {
     const displayName = `${seed.firstName} ${seed.lastName}`;
-    const legacyEmployee = await prisma.employee.findFirst({
+    // Re-running the seed stays safe without an upsert key: the display name is what
+    // identifies a seeded employee, and the lookup below finds whatever an earlier run
+    // created — including rows created back when the ids were literals.
+    const existing = await prisma.employee.findFirst({
       where: { organizationId, displayName },
     });
     const employee =
-      legacyEmployee ??
-      (await prisma.employee.upsert({
-        where: { id: seed.id },
-        update: {},
-        create: {
-          id: seed.id,
+      existing ??
+      (await prisma.employee.create({
+        data: {
           organizationId,
           firstName: seed.firstName,
           lastName: seed.lastName,

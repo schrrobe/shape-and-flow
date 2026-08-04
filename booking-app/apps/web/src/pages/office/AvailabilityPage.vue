@@ -17,6 +17,8 @@ import { officeMessage } from '../../office/messages.js';
 import { blockingBookingCount, useCrudResource } from '../../office/useCrudResource.js';
 import { useSession } from '../../stores/session.js';
 
+import { MAX_CALENDAR_RANGE_DAYS } from '@shape-and-flow/booking-contracts';
+
 import type {
   BlockedTime,
   ClosedDay,
@@ -40,7 +42,15 @@ const session = useSession();
 
 useFocusStep('Availability');
 
-const RANGE_DAYS = 90;
+// Derived from the contract rather than written as a number.
+//
+// This was `90`, while `blockedTimeListQuerySchema` and `closedDayListQuerySchema` both
+// reject a span wider than MAX_CALENDAR_RANGE_DAYS — so every request this page made was a
+// 400, and the page rendered empty lists on a working backend. A literal here and a limit
+// there is a mismatch that no type checks, which is why the constant is imported instead.
+//
+// `inclusiveDaySpan` counts both endpoints, so the offset is one less than the limit.
+const RANGE_DAYS = MAX_CALENDAR_RANGE_DAYS - 1;
 
 const from = ref(today());
 const to = computed(() => addDays(from.value, RANGE_DAYS));
