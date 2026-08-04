@@ -349,20 +349,29 @@ jobs:
           # a file of secrets, so a value containing `$(...)` would run on the server.
           #
           # The ports still come from the env file, so exactly one place knows them.
+          #
+          # Missing or empty takes the same default the compose file publishes on —
+          # `${API_PUBLISH_PORT:-3001}` and `${WEB_PUBLISH_PORT:-8080}`. Refusing instead
+          # would fail a deployment that is up and serving on the default, which is the
+          # mistake this step has already made once. Present but not a number is still a
+          # refusal: compose would reject it too, and a guess would hide it.
+          #
+          # `tail -n 1` matches compose's dotenv rule that a later duplicate key wins.
           port_of() {
             local value
             value=$(sed -n "s/^$1=//p" "./.env.$ENV_NAME" | tail -n 1 | tr -d '\r')
             case $value in
-              '' | *[!0-9]*)
-                echo "$1 is missing or not numeric in .env.$ENV_NAME" >&2
+              '') value=$2 ;;
+              *[!0-9]*)
+                echo "$1 in .env.$ENV_NAME is not a port number" >&2
                 exit 1
                 ;;
             esac
             printf '%s\n' "$value"
           }
 
-          API_PORT=$(port_of API_PUBLISH_PORT)
-          WEB_PORT=$(port_of WEB_PUBLISH_PORT)
+          API_PORT=$(port_of API_PUBLISH_PORT 3001)
+          WEB_PORT=$(port_of WEB_PUBLISH_PORT 8080)
 
           echo "==> readiness on 127.0.0.1:$API_PORT"
           # /api/health/ready reports database, Redis and applied migrations by name, so a
