@@ -236,7 +236,86 @@ booking-app/infrastructure/scripts/backup.sh
 
 ---
 
+## Runbook: automatic deployment (stage and dev)
+
+Stage and dev deploy themselves from a green pipeline. Production does not — see the manual
+runbook below.
+
+| Merge into | Deploys to | Hostname                        |
+| ---------- | ---------- | ------------------------------- |
+| `main`     | `stage`    | `stage.buchung.shapeandflow.de` |
+| `fusion`   | `dev`      | `dev.buchung.shapeandflow.de`   |
+
+`.github/workflows/ci.yml` calls `.github/workflows/deploy.yml` as its last job, with
+`needs` naming every other job. A deployment cannot outrun the tests.
+
+**Nothing is built on the server.** The runner builds all four images and pushes them to
+`ghcr.io/<owner>/sf-booking-{api,worker,migrate,web}`, tagged with the commit sha.
+`docker-compose.registry.yml` overlays `docker-compose.prod.yml` to replace every `build:`
+with that image and `pull_policy: always`, so the server pulls or stops — it never falls back
+to compiling on two shared cores while another environment is serving.
+
+On the server the workflow copies both compose files into `/opt/booking/<env>/`, writes
+`.env.<env>` there from the environment secret at mode 600, then pulls, starts the data
+stores, runs `migrate` to completion, starts the rest, and finally checks
+`/api/health/ready` and one SPA deep link. A failure prints `compose ps` and 200 log lines.
+
+`IMAGE_TAG` and `GHCR_OWNER` are written into `.env.<env>` rather than exported, so the file
+on the server always records which commit is running:
+
+```bash
+ssh robert@<host> 'grep IMAGE_TAG /opt/booking/stage/.env.stage'   # needs sudo, file is 600
+```
+
+### What it needs configured
+
+Repository variables `DEPLOY_HOST`, `DEPLOY_USER`, `SSH_KNOWN_HOSTS`; repository secret
+`SSH_PRIVATE_KEY`; and an **environment** secret `ENV_FILE` in each of `stage` and `dev`
+holding the whole env file. Same secret name in both environments, which is why the workflow
+never branches to find it. The environments carry a branch policy — `stage` accepts only
+`main`, `dev` only `fusion` — so a stray trigger cannot reach the wrong secret.
+
+`SSH_KNOWN_HOSTS` is a variable, not a secret, deliberately: the host key is public
+information, and as a secret it would be masked to `***` in exactly the logs where an SSH
+failure has to be read.
+
+### First deployment of an environment
+
+Two things the workflow will not do for you.
+
+The placeholder services still hold the ports, and `up` fails with *port is already
+allocated*. Retire the pair for that environment first:
+
+```bash
+sudo systemctl disable --now placeholder@booking-stage-web placeholder@booking-stage-api
+```
+
+And an empty database needs seeding once, because the API refuses to start until
+`DEFAULT_ORGANIZATION_SLUG` resolves. Seeding is not automatic — on every push it would
+quietly overwrite whatever staging data exists:
+
+```bash
+gh workflow run deploy.yml -f env_name=stage -f seed=true
+```
+
+### Redeploy, and rollback without a build
+
+```bash
+gh workflow run deploy.yml -f env_name=stage                      # same commit again
+gh workflow run deploy.yml -f env_name=stage -f image_tag=<sha>   # an older image
+```
+
+Passing `image_tag` skips the build job entirely: the images for that sha are already in the
+registry, and rebuilding them would defeat the point of naming a known-good one. The schema
+caveats in [Runbook: rollback](#runbook-rollback) apply unchanged — rolling back images does
+not roll back migrations.
+
+---
+
 ## Runbook: routine deployment
+
+This is the **production** path, and the one to use on any host that has no workflow pointed
+at it. Stage and dev are deployed by the pipeline above.
 
 ```bash
 git pull
@@ -282,6 +361,12 @@ So a rollback rolls back **images**, not the schema:
 sed -i "s/^IMAGE_TAG=.*/IMAGE_TAG=<previous tag>/" booking-app/.env.production
 docker compose --env-file booking-app/.env.production \
                -f booking-app/docker-compose.prod.yml up -d --wait
+```
+
+On stage and dev the same thing is one command, and it skips the build:
+
+```bash
+gh workflow run deploy.yml -f env_name=stage -f image_tag=<previous sha>
 ```
 
 This works whenever the newer migration was **additive** — a new column, a new table —

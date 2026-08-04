@@ -2,13 +2,19 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # main deploys to stage, fusion deploys to dev. See the `deploy` job at the bottom.
+    branches: [main, fusion]
   pull_request:
 
-# A new push to the same ref supersedes the previous run.
+# A new push to the same ref supersedes the previous run — but only for pull requests.
+#
+# On a branch push this pipeline ends in a deployment, and cancelling a run mid-deploy can
+# interrupt `prisma migrate deploy` and leave a half-applied schema. With
+# cancel-in-progress false a second push queues behind the first instead, which costs a few
+# runner minutes and cannot corrupt anything.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -269,3 +275,36 @@ jobs:
       - name: Tear down
         if: always()
         run: $COMPOSE down -v
+
+  # ── Deployment ──────────────────────────────────────────────────────────────
+  #
+  # The last job of a green pipeline, and the only one that touches a real server.
+  #
+  #   main   → stage   (stage.buchung.shapeandflow.de)
+  #   fusion → dev     (dev.buchung.shapeandflow.de)
+  #
+  # `needs` names every other job on purpose. A deployment that can outrun the end-to-end
+  # tests is a deployment that will eventually ship a commit those tests would have caught,
+  # and the few minutes saved are not worth finding that out on stage.
+  deploy:
+    name: Deploy
+    needs: [lint, test, integration, e2e, build, deploy-check]
+    # Pull requests never deploy. Fork PRs get no secrets either way, but this is the line
+    # that makes it true regardless of how the triggers change later.
+    if: github.event_name == 'push'
+    permissions:
+      contents: read
+      # Granted here rather than in deploy.yml because a reusable workflow's token can only
+      # be *downgraded* from the caller's, and this file sets `contents: read` at the top.
+      # Without this line the GHCR push fails with 403.
+      packages: write
+    uses: ./.github/workflows/deploy.yml
+    with:
+      env_name: ${{ github.ref_name == 'main' && 'stage' || 'dev' }}
+      # Seeding is deliberately not automatic. `prisma:seed` is needed once, for an empty
+      # database, because the API refuses to start without DEFAULT_ORGANIZATION_SLUG
+      # resolving — but running it on every push is how staging data gets quietly
+      # overwritten. Use the workflow_dispatch input for the first deploy of an
+      # environment: `gh workflow run deploy.yml -f env_name=dev -f seed=true`.
+      seed: false
+    secrets: inherit

@@ -1,0 +1,51 @@
+# The overlay that turns the production stack from something this host *builds* into
+# something it *pulls*. Applied on top of docker-compose.prod.yml, never on its own:
+#
+#     docker compose --env-file .env.stage \
+#                    -f docker-compose.prod.yml -f docker-compose.registry.yml up -d --wait
+#
+# Only the four application images are listed. Postgres and Redis already come from Docker
+# Hub by tag in the base file and need nothing from here.
+#
+# ── Why `pull_policy` is the load-bearing line ───────────────────────────────
+#
+# The base file keeps its `build:` sections, and Compose's rule is that when both `build`
+# and `image` are set the behaviour follows `pull_policy` — with none specified it pulls
+# first and *builds from source if the image is not found in the registry*.
+#
+# On this server that fallback is the worst possible outcome. A mistyped tag would not fail
+# in a second; it would start a pnpm install and a Vite build on two shared cores while the
+# other environments are serving traffic, and the box has 4 GB of swap standing by to make
+# that slow rather than fatal. `always` deletes the fallback: pull, or stop.
+#
+# It also removes a subtler failure. Without it, a *stale* local image with the right name
+# satisfies the run and the deploy reports success while serving the previous build.
+#
+# ── Why the tag is required rather than defaulted ────────────────────────────
+#
+# `${IMAGE_TAG:?}` refuses an empty value instead of resolving to `:latest`. The registry
+# also carries the moving `stage` and `dev` tags, so a silent `:latest` would deploy
+# whatever was pushed last by anyone, which is the one thing a deployment must never do.
+#
+# The deploy workflow writes IMAGE_TAG into `.env.<suffix>` on the server rather than
+# exporting it into the shell. Two reasons: the precedence between a shell variable and
+# `--env-file` is then never in question, and the file left on the server records which
+# commit is actually running — the first thing you want when something looks wrong.
+services:
+  api:
+    image: ghcr.io/${GHCR_OWNER:?GHCR_OWNER is required}/sf-booking-api:${IMAGE_TAG:?IMAGE_TAG is required}
+    pull_policy: always
+
+  worker:
+    image: ghcr.io/${GHCR_OWNER:?GHCR_OWNER is required}/sf-booking-worker:${IMAGE_TAG:?IMAGE_TAG is required}
+    pull_policy: always
+
+  # The gate keeps `restart: 'no'` from the base file. It must be pulled like the others,
+  # because the schema it applies has to come from the same commit as the API that reads it.
+  migrate:
+    image: ghcr.io/${GHCR_OWNER:?GHCR_OWNER is required}/sf-booking-migrate:${IMAGE_TAG:?IMAGE_TAG is required}
+    pull_policy: always
+
+  web:
+    image: ghcr.io/${GHCR_OWNER:?GHCR_OWNER is required}/sf-booking-web:${IMAGE_TAG:?IMAGE_TAG is required}
+    pull_policy: always
