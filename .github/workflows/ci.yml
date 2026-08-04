@@ -291,7 +291,12 @@ jobs:
     needs: [lint, test, integration, e2e, build, deploy-check]
     # Pull requests never deploy. Fork PRs get no secrets either way, but this is the line
     # that makes it true regardless of how the triggers change later.
-    if: github.event_name == 'push'
+    #
+    # The two branches are named rather than left implicit. `env_name` below reads "main
+    # means stage, anything else means dev", so adding a third branch to the triggers above
+    # would silently deploy it to dev — over whatever the team was looking at. Naming them
+    # here makes that combination run the tests and stop, which is the safe default.
+    if: ${{ github.event_name == 'push' && (github.ref_name == 'main' || github.ref_name == 'fusion') }}
     permissions:
       contents: read
       # Granted here rather than in deploy.yml because a reusable workflow's token can only

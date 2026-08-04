@@ -249,6 +249,13 @@ runbook below.
 `.github/workflows/ci.yml` calls `.github/workflows/deploy.yml` as its last job, with
 `needs` naming every other job. A deployment cannot outrun the tests.
 
+> **A branch only deploys once it carries these workflow files.** For a `push` event GitHub
+> runs the workflow from the ref that was pushed, not from the default branch — so a `fusion`
+> branched before this landed triggers nothing at all, not even CI, because its own `ci.yml`
+> still lists only `main`. Merge `main` into it once and every later push deploys. The same
+> applies to any new deploy branch: add it to the triggers *and* to the `if` on the `deploy`
+> job, then get that commit onto the branch.
+
 **Nothing is built on the server.** The runner builds all four images and pushes them to
 `ghcr.io/<owner>/sf-booking-{api,worker,migrate,web}`, tagged with the commit sha.
 `docker-compose.registry.yml` overlays `docker-compose.prod.yml` to replace every `build:`
