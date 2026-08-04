@@ -12,14 +12,18 @@ Every command is run **from the repository root**.
 
 Six containers, one of which exits before the others start.
 
-| Container            | What it is                            | Reachable from                |
-| -------------------- | ------------------------------------- | ----------------------------- |
-| `sf-booking-postgres` | PostgreSQL 17, one named volume       | the compose network only      |
-| `sf-booking-redis`    | Redis 7, append-only                  | the compose network only      |
-| `sf-booking-migrate`  | one-shot `prisma migrate deploy`      | nothing; it exits             |
-| `sf-booking-api`      | the HTTP API                          | `127.0.0.1:3001`              |
-| `sf-booking-worker`   | queues, sweeps and notifications      | nothing; it serves no port    |
-| `sf-booking-web`      | nginx serving the built bundle        | `127.0.0.1:8080`              |
+| Container                        | What it is                       | Reachable from             |
+| -------------------------------- | -------------------------------- | -------------------------- |
+| `sf-booking-postgres-production` | PostgreSQL 17, one named volume  | the compose network only   |
+| `sf-booking-redis-production`    | Redis 7, append-only             | the compose network only   |
+| `sf-booking-migrate-production`  | one-shot `prisma migrate deploy` | nothing; it exits          |
+| `sf-booking-api-production`      | the HTTP API                     | `127.0.0.1:3001`           |
+| `sf-booking-worker-production`   | queues, sweeps and notifications | nothing; it serves no port |
+| `sf-booking-web-production`      | nginx serving the built bundle   | `127.0.0.1:8080`           |
+
+The `-production` suffix is `STACK_SUFFIX`, which defaults to `production`. It is what lets a
+second environment run on the same host; see [More than one environment](#more-than-one-environment).
+Every `docker exec` below assumes the default. For another environment, substitute its suffix.
 
 In front of them, on the host, is nginx: `infrastructure/nginx/booking.conf`. It terminates
 TLS, sends `/api` to the API container and everything else to the web container. It is the
@@ -232,7 +236,100 @@ booking-app/infrastructure/scripts/backup.sh
 
 ---
 
+## Runbook: automatic deployment (stage and dev)
+
+Stage and dev deploy themselves from a green pipeline. Production does not — see the manual
+runbook below.
+
+| Merge into | Deploys to | Hostname                        |
+| ---------- | ---------- | ------------------------------- |
+| `main`     | `stage`    | `stage.buchung.shapeandflow.de` |
+| `fusion`   | `dev`      | `dev.buchung.shapeandflow.de`   |
+
+`.github/workflows/ci.yml` calls `.github/workflows/deploy.yml` as its last job, with
+`needs` naming every other job. A deployment cannot outrun the tests.
+
+> **A branch only deploys once it carries these workflow files.** For a `push` event GitHub
+> runs the workflow from the ref that was pushed, not from the default branch — so a `fusion`
+> branched before this landed triggers nothing at all, not even CI, because its own `ci.yml`
+> still lists only `main`. Merge `main` into it once and every later push deploys. The same
+> applies to any new deploy branch: add it to the triggers *and* to the `if` on the `deploy`
+> job, then get that commit onto the branch.
+
+**Nothing is built on the server.** The runner builds all four images and pushes them to
+`ghcr.io/<owner>/sf-booking-{api,worker,migrate,web}`, tagged with the commit sha.
+`docker-compose.registry.yml` overlays `docker-compose.prod.yml` to replace every `build:`
+with that image and `pull_policy: always`, so the server pulls or stops — it never falls back
+to compiling on two shared cores while another environment is serving.
+
+On the server the workflow copies both compose files into `/opt/booking/<env>/`, writes
+`.env.<env>` there from the environment secret at mode 600, then pulls, starts the data
+stores, runs `migrate` to completion, starts the rest, and finally checks
+`/api/health/ready` and one SPA deep link. A failure prints `compose ps` and 200 log lines.
+
+`IMAGE_TAG` and `GHCR_OWNER` are written into `.env.<env>` rather than exported, so the file
+on the server always records which commit is running:
+
+```bash
+# sudo, not because of the directory but because the file is mode 600 and owned by `deploy`.
+ssh -t robert@<host> 'sudo grep IMAGE_TAG /opt/booking/stage/.env.stage'
+```
+
+### What it needs configured
+
+Repository variables `DEPLOY_HOST`, `DEPLOY_USER`, `SSH_KNOWN_HOSTS`; repository secret
+`SSH_PRIVATE_KEY`; and an **environment** secret `ENV_FILE` in each of `stage` and `dev`
+holding the whole env file. Same secret name in both environments, which is why the workflow
+never branches to find it.
+
+The two environments carry deliberately different branch policies. `stage` accepts only
+`main`, so no stray trigger and no hand-dispatch can reach its secret from a feature branch.
+`dev` accepts **all** branches, which is what makes the manual dispatch below useful — dev is
+the environment meant to be thrown a branch. The asymmetry is enforced twice: by the
+environment policy, and by a guard in the workflow's `prepare` job that refuses a stage
+deploy from any ref other than `main` before four images are built.
+
+`SSH_KNOWN_HOSTS` is a variable, not a secret, deliberately: the host key is public
+information, and as a secret it would be masked to `***` in exactly the logs where an SSH
+failure has to be read.
+
+### First deployment of an environment
+
+Two things the workflow will not do for you.
+
+The placeholder services still hold the ports, and `up` fails with *port is already
+allocated*. Retire the pair for that environment first:
+
+```bash
+sudo systemctl disable --now placeholder@booking-stage-web placeholder@booking-stage-api
+```
+
+And an empty database needs seeding once, because the API refuses to start until
+`DEFAULT_ORGANIZATION_SLUG` resolves. Seeding is not automatic — on every push it would
+quietly overwrite whatever staging data exists:
+
+```bash
+gh workflow run deploy.yml -f env_name=stage -f seed=true
+```
+
+### Redeploy, and rollback without a build
+
+```bash
+gh workflow run deploy.yml -f env_name=stage                      # same commit again
+gh workflow run deploy.yml -f env_name=stage -f image_tag=<sha>   # an older image
+```
+
+Passing `image_tag` skips the build job entirely: the images for that sha are already in the
+registry, and rebuilding them would defeat the point of naming a known-good one. The schema
+caveats in [Runbook: rollback](#runbook-rollback) apply unchanged — rolling back images does
+not roll back migrations.
+
+---
+
 ## Runbook: routine deployment
+
+This is the **production** path, and the one to use on any host that has no workflow pointed
+at it. Stage and dev are deployed by the pipeline above.
 
 ```bash
 git pull
@@ -278,6 +375,12 @@ So a rollback rolls back **images**, not the schema:
 sed -i "s/^IMAGE_TAG=.*/IMAGE_TAG=<previous tag>/" booking-app/.env.production
 docker compose --env-file booking-app/.env.production \
                -f booking-app/docker-compose.prod.yml up -d --wait
+```
+
+On stage and dev the same thing is one command, and it skips the build:
+
+```bash
+gh workflow run deploy.yml -f env_name=stage -f image_tag=<previous sha>
 ```
 
 This works whenever the newer migration was **additive** — a new column, a new table —
@@ -545,3 +648,47 @@ would otherwise dominate the volume.
 
 The edge nginx logs separately, in `/var/log/nginx/booking.access.log`. A request that appears
 there and not in the API log never reached the API.
+
+---
+
+## More than one environment
+
+The stack is parameterized on a single variable, `STACK_SUFFIX`, which defaults to
+`production` so every command in this document works unchanged. It is substituted into the
+three things that are not otherwise unique per environment:
+
+- the compose **project name**, which is what scopes the named volumes
+- every **`container_name`**. These are global to the Docker daemon, so without the suffix a
+  second stack fails with `container name is already in use`
+- the **`env_file`** each container reads, so a stage deploy cannot be handed production's
+  secrets
+
+Ports are already variables (`API_PUBLISH_PORT`, `WEB_PUBLISH_PORT`), so an environment is one
+more env file plus one variable in it. For a stage environment, `booking-app/.env.stage`:
+
+```
+STACK_SUFFIX=stage
+API_PUBLISH_PORT=3011
+WEB_PUBLISH_PORT=8081
+```
+
+then the usual command against that file:
+
+```bash
+docker compose --env-file booking-app/.env.stage \
+               -f booking-app/docker-compose.prod.yml up -d --wait
+```
+
+`STACK_SUFFIX` has to be written **in the env file**, not only exported in the shell: compose
+resolves `${...}` from `--env-file`.
+
+The port map in use on the server:
+
+| Environment | Suffix       | API    | Web    |
+| ----------- | ------------ | ------ | ------ |
+| production  | `production` | `3001` | `8080` |
+| stage       | `stage`      | `3011` | `8081` |
+| dev         | `dev`        | `3021` | `8082` |
+
+Each environment gets its own Postgres and Redis inside its own project, and its own named
+volumes. `docker compose ... down -v` in one environment cannot reach another's data.

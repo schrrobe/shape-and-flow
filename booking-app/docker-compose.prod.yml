@@ -21,12 +21,36 @@
 # place a secret is written. Nothing below interpolates a secret into this file, so it can
 # be read, diffed and committed without a second thought.
 #
+# ── Running more than one environment on one host ───────────────────────────
+#
+# `STACK_SUFFIX` names the environment and defaults to `production`, so the command
+# above keeps working unchanged. It is substituted into three things that would
+# otherwise collide between environments:
+#
+#   * the compose project name, which scopes the named volumes
+#   * every `container_name`, which is global to the Docker daemon — two stacks
+#     without this suffix fail with "container name is already in use"
+#   * the `env_file` each container reads, so a stage deploy cannot be handed
+#     production's secrets
+#
+# A second environment is therefore a second env file and one variable in it:
+#
+#     STACK_SUFFIX=stage
+#     API_PUBLISH_PORT=3011
+#     WEB_PUBLISH_PORT=8081
+#
+#     docker compose --env-file booking-app/.env.stage \
+#                    -f booking-app/docker-compose.prod.yml up -d --wait
+#
+# The suffix has to be in the env file, not only in the environment: compose reads
+# `${...}` substitutions from `--env-file`.
+#
 # ── What is published ───────────────────────────────────────────────────────
 #
 # Only the API and the web bundle, and only on 127.0.0.1. Postgres and Redis are reachable
 # from the compose network and from nowhere else — not even from another process on this
 # host. The edge nginx is what the internet talks to; see infrastructure/nginx/booking.conf.
-name: shape-and-flow-booking-prod
+name: shape-and-flow-booking-${STACK_SUFFIX:-production}
 
 # Anchors, so a change to the log policy or the restart policy is one edit rather than five.
 x-logging: &logging
@@ -45,7 +69,7 @@ x-hardening: &hardening
 services:
   postgres:
     image: postgres:17-alpine
-    container_name: sf-booking-postgres
+    container_name: sf-booking-postgres-${STACK_SUFFIX:-production}
     environment:
       POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
@@ -65,7 +89,7 @@ services:
 
   redis:
     image: redis:7-alpine
-    container_name: sf-booking-redis
+    container_name: sf-booking-redis-${STACK_SUFFIX:-production}
     # Append-only, fsync every second. The queue holds jobs that were already committed to
     # the outbox, so a lost second of Redis costs a retry rather than a lost notification —
     # but it is still the difference between a delayed reminder and a missing one.
@@ -96,8 +120,8 @@ services:
       dockerfile: booking-app/apps/api/Dockerfile
       target: migrate
     image: sf-booking-migrate:${IMAGE_TAG:-local}
-    container_name: sf-booking-migrate
-    env_file: [.env.production]
+    container_name: sf-booking-migrate-${STACK_SUFFIX:-production}
+    env_file: ['.env.${STACK_SUFFIX:-production}']
     depends_on:
       postgres:
         condition: service_healthy
@@ -113,8 +137,8 @@ services:
       dockerfile: booking-app/apps/api/Dockerfile
       target: api
     image: sf-booking-api:${IMAGE_TAG:-local}
-    container_name: sf-booking-api
-    env_file: [.env.production]
+    container_name: sf-booking-api-${STACK_SUFFIX:-production}
+    env_file: ['.env.${STACK_SUFFIX:-production}']
     environment:
       # Declared here, not in the env file, and deliberately: one file configures both
       # processes, and a stray `APP_ROLE` in it would either stop the worker from starting
@@ -149,8 +173,8 @@ services:
       dockerfile: booking-app/apps/api/Dockerfile
       target: worker
     image: sf-booking-worker:${IMAGE_TAG:-local}
-    container_name: sf-booking-worker
-    env_file: [.env.production]
+    container_name: sf-booking-worker-${STACK_SUFFIX:-production}
+    env_file: ['.env.${STACK_SUFFIX:-production}']
     environment:
       APP_ROLE: worker
     depends_on:
@@ -175,7 +199,7 @@ services:
       context: ..
       dockerfile: booking-app/apps/web/Dockerfile
     image: sf-booking-web:${IMAGE_TAG:-local}
-    container_name: sf-booking-web
+    container_name: sf-booking-web-${STACK_SUFFIX:-production}
     # No env_file. The bundle is built, not configured: it talks to `/api` on whatever
     # origin served it, so there is nothing to inject and nothing that can be wrong.
     ports:
