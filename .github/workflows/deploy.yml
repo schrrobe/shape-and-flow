@@ -10,6 +10,12 @@ name: Deploy
 #     gh workflow run deploy.yml -f env_name=dev -f seed=true
 #     gh workflow run deploy.yml -f env_name=stage -f image_tag=<older sha>
 #
+# Dev can be deployed from any branch — pick it in the Run workflow dialog, or:
+#
+#     gh workflow run deploy.yml --ref my-branch -f env_name=dev
+#
+# Stage cannot; see the guard in the `prepare` job.
+#
 # ── Where the configuration comes from ──────────────────────────────────────
 #
 #   vars.DEPLOY_HOST      the server
@@ -44,7 +50,17 @@ on:
         description: Which environment to deploy
         required: true
         type: choice
-        options: [stage, dev]
+        # `dev` first, so it is what the Run workflow button offers by default. Dev is the
+        # environment meant to be thrown a branch; stage is what `main` produces.
+        #
+        # The branch selector in that dialog decides which ref is built, so dev can be
+        # deployed from any branch. Two consequences worth being clear about: the dev
+        # environment must allow all branches in its deployment branch policy, or the job
+        # is blocked before it starts — and a dispatch runs *only* this workflow, so
+        # nothing was linted or tested first. That is the point of the button, and the
+        # reason it does not exist for stage.
+        options: [dev, stage]
+        default: dev
       image_tag:
         description: Existing image tag to deploy (empty = build this commit)
         required: false
@@ -65,6 +81,22 @@ jobs:
       owner: ${{ steps.values.outputs.owner }}
       tag: ${{ steps.values.outputs.tag }}
     steps:
+      # Checked here rather than in the deploy job so it fails before four images are built.
+      #
+      # Dev may be deployed from any branch on purpose. Stage may not: it is the environment
+      # `main` produces, and a hand-dispatched stage deploy from a feature branch would put
+      # untested code behind the hostname the team treats as "what main looks like". The
+      # environment's branch policy enforces this too; this step makes the refusal legible
+      # instead of a blocked job with no explanation.
+      - name: Stage is deployed from main only
+        if: ${{ inputs.env_name == 'stage' && github.ref_name != 'main' }}
+        env:
+          REF: ${{ github.ref_name }}
+        run: |
+          echo "Refusing to deploy stage from '$REF'." >&2
+          echo "Merge to main, or dispatch env_name=dev to try this branch." >&2
+          exit 1
+
       - id: values
         env:
           OWNER: ${{ github.repository_owner }}
