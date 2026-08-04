@@ -271,7 +271,8 @@ stores, runs `migrate` to completion, starts the rest, and finally checks
 on the server always records which commit is running:
 
 ```bash
-ssh robert@<host> 'grep IMAGE_TAG /opt/booking/stage/.env.stage'   # needs sudo, file is 600
+# sudo, not because of the directory but because the file is mode 600 and owned by `deploy`.
+ssh -t robert@<host> 'sudo grep IMAGE_TAG /opt/booking/stage/.env.stage'
 ```
 
 ### What it needs configured
@@ -279,8 +280,14 @@ ssh robert@<host> 'grep IMAGE_TAG /opt/booking/stage/.env.stage'   # needs sudo,
 Repository variables `DEPLOY_HOST`, `DEPLOY_USER`, `SSH_KNOWN_HOSTS`; repository secret
 `SSH_PRIVATE_KEY`; and an **environment** secret `ENV_FILE` in each of `stage` and `dev`
 holding the whole env file. Same secret name in both environments, which is why the workflow
-never branches to find it. The environments carry a branch policy — `stage` accepts only
-`main`, `dev` only `fusion` — so a stray trigger cannot reach the wrong secret.
+never branches to find it.
+
+The two environments carry deliberately different branch policies. `stage` accepts only
+`main`, so no stray trigger and no hand-dispatch can reach its secret from a feature branch.
+`dev` accepts **all** branches, which is what makes the manual dispatch below useful — dev is
+the environment meant to be thrown a branch. The asymmetry is enforced twice: by the
+environment policy, and by a guard in the workflow's `prepare` job that refuses a stage
+deploy from any ref other than `main` before four images are built.
 
 `SSH_KNOWN_HOSTS` is a variable, not a secret, deliberately: the host key is public
 information, and as a secret it would be masked to `***` in exactly the logs where an SSH

@@ -149,6 +149,18 @@ jobs:
 
       - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
 
+      # `packages: write` above is the permission; this is the credential. Without it the
+      # step below fails at the push with "unauthorized", after paying for the whole build.
+      #
+      # A plain `docker login` rather than docker/login-action: it writes the same
+      # ~/.docker/config.json that buildx reads, and it is one fewer third-party action to
+      # pin and keep current.
+      - name: Log in to GHCR
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+        run: printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
+
       - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           # The repository root, because the lockfile and the workspace manifest live there

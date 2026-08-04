@@ -1,4 +1,5 @@
 import { hash } from '@node-rs/argon2';
+import { cuidSchema } from '@shape-and-flow/booking-contracts';
 
 import { ARGON2_OPTIONS } from '../auth/password.options.js';
 import { Locale, OfficeUserRole, Weekday } from '../prisma/client.js';
@@ -127,12 +128,30 @@ export async function seedDemoOrganization(
   const employees = [];
   for (const seed of employeeSeeds) {
     const displayName = `${seed.firstName} ${seed.lastName}`;
-    // Re-running the seed stays safe without an upsert key: the display name is what
-    // identifies a seeded employee, and the lookup below finds whatever an earlier run
-    // created — including rows created back when the ids were literals.
+    // Re-running the seed stays safe without an upsert key: the display name identifies a
+    // seeded employee, so an earlier run's row is found rather than duplicated.
     const existing = await prisma.employee.findFirst({
       where: { organizationId, displayName },
     });
+
+    // A row from before this change carries one of the old literal ids, and reusing it puts
+    // the problem straight back: `officeEmployeeSchema.id` and the `employeeId` query
+    // parameter both validate with `cuidSchema`, so the office employee list and every
+    // availability request would fail on it — while the seed reported success.
+    //
+    // Rewriting the id in place would mean updating every dependent foreign key in one
+    // transaction. That is a lot of machinery to carry forever for demo data, and the wrong
+    // trade when the fix is one command. So refuse, and name the command.
+    if (existing !== null && !cuidSchema.safeParse(existing.id).success) {
+      throw new Error(
+        `Employee "${displayName}" has the id "${existing.id}", which is not a cuid and ` +
+          'comes from a seed that predates this file. Reusing it would break the office ' +
+          'employee list and every availability request. Delete the demo employees, or ' +
+          'reset the database with `pnpm --filter @shape-and-flow/booking-api exec prisma ' +
+          'migrate reset`, then seed again.',
+      );
+    }
+
     const employee =
       existing ??
       (await prisma.employee.create({
