@@ -4,6 +4,11 @@
 
 # dependencies
 node_modules/
+# pnpm's content-addressable store. It only appears here when the store has been
+# pointed at the project — a CI cache setup, or `store-dir` in a local .npmrc —
+# but when it does it is tens of thousands of files, and one `git add -A` away
+# from an unreviewable commit.
+.pnpm-store/
 
 # generated code — recreated by `prisma generate` on install.
 # The leading **/ matters: a pattern containing a middle separator is anchored

@@ -60,6 +60,14 @@ const FORMATS = {
   time: { timeZone: DISPLAY_ZONE, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' },
   weekdayLong: { timeZone: DISPLAY_ZONE, weekday: 'long' },
   dayMonth: { timeZone: DISPLAY_ZONE, weekday: 'short', day: '2-digit', month: '2-digit' },
+  monthYear: { timeZone: DISPLAY_ZONE, month: 'long', year: 'numeric' },
+  dateLong: {
+    timeZone: DISPLAY_ZONE,
+    weekday: 'long',
+    day: '2-digit',
+    month: 'long',
+    year: 'numeric',
+  },
   full: {
     timeZone: DISPLAY_ZONE,
     weekday: 'long',

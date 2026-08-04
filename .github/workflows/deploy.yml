@@ -1,0 +1,409 @@
+name: Deploy
+
+# Builds the four application images on the runner, pushes them to GHCR, and brings the
+# target environment up from those images over SSH. Nothing is built on the server.
+#
+# It is called by ci.yml as the last job of a green pipeline, and can be run by hand for a
+# redeploy, a first-time seed, or a rollback:
+#
+#     gh workflow run deploy.yml -f env_name=stage
+#     gh workflow run deploy.yml -f env_name=dev -f seed=true
+#     gh workflow run deploy.yml -f env_name=stage -f image_tag=<older sha>
+#
+# Dev can be deployed from any branch — pick it in the Run workflow dialog, or:
+#
+#     gh workflow run deploy.yml --ref my-branch -f env_name=dev
+#
+# Stage cannot; see the guard in the `prepare` job.
+#
+# ── Where the configuration comes from ──────────────────────────────────────
+#
+#   vars.DEPLOY_HOST      the server
+#   vars.DEPLOY_USER      `deploy` — no sudo, member of the docker group
+#   vars.SSH_KNOWN_HOSTS  the server's host key. A *variable*, not a secret, on purpose:
+#                         it is public information, and as a secret it would be masked to
+#                         `***` in exactly the logs where an SSH failure needs reading.
+#   secrets.SSH_PRIVATE_KEY   repository secret, one key used only by this workflow
+#   secrets.ENV_FILE          *environment* secret — same name in `stage` and `dev`, which
+#                             is why nothing below branches on the environment to find it.
+
+on:
+  workflow_call:
+    inputs:
+      env_name:
+        description: stage or dev
+        required: true
+        type: string
+      image_tag:
+        description: Deploy an existing tag instead of building this commit
+        required: false
+        type: string
+        default: ''
+      seed:
+        description: Run prisma:seed after migrating
+        required: false
+        type: boolean
+        default: false
+  workflow_dispatch:
+    inputs:
+      env_name:
+        description: Which environment to deploy
+        required: true
+        type: choice
+        # `dev` first, so it is what the Run workflow button offers by default. Dev is the
+        # environment meant to be thrown a branch; stage is what `main` produces.
+        #
+        # The branch selector in that dialog decides which ref is built, so dev can be
+        # deployed from any branch. Two consequences worth being clear about: the dev
+        # environment must allow all branches in its deployment branch policy, or the job
+        # is blocked before it starts — and a dispatch runs *only* this workflow, so
+        # nothing was linted or tested first. That is the point of the button, and the
+        # reason it does not exist for stage.
+        options: [dev, stage]
+        default: dev
+      image_tag:
+        description: Existing image tag to deploy (empty = build this commit)
+        required: false
+        type: string
+        default: ''
+      seed:
+        description: Run prisma:seed after migrating (first deploy of an empty database)
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  # Two values both later jobs need, computed once.
+  prepare:
+    name: Resolve owner and tag
+    runs-on: ubuntu-latest
+    outputs:
+      owner: ${{ steps.values.outputs.owner }}
+      tag: ${{ steps.values.outputs.tag }}
+    steps:
+      # Checked here rather than in the deploy job so it fails before four images are built.
+      #
+      # Dev may be deployed from any branch on purpose. Stage may not: it is the environment
+      # `main` produces, and a hand-dispatched stage deploy from a feature branch would put
+      # untested code behind the hostname the team treats as "what main looks like". The
+      # environment's branch policy enforces this too; this step makes the refusal legible
+      # instead of a blocked job with no explanation.
+      - name: Stage is deployed from main only
+        if: ${{ inputs.env_name == 'stage' && github.ref_name != 'main' }}
+        env:
+          REF: ${{ github.ref_name }}
+        run: |
+          echo "Refusing to deploy stage from '$REF'." >&2
+          echo "Merge to main, or dispatch env_name=dev to try this branch." >&2
+          exit 1
+
+      - id: values
+        env:
+          OWNER: ${{ github.repository_owner }}
+          # A supplied tag wins, so a rollback deploys that tag and skips the build
+          # entirely. Otherwise the commit being tested is what gets deployed — the whole
+          # point of hanging this off a green pipeline.
+          TAG: ${{ inputs.image_tag != '' && inputs.image_tag || github.sha }}
+        run: |
+          # GHCR rejects an uppercase path segment, while GitHub account names may contain
+          # one. Lowercasing here rather than at three call sites keeps them in step.
+          printf 'owner=%s\n' "$(printf '%s' "$OWNER" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+          printf 'tag=%s\n' "$TAG" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build and push ${{ matrix.image }}
+    needs: [prepare]
+    # Skipped for a rollback: the images for an older tag are already in the registry, and
+    # rebuilding them would defeat the purpose of naming a known-good tag.
+    if: inputs.image_tag == ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Not inherited. ci.yml sets `contents: read` at workflow level, and a reusable
+      # workflow's token can only be downgraded from the caller's — so the *calling job*
+      # in ci.yml grants packages: write, and this declares what it uses.
+      packages: write
+    strategy:
+      # One red image should not hide the state of the other three.
+      fail-fast: false
+      matrix:
+        include:
+          - image: api
+            dockerfile: booking-app/apps/api/Dockerfile
+            target: api
+          - image: worker
+            dockerfile: booking-app/apps/api/Dockerfile
+            target: worker
+          # Built from the API's Dockerfile but a separate image: the runtime image has no
+          # Prisma CLI, so a container serving traffic cannot rewrite the schema it reads.
+          - image: migrate
+            dockerfile: booking-app/apps/api/Dockerfile
+            target: migrate
+          - image: web
+            dockerfile: booking-app/apps/web/Dockerfile
+            target: ''
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      # `packages: write` above is the permission; this is the credential. Without it the
+      # step below fails at the push with "unauthorized", after paying for the whole build.
+      #
+      # A plain `docker login` rather than docker/login-action: it writes the same
+      # ~/.docker/config.json that buildx reads, and it is one fewer third-party action to
+      # pin and keep current.
+      - name: Log in to GHCR
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+        run: printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
+
+      - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          # The repository root, because the lockfile and the workspace manifest live there
+          # and an install without them is not the install that was tested. Same context
+          # docker-compose.prod.yml uses.
+          context: .
+          file: ${{ matrix.dockerfile }}
+          target: ${{ matrix.target }}
+          push: true
+          # The immutable tag is what gets deployed. The moving one exists so a human can
+          # see at a glance what an environment last received; nothing resolves it.
+          tags: |
+            ghcr.io/${{ needs.prepare.outputs.owner }}/sf-booking-${{ matrix.image }}:${{ needs.prepare.outputs.tag }}
+            ghcr.io/${{ needs.prepare.outputs.owner }}/sf-booking-${{ matrix.image }}:${{ inputs.env_name }}
+          # Scoped per image, or the four builds would evict each other's layers and the
+          # cache would cost more than it saves.
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+          provenance: false
+
+  deploy:
+    name: Deploy to ${{ inputs.env_name }}
+    needs: [prepare, build]
+    # `always()` is needed because `build` is skipped on a rollback, and a skipped
+    # dependency would otherwise skip this job too. The result check is what keeps a failed
+    # build from deploying anyway.
+    if: ${{ always() && needs.prepare.result == 'success' && (needs.build.result == 'success' || needs.build.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    # This is where `secrets.ENV_FILE` is resolved, and where a branch policy or a required
+    # reviewer on the environment takes effect.
+    environment:
+      name: ${{ inputs.env_name }}
+      url: https://${{ inputs.env_name }}.buchung.shapeandflow.de
+    permissions:
+      contents: read
+      packages: read
+    # Job level, not workflow level: the `inputs` context is documented as available to jobs
+    # and steps. cancel-in-progress must stay false — a deploy cancelled between `migrate`
+    # and `up` leaves a migrated schema that nothing is serving.
+    concurrency:
+      group: deploy-${{ inputs.env_name }}
+      cancel-in-progress: false
+    env:
+      DIR: /opt/booking/${{ inputs.env_name }}
+      ENV_NAME: ${{ inputs.env_name }}
+      IMAGE_TAG: ${{ needs.prepare.outputs.tag }}
+      GHCR_OWNER: ${{ needs.prepare.outputs.owner }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      # ── The connection ─────────────────────────────────────────────────────
+      #
+      # Written as an ssh_config with a host alias rather than passed as flags on every
+      # call. Two reasons beyond tidiness. A flag list held in a shell variable has to be
+      # left unquoted so it word-splits, which is exactly the line a later reader "fixes"
+      # by quoting — turning six flags into one nonsense argument. And `~` inside a
+      # variable is not re-expanded after the variable expands, so the paths would have to
+      # be absolute anyway. With `-F` every call site is fully quoted, and one place
+      # defines how this workflow reaches the server.
+      - name: Prepare SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ vars.SSH_KNOWN_HOSTS }}
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ vars.DEPLOY_USER }}
+        run: |
+          umask 077
+          printf '%s\n' "$SSH_PRIVATE_KEY" > /tmp/deploy_key
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > /tmp/deploy_known_hosts
+          cat > /tmp/ssh_config <<EOF
+          Host booking
+            HostName $DEPLOY_HOST
+            User $DEPLOY_USER
+            IdentityFile /tmp/deploy_key
+            IdentitiesOnly yes
+            StrictHostKeyChecking yes
+            UserKnownHostsFile /tmp/deploy_known_hosts
+            BatchMode yes
+            ConnectTimeout 15
+          EOF
+
+          # A real known_hosts entry, not StrictHostKeyChecking=no. The alternative trusts
+          # whatever answers on port 22, which is the entirety of the protection.
+          ssh -F /tmp/ssh_config booking 'echo "connected as $(id -un) to $(hostname)"'
+
+      - name: Upload the compose files
+        run: |
+          # Copied on every deploy rather than checked out on the server: what runs is then
+          # always the pair from the commit being deployed, and the server needs no git, no
+          # source tree, and no credentials to fetch one.
+          scp -F /tmp/ssh_config \
+            booking-app/docker-compose.prod.yml \
+            booking-app/docker-compose.registry.yml \
+            "booking:$DIR/"
+
+      - name: Install the environment file
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        run: |
+          # IMAGE_TAG and GHCR_OWNER are written into the file rather than exported into the
+          # remote shell. That settles the precedence question between a shell variable and
+          # `--env-file` for good, and it leaves the answer to "what is actually running
+          # here" in a file on the server rather than only in a workflow log.
+          #
+          # Any IMAGE_TAG the secret carries is dropped first: the example file ships
+          # `IMAGE_TAG=local`, and a duplicated key in a dotenv file is a coin toss.
+          #
+          # `umask 077` on the remote side makes the file 600 from the moment it exists. A
+          # `cat` followed by `chmod` would leave it readable for the width of one syscall.
+          {
+            printf '%s\n' "$ENV_FILE" | grep -vE '^(IMAGE_TAG|GHCR_OWNER)='
+            printf 'IMAGE_TAG=%s\n' "$IMAGE_TAG"
+            printf 'GHCR_OWNER=%s\n' "$GHCR_OWNER"
+          } | ssh -F /tmp/ssh_config booking "umask 077 && cat > '$DIR/.env.$ENV_NAME'"
+
+          ssh -F /tmp/ssh_config booking "ls -l '$DIR/.env.$ENV_NAME'"
+
+      - name: Log in to GHCR on the server
+        env:
+          # The run's own token, not a stored PAT: it may read this repository's packages and
+          # it expires when the job ends, so no long-lived registry credential ever comes to
+          # rest on the server.
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          printf '%s' "$GHCR_TOKEN" \
+            | ssh -F /tmp/ssh_config booking "docker login ghcr.io -u '$ACTOR' --password-stdin"
+
+      - name: Pull, migrate, start
+        env:
+          SEED: ${{ inputs.seed }}
+        run: |
+          # The assignments in front of `bash` expand here, on the runner, which is what puts
+          # them into the remote shell's environment. The heredoc body is quoted and so
+          # reaches the server untouched.
+          # shellcheck disable=SC2029
+          ssh -F /tmp/ssh_config booking \
+            "DIR='$DIR' ENV_NAME='$ENV_NAME' SEED='$SEED' bash -euo pipefail -s" <<'REMOTE_SCRIPT'
+          cd "$DIR"
+          COMPOSE="docker compose --env-file .env.$ENV_NAME -f docker-compose.prod.yml -f docker-compose.registry.yml"
+
+          echo "==> pulling"
+          $COMPOSE pull
+
+          echo "==> data stores"
+          $COMPOSE up -d --wait postgres redis
+
+          # A separate step rather than a dependency of `up`: migrate has `restart: 'no'`
+          # and exits, and `up --wait` treats a container that is gone as a failure.
+          #
+          # `-T </dev/null` is not decoration. This script *is* the remote shell's stdin —
+          # it arrives over the heredoc and bash reads it as it goes — and `compose run`
+          # attaches stdin to the container by default. Without this it read the rest of
+          # this file into the migrate container: the seed and the `up` below never ran,
+          # bash hit end-of-input, and the step exited 0. A deployment with no application
+          # containers reported success, and the first thing to notice was the smoke test
+          # failing to connect. Every stdin-reading command in here needs the same guard.
+          echo "==> migrating"
+          $COMPOSE run --rm -T migrate </dev/null
+
+          if [ "$SEED" = "true" ]; then
+            echo "==> seeding"
+            $COMPOSE run --rm -T migrate pnpm prisma:seed </dev/null
+          fi
+
+          echo "==> starting"
+          $COMPOSE up -d --wait
+          REMOTE_SCRIPT
+
+      - name: Smoke test
+        run: |
+          # shellcheck disable=SC2029
+          ssh -F /tmp/ssh_config booking \
+            "DIR='$DIR' ENV_NAME='$ENV_NAME' bash -euo pipefail -s" <<'REMOTE_SCRIPT'
+          cd "$DIR"
+
+          # One key out of the env file, without sourcing it.
+          #
+          # `set -a; . "./.env.$ENV_NAME"` was shorter and wrong twice over. The file is a
+          # compose `--env-file`, where a value needs no quoting: `EMAIL_FROM_NAME=Shape and
+          # Flow` is one three-word value to compose, and to bash an assignment followed by
+          # the command `and` — which is how this step died with `and: command not found`
+          # after a deployment that had otherwise fully succeeded. Sourcing also *executes*
+          # a file of secrets, so a value containing `$(...)` would run on the server.
+          #
+          # The ports still come from the env file, so exactly one place knows them.
+          #
+          # Missing or empty takes the same default the compose file publishes on —
+          # `${API_PUBLISH_PORT:-3001}` and `${WEB_PUBLISH_PORT:-8080}`. Refusing instead
+          # would fail a deployment that is up and serving on the default, which is the
+          # mistake this step has already made once. Present but not a number is still a
+          # refusal: compose would reject it too, and a guess would hide it.
+          #
+          # `tail -n 1` matches compose's dotenv rule that a later duplicate key wins.
+          port_of() {
+            local value
+            value=$(sed -n "s/^$1=//p" "./.env.$ENV_NAME" | tail -n 1 | tr -d '\r')
+            case $value in
+              '') value=$2 ;;
+              *[!0-9]*)
+                echo "$1 in .env.$ENV_NAME is not a port number" >&2
+                exit 1
+                ;;
+            esac
+            printf '%s\n' "$value"
+          }
+
+          API_PORT=$(port_of API_PUBLISH_PORT 3001)
+          WEB_PORT=$(port_of WEB_PUBLISH_PORT 8080)
+
+          echo "==> readiness on 127.0.0.1:$API_PORT"
+          # /api/health/ready reports database, Redis and applied migrations by name, so a
+          # partial start fails here rather than at the first customer.
+          curl -fsS --max-time 20 "http://127.0.0.1:$API_PORT/api/health/ready" \
+            | tee /dev/stderr | grep -q '"status":"ok"'
+
+          echo "==> deep link on 127.0.0.1:$WEB_PORT"
+          # A path that is a 404 on disk and a real destination in the browser. Without the
+          # SPA fallback every office bookmark breaks on reload and nothing else notices.
+          code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 \
+            "http://127.0.0.1:$WEB_PORT/office/calendar")
+          test "$code" = "200" || { echo "expected 200, got $code" >&2; exit 1; }
+          REMOTE_SCRIPT
+
+      - name: Logs
+        if: failure()
+        run: |
+          # shellcheck disable=SC2029
+          ssh -F /tmp/ssh_config booking \
+            "DIR='$DIR' ENV_NAME='$ENV_NAME' bash -euo pipefail -s" <<'REMOTE_SCRIPT'
+          cd "$DIR"
+          COMPOSE="docker compose --env-file .env.$ENV_NAME -f docker-compose.prod.yml -f docker-compose.registry.yml"
+          $COMPOSE ps
+          $COMPOSE logs --tail=200
+          REMOTE_SCRIPT
+
+      - name: Clean up
+        if: always()
+        run: |
+          # `|| true` on both: the registry credential and the runner's key are worth
+          # removing even when the deploy already failed, and neither cleanup failing should
+          # mask the real error.
+          ssh -F /tmp/ssh_config booking 'docker logout ghcr.io' || true
+          rm -f /tmp/deploy_key /tmp/deploy_known_hosts /tmp/ssh_config || true
