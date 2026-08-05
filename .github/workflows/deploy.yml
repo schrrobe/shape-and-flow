@@ -14,7 +14,9 @@ name: Deploy
 #
 #     gh workflow run deploy.yml --ref my-branch -f env_name=dev
 #
-# Stage cannot; see the guard in the `prepare` job.
+# Stage and production cannot; see the guard in the `prepare` job. Production is also gated
+# by release-please — see the `release`/`deploy-production` jobs in ci.yml — but can be
+# hand-dispatched too (first seed, redeploy, rollback), same as stage.
 #
 # ── Where the configuration comes from ──────────────────────────────────────
 #
@@ -24,14 +26,15 @@ name: Deploy
 #                         it is public information, and as a secret it would be masked to
 #                         `***` in exactly the logs where an SSH failure needs reading.
 #   secrets.SSH_PRIVATE_KEY   repository secret, one key used only by this workflow
-#   secrets.ENV_FILE          *environment* secret — same name in `stage` and `dev`, which
-#                             is why nothing below branches on the environment to find it.
+#   secrets.ENV_FILE          *environment* secret — same name in `stage`, `dev`, and
+#                             `production`, which is why nothing below branches on the
+#                             environment to find it.
 
 on:
   workflow_call:
     inputs:
       env_name:
-        description: stage or dev
+        description: stage, dev, or production
         required: true
         type: string
       image_tag:
@@ -59,7 +62,7 @@ on:
         # is blocked before it starts — and a dispatch runs *only* this workflow, so
         # nothing was linted or tested first. That is the point of the button, and the
         # reason it does not exist for stage.
-        options: [dev, stage]
+        options: [dev, stage, production]
         default: dev
       image_tag:
         description: Existing image tag to deploy (empty = build this commit)
@@ -83,17 +86,18 @@ jobs:
     steps:
       # Checked here rather than in the deploy job so it fails before four images are built.
       #
-      # Dev may be deployed from any branch on purpose. Stage may not: it is the environment
-      # `main` produces, and a hand-dispatched stage deploy from a feature branch would put
-      # untested code behind the hostname the team treats as "what main looks like". The
-      # environment's branch policy enforces this too; this step makes the refusal legible
+      # Dev may be deployed from any branch on purpose. Stage and production may not: they are
+      # the environments `main` produces, and a hand-dispatched deploy from a feature branch
+      # would put untested code behind the hostnames the team treats as "what main looks like".
+      # Each environment's branch policy enforces this too; this step makes the refusal legible
       # instead of a blocked job with no explanation.
-      - name: Stage is deployed from main only
-        if: ${{ inputs.env_name == 'stage' && github.ref_name != 'main' }}
+      - name: Stage and production are deployed from main only
+        if: ${{ (inputs.env_name == 'stage' || inputs.env_name == 'production') && github.ref_name != 'main' }}
         env:
           REF: ${{ github.ref_name }}
+          ENV_NAME: ${{ inputs.env_name }}
         run: |
-          echo "Refusing to deploy stage from '$REF'." >&2
+          echo "Refusing to deploy $ENV_NAME from '$REF'." >&2
           echo "Merge to main, or dispatch env_name=dev to try this branch." >&2
           exit 1
 
@@ -193,7 +197,8 @@ jobs:
     # reviewer on the environment takes effect.
     environment:
       name: ${{ inputs.env_name }}
-      url: https://${{ inputs.env_name }}.buchung.shapeandflow.de
+      # Production has no subdomain; stage/dev are `<env_name>.buchung.shapeandflow.de`.
+      url: ${{ inputs.env_name == 'production' && 'https://buchung.shapeandflow.de' || format('https://{0}.buchung.shapeandflow.de', inputs.env_name) }}
     permissions:
       contents: read
       packages: read

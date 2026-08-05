@@ -236,18 +236,30 @@ booking-app/infrastructure/scripts/backup.sh
 
 ---
 
-## Runbook: automatic deployment (stage and dev)
+## Runbook: automatic deployment (stage, dev, and production)
 
-Stage and dev deploy themselves from a green pipeline. Production does not — see the manual
-runbook below.
+Stage and dev deploy themselves from every green pipeline on their branch. Production deploys
+itself too, but only from a **release** — see the caveat above about `NODE_ENV=production`
+before treating a production deploy as customer-ready.
 
-| Merge into | Deploys to | Hostname                        |
-| ---------- | ---------- | ------------------------------- |
-| `main`     | `stage`    | `stage.buchung.shapeandflow.de` |
-| `fusion`   | `dev`      | `dev.buchung.shapeandflow.de`   |
+| Trigger                                     | Deploys to   | Hostname                        |
+| -------------------------------------------- | ------------ | -------------------------------- |
+| push to `main`                              | `stage`      | `stage.buchung.shapeandflow.de` |
+| push to `fusion`                             | `dev`        | `dev.buchung.shapeandflow.de`   |
+| merging a release-please PR (which pushes to `main`) | `production` | `buchung.shapeandflow.de`       |
 
-`.github/workflows/ci.yml` calls `.github/workflows/deploy.yml` as its last job, with
-`needs` naming every other job. A deployment cannot outrun the tests.
+`.github/workflows/ci.yml` calls `.github/workflows/deploy.yml` for stage; `needs` names every
+other job, so a deployment cannot outrun the tests. Production goes through the same gate: a
+`release` job (running `googleapis/release-please-action`) also `needs` every test job, and a
+`deploy-production` job runs only when that job's `release_created` output is true — i.e. only
+on the push that merges the standing Release PR, not on every push to `main`. See the comment
+above the `release` job in `ci.yml` for why this reads the output within the same run instead
+of triggering on `release: published` (recursive-trigger protection would otherwise require a
+PAT).
+
+Production additionally requires a human to approve the deploy in the Actions UI — the
+`production` GitHub Environment has a required reviewer, so merging the release PR only stages
+the release; nothing touches the server until that approval.
 
 > **A branch only deploys once it carries these workflow files.** For a `push` event GitHub
 > runs the workflow from the ref that was pushed, not from the default branch — so a `fusion`
@@ -278,16 +290,19 @@ ssh -t robert@<host> 'sudo grep IMAGE_TAG /opt/booking/stage/.env.stage'
 ### What it needs configured
 
 Repository variables `DEPLOY_HOST`, `DEPLOY_USER`, `SSH_KNOWN_HOSTS`; repository secret
-`SSH_PRIVATE_KEY`; and an **environment** secret `ENV_FILE` in each of `stage` and `dev`
-holding the whole env file. Same secret name in both environments, which is why the workflow
-never branches to find it.
+`SSH_PRIVATE_KEY`; and an **environment** secret `ENV_FILE` in each of `stage`, `dev`, and
+`production` holding the whole env file. Same secret name in all three environments, which is
+why the workflow never branches to find it.
 
-The two environments carry deliberately different branch policies. `stage` accepts only
-`main`, so no stray trigger and no hand-dispatch can reach its secret from a feature branch.
+`stage` and `production` carry deliberately restrictive branch policies: both accept only
+`main`, so no stray trigger and no hand-dispatch can reach their secret from a feature branch.
 `dev` accepts **all** branches, which is what makes the manual dispatch below useful — dev is
-the environment meant to be thrown a branch. The asymmetry is enforced twice: by the
-environment policy, and by a guard in the workflow's `prepare` job that refuses a stage
-deploy from any ref other than `main` before four images are built.
+the environment meant to be thrown a branch. The stage/production restriction is enforced
+twice: by the environment policy, and by a guard in the workflow's `prepare` job that refuses
+those deploys from any ref other than `main` before four images are built.
+
+`production` additionally has a required reviewer — the one branch-policy/guard pair above
+stops the wrong *code* from deploying, the reviewer stops the wrong *moment*.
 
 `SSH_KNOWN_HOSTS` is a variable, not a secret, deliberately: the host key is public
 information, and as a secret it would be masked to `***` in exactly the logs where an SSH
@@ -328,8 +343,9 @@ not roll back migrations.
 
 ## Runbook: routine deployment
 
-This is the **production** path, and the one to use on any host that has no workflow pointed
-at it. Stage and dev are deployed by the pipeline above.
+Manual, build-on-the-server fallback. Production, stage, and dev are all deployed by the
+pipeline above by default — use this on any host that has no workflow pointed at it, or when
+the pipeline itself is unavailable and a deploy can't wait.
 
 ```bash
 git pull
