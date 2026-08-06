@@ -93,7 +93,11 @@ const rovingDate = computed(() => {
 const dayButtons = new Map<string, HTMLButtonElement>();
 
 function registerDay(date: string, el: unknown): void {
-  if (el instanceof HTMLButtonElement) dayButtons.set(date, el);
+  if (el instanceof HTMLButtonElement) {
+    dayButtons.set(date, el);
+  } else {
+    dayButtons.delete(date);
+  }
 }
 
 // A plain function, not an inline arrow, so the template's `:ref` binding has no `=>` in it —
