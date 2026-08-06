@@ -34,7 +34,17 @@ export function startOfMonth(date: string): string {
 
 export function addMonths(date: string, months: number): string {
   const anchored = new Date(`${date}T12:00:00Z`);
+  const day = anchored.getUTCDate();
+
+  // Land on the 1st before applying the offset, so e.g. Jan 31 + 1 month cannot overflow past
+  // Feb into March — then clamp back to the target month's real length.
+  anchored.setUTCDate(1);
   anchored.setUTCMonth(anchored.getUTCMonth() + months);
+  const daysInTargetMonth = new Date(
+    Date.UTC(anchored.getUTCFullYear(), anchored.getUTCMonth() + 1, 0),
+  ).getUTCDate();
+  anchored.setUTCDate(Math.min(day, daysInTargetMonth));
+
   return anchored.toISOString().slice(0, 10);
 }
 
