@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { SfAlert, SfButton, SfCard, SfInput, SfSkeleton } from '@shape-and-flow/booking-ui';
 import { computed, onMounted, ref } from 'vue';
+import { useI18n } from 'vue-i18n';
 
 import { api } from '../../api/client.js';
 import { useFocusStep } from '../../composables/useFocusStep.js';
 import { dateTime, difference, money } from '../../office/format.js';
+import { registerOfficeMessages } from '../../office/i18n/index.js';
 import { officeMessage } from '../../office/messages.js';
 import { useSession } from '../../stores/session.js';
 
@@ -26,9 +28,12 @@ import type {
  * an admin who may not move money can still reject a request or approve it retaining
  * everything, and a greyed-out field would suggest the decision is theirs to make.
  */
+registerOfficeMessages();
+
+const { t } = useI18n();
 const session = useSession();
 
-useFocusStep('Requests');
+useFocusStep(t('office.requests.heading'));
 
 const cancellations = ref<OfficeCancellationRequest[]>([]);
 const reschedules = ref<OfficeRescheduleRequest[]>([]);
@@ -134,8 +139,11 @@ async function decideCancellation(
       id: request.id,
       message:
         decision === 'APPROVED'
-          ? `Cancelled. ${money(refundCents(request))} goes back to ${request.booking.customerName}.`
-          : `Kept. ${request.booking.customerName} was told the appointment stands.`,
+          ? t('office.requests.cancelledMessage', {
+              amount: money(refundCents(request)),
+              name: request.booking.customerName,
+            })
+          : t('office.requests.keptMessage', { name: request.booking.customerName }),
     };
   } catch (caught) {
     error.value = officeMessage(caught);
@@ -166,8 +174,8 @@ async function decideReschedule(
       id: request.id,
       message:
         decision === 'APPROVED'
-          ? `Moved to ${dateTime(request.requestedStartsAt)}.`
-          : `Left where it was. ${request.booking.customerName} was told.`,
+          ? t('office.requests.movedMessage', { date: dateTime(request.requestedStartsAt) })
+          : t('office.requests.leftMessage', { name: request.booking.customerName }),
     };
   } catch (caught) {
     error.value = officeMessage(caught);
@@ -192,7 +200,7 @@ onMounted(load);
 <template>
   <section class="space-y-4">
     <h1 ref="heading" tabindex="-1" class="text-xl font-semibold tracking-tight outline-none">
-      Requests
+      {{ t('office.requests.heading') }}
     </h1>
 
     <SfAlert v-if="error !== null" tone="danger" data-test="error">{{ error }}</SfAlert>
@@ -203,7 +211,7 @@ onMounted(load);
     <SfSkeleton v-if="loading && empty" class="h-48" />
 
     <p v-else-if="empty" class="text-text-secondary" data-test="empty">
-      Nothing is waiting for a decision.
+      {{ t('office.requests.empty') }}
     </p>
 
     <SfCard
@@ -212,7 +220,9 @@ onMounted(load);
       as="article"
       :data-test="`cancellation-${request.id}`"
     >
-      <h2 class="text-lg font-medium">Cancellation · {{ request.booking.reference }}</h2>
+      <h2 class="text-lg font-medium">
+        {{ t('office.requests.cancellationHeading', { reference: request.booking.reference }) }}
+      </h2>
       <p class="text-text-secondary">
         {{ request.booking.customerName }} · {{ dateTime(request.booking.startsAt) }} ·
         {{ request.booking.serviceName }}
@@ -220,9 +230,9 @@ onMounted(load);
       <p v-if="request.reason !== null" class="mt-1 text-sm">“{{ request.reason }}”</p>
 
       <dl class="mt-3 grid grid-cols-[auto_1fr] gap-x-4 text-sm">
-        <dt class="text-text-secondary">They paid</dt>
+        <dt class="text-text-secondary">{{ t('office.requests.paidLabel') }}</dt>
         <dd class="tabular-nums" data-test="paid">{{ money(request.booking.paid) }}</dd>
-        <dt class="text-text-secondary">Suggested to keep</dt>
+        <dt class="text-text-secondary">{{ t('office.requests.suggestedLabel') }}</dt>
         <dd class="tabular-nums" data-test="suggested">
           {{ money(request.suggestedRetainedAmountCents) }}
         </dd>
@@ -232,7 +242,7 @@ onMounted(load);
         <SfInput
           v-if="session.can('refund.issue')"
           :model-value="retained[request.id] ?? ''"
-          label="Keep (euros)"
+          :label="t('office.requests.retainedLabel')"
           inputmode="decimal"
           :placeholder="String(request.suggestedRetainedAmountCents / 100)"
           data-test="retained"
@@ -241,7 +251,7 @@ onMounted(load);
 
         <SfInput
           :model-value="notes[request.id] ?? ''"
-          label="Note (internal)"
+          :label="t('office.requests.noteLabel')"
           data-test="note"
           @update:model-value="(value) => (notes[request.id] = value)"
         />
@@ -254,29 +264,36 @@ onMounted(load);
         data-test="refund-preview"
       >
         <template v-if="retainedValid(request)">
-          {{ money(refundCents(request)) }} goes back to {{ request.booking.customerName }}.
+          {{
+            t('office.requests.refundGoesBack', {
+              amount: money(refundCents(request)),
+              name: request.booking.customerName,
+            })
+          }}
         </template>
-        <template v-else> That is more than {{ request.booking.customerName }} paid. </template>
+        <template v-else>
+          {{ t('office.requests.refundExceeds', { name: request.booking.customerName }) }}
+        </template>
       </p>
 
       <div class="mt-3 flex flex-wrap gap-2">
         <SfButton
           :disabled="!retainedValid(request)"
           :loading="busy === request.id"
-          loading-label="Deciding"
+          :loading-label="t('office.requests.deciding')"
           data-test="approve"
           @click="decideCancellation(request, 'APPROVED')"
         >
-          Approve the cancellation
+          {{ t('office.requests.approveCancellation') }}
         </SfButton>
         <SfButton
           variant="secondary"
           :loading="busy === request.id"
-          loading-label="Deciding"
+          :loading-label="t('office.requests.deciding')"
           data-test="reject"
           @click="decideCancellation(request, 'REJECTED')"
         >
-          Refuse it
+          {{ t('office.requests.rejectCancellation') }}
         </SfButton>
       </div>
     </SfCard>
@@ -287,15 +304,17 @@ onMounted(load);
       as="article"
       :data-test="`reschedule-${request.id}`"
     >
-      <h2 class="text-lg font-medium">Move · {{ request.booking.reference }}</h2>
+      <h2 class="text-lg font-medium">
+        {{ t('office.requests.rescheduleHeading', { reference: request.booking.reference }) }}
+      </h2>
       <p class="text-text-secondary">
         {{ request.booking.customerName }} · {{ request.booking.serviceName }}
       </p>
 
       <dl class="mt-3 grid grid-cols-[auto_1fr] gap-x-4 text-sm">
-        <dt class="text-text-secondary">From</dt>
+        <dt class="text-text-secondary">{{ t('office.requests.fromLabel') }}</dt>
         <dd class="tabular-nums">{{ dateTime(request.booking.startsAt) }}</dd>
-        <dt class="text-text-secondary">To</dt>
+        <dt class="text-text-secondary">{{ t('office.requests.toLabel') }}</dt>
         <dd class="tabular-nums" data-test="requested-start">
           {{ dateTime(request.requestedStartsAt) }}
         </dd>
@@ -305,7 +324,7 @@ onMounted(load);
 
       <SfInput
         :model-value="notes[request.id] ?? ''"
-        label="Note (internal)"
+        :label="t('office.requests.noteLabel')"
         class="mt-3"
         data-test="note"
         @update:model-value="(value) => (notes[request.id] = value)"
@@ -314,20 +333,20 @@ onMounted(load);
       <div class="mt-3 flex flex-wrap gap-2">
         <SfButton
           :loading="busy === request.id"
-          loading-label="Deciding"
+          :loading-label="t('office.requests.deciding')"
           data-test="approve"
           @click="decideReschedule(request, 'APPROVED')"
         >
-          Move it
+          {{ t('office.requests.approveReschedule') }}
         </SfButton>
         <SfButton
           variant="secondary"
           :loading="busy === request.id"
-          loading-label="Deciding"
+          :loading-label="t('office.requests.deciding')"
           data-test="reject"
           @click="decideReschedule(request, 'REJECTED')"
         >
-          Leave it
+          {{ t('office.requests.rejectReschedule') }}
         </SfButton>
       </div>
     </SfCard>

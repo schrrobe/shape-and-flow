@@ -1,7 +1,8 @@
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { i18n } from '../../i18n/index.js';
 import { router } from '../../router/index.js';
 import { useSession } from '../../stores/session.js';
 
@@ -148,7 +149,7 @@ async function mountDetail() {
   const wrapper = mount(BookingDetail, {
     // The dialog teleports to `body`, so it is only reachable through the document.
     attachTo: document.body,
-    global: { plugins: [pinia, router] },
+    global: { plugins: [pinia, router, i18n] },
   });
   await flushPromises();
 
@@ -212,6 +213,14 @@ async function confirm(): Promise<void> {
 }
 
 describe('BookingDetail refunds', () => {
+  beforeAll(() => {
+    i18n.global.locale.value = 'en';
+  });
+
+  afterAll(() => {
+    i18n.global.locale.value = 'de';
+  });
+
   it('sends the same idempotency key when the operator retries the same refund', async () => {
     refundFailures = 1;
     await openRefundFor('10.00');
@@ -257,6 +266,14 @@ describe('BookingDetail refunds', () => {
 });
 
 describe('BookingDetail cancellations', () => {
+  beforeAll(() => {
+    i18n.global.locale.value = 'en';
+  });
+
+  afterAll(() => {
+    i18n.global.locale.value = 'de';
+  });
+
   it('sends the same idempotency key when the operator retries the same cancellation', async () => {
     cancelFailures = 1;
     await openCancelFor('Krankheit');

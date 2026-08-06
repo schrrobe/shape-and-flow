@@ -1,8 +1,9 @@
 import { SfSkeleton } from '@shape-and-flow/booking-ui';
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { i18n } from '../../i18n/index.js';
 import { useSession } from '../../stores/session.js';
 
 import RequestsPage from './RequestsPage.vue';
@@ -142,7 +143,7 @@ async function mountWithRequest(
   const session = useSession(pinia);
   session.user = { ...OWNER, ...user };
 
-  const wrapper = mount(RequestsPage, { global: { plugins: [pinia] } });
+  const wrapper = mount(RequestsPage, { global: { plugins: [pinia, i18n] } });
   await flushPromises();
 
   return wrapper;
@@ -154,13 +155,21 @@ async function mountWithRescheduleRequest() {
   const session = useSession(pinia);
   session.user = OWNER;
 
-  const wrapper = mount(RequestsPage, { global: { plugins: [pinia] } });
+  const wrapper = mount(RequestsPage, { global: { plugins: [pinia, i18n] } });
   await flushPromises();
 
   return wrapper;
 }
 
 describe('RequestsPage', () => {
+  beforeAll(() => {
+    i18n.global.locale.value = 'en';
+  });
+
+  afterAll(() => {
+    i18n.global.locale.value = 'de';
+  });
+
   it('shows the suggested retained amount and lets the decider override it', async () => {
     const wrapper = await mountWithRequest({ paidCents: 4500, suggestedRetainedAmountCents: 2250 });
 
@@ -244,7 +253,7 @@ describe('RequestsPage', () => {
     const session = useSession(pinia);
     session.user = { ...OWNER, role: 'EMPLOYEE', canIssueRefunds: false, employeeId: 'e1' };
 
-    mount(RequestsPage, { global: { plugins: [pinia] } });
+    mount(RequestsPage, { global: { plugins: [pinia, i18n] } });
     await flushPromises();
 
     // §10.5 gives an employee `cancellation.decide: none`, so asking would be a request
@@ -269,7 +278,7 @@ describe('RequestsPage', () => {
     const session = useSession(pinia);
     session.user = OWNER;
 
-    const wrapper = mount(RequestsPage, { global: { plugins: [pinia] } });
+    const wrapper = mount(RequestsPage, { global: { plugins: [pinia, i18n] } });
     await flushPromises();
 
     // Two queues, two capabilities, two outcomes. One failing call used to take the other
@@ -298,7 +307,7 @@ describe('RequestsPage', () => {
     const session = useSession(pinia);
     session.user = OWNER;
 
-    const wrapper = mount(RequestsPage, { global: { plugins: [pinia] } });
+    const wrapper = mount(RequestsPage, { global: { plugins: [pinia, i18n] } });
     await flushPromises();
 
     // The skeleton, not the empty message: "nothing is waiting for a decision" is a claim

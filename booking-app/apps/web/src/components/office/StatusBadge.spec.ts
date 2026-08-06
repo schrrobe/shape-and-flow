@@ -1,6 +1,8 @@
 import { displayStatusSchema } from '@shape-and-flow/booking-contracts';
 import { mount } from '@vue/test-utils';
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+
+import { i18n } from '../../i18n/index.js';
 
 import { STATUS_PRESENTATION } from './status-presentation.js';
 import StatusBadge from './StatusBadge.vue';
@@ -15,6 +17,16 @@ import StatusBadge from './StatusBadge.vue';
 const ALL_DISPLAY_STATUSES = displayStatusSchema.options;
 
 describe('StatusBadge', () => {
+  // The badge resolves through the shared i18n instance, whose default is German. These
+  // assertions are all written against the English wording.
+  beforeAll(() => {
+    i18n.global.locale.value = 'en';
+  });
+
+  afterAll(() => {
+    i18n.global.locale.value = 'de';
+  });
+
   it('covers every status the contract defines', () => {
     expect(Object.keys(STATUS_PRESENTATION).sort()).toEqual([...ALL_DISPLAY_STATUSES].sort());
   });
@@ -60,11 +72,11 @@ describe('StatusBadge', () => {
   it('gives the two derived statuses their own wording', () => {
     // They are not booking statuses — the row stays CONFIRMED — so a label that said
     // "confirmed" would hide the fact that somebody is waiting for an answer.
-    expect(STATUS_PRESENTATION.CANCELLATION_REQUESTED.label).not.toBe(
-      STATUS_PRESENTATION.CONFIRMED.label,
+    expect(STATUS_PRESENTATION.CANCELLATION_REQUESTED.labelKey).not.toBe(
+      STATUS_PRESENTATION.CONFIRMED.labelKey,
     );
-    expect(STATUS_PRESENTATION.RESCHEDULE_REQUESTED.label).not.toBe(
-      STATUS_PRESENTATION.CONFIRMED.label,
+    expect(STATUS_PRESENTATION.RESCHEDULE_REQUESTED.labelKey).not.toBe(
+      STATUS_PRESENTATION.CONFIRMED.labelKey,
     );
   });
 });

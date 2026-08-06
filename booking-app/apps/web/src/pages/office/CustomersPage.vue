@@ -7,11 +7,13 @@ import {
   SfModal,
   SfSkeleton,
 } from '@shape-and-flow/booking-ui';
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
+import { useI18n } from 'vue-i18n';
 
 import { api } from '../../api/client.js';
 import { useFocusStep } from '../../composables/useFocusStep.js';
 import { date, money } from '../../office/format.js';
+import { registerOfficeMessages } from '../../office/i18n/index.js';
 import { officeMessage } from '../../office/messages.js';
 import { useSession } from '../../stores/session.js';
 
@@ -25,9 +27,12 @@ import type { OfficeCustomer, OfficeCustomerDetail } from '@shape-and-flow/booki
  * operator who believed that would be surprised twice: once when the bookings remain, and
  * once when they discover the person's name cannot be recovered.
  */
+registerOfficeMessages();
+
+const { t } = useI18n();
 const session = useSession();
 
-useFocusStep('Customers');
+useFocusStep(t('office.customers.title'));
 
 const items = ref<OfficeCustomer[]>([]);
 const nextCursor = ref<string | null>(null);
@@ -42,6 +47,11 @@ const erasing = ref<OfficeCustomer | null>(null);
 const erased = ref<string | null>(null);
 
 const form = ref({ firstName: '', lastName: '', email: '', phone: '', internalNote: '' });
+
+/** The customer facing erasure, so the confirmation reads as a sentence rather than two names. */
+const erasingName = computed(() =>
+  `${erasing.value?.firstName ?? ''} ${erasing.value?.lastName ?? ''}`.trim(),
+);
 
 async function load(cursor?: string): Promise<void> {
   loading.value = true;
@@ -118,7 +128,11 @@ async function confirmErase(): Promise<void> {
 
   try {
     const result = await api.office.customers.erase(customer.id);
-    erased.value = `Erased. ${String(result.bookingsRetained)} booking(s) kept.`;
+    erased.value = t(
+      'office.customers.erasedMessage',
+      { count: result.bookingsRetained },
+      result.bookingsRetained,
+    );
     erasing.value = null;
     detail.value = null;
     await load();
@@ -135,18 +149,20 @@ onMounted(load);
 <template>
   <section class="space-y-4">
     <h1 ref="heading" tabindex="-1" class="text-xl font-semibold tracking-tight outline-none">
-      Customers
+      {{ t('office.customers.title') }}
     </h1>
 
     <form class="flex flex-wrap items-end gap-3" @submit.prevent="load()">
       <SfInput
         v-model="search"
-        label="Search"
-        placeholder="Name, email or phone"
+        :label="t('office.customers.searchLabel')"
+        :placeholder="t('office.customers.searchPlaceholder')"
         class="min-w-64"
         data-test="search"
       />
-      <SfButton type="submit" data-test="apply" @click="load()">Search</SfButton>
+      <SfButton type="submit" data-test="apply" @click="load()">
+        {{ t('office.customers.searchButton') }}
+      </SfButton>
     </form>
 
     <SfAlert v-if="error !== null" tone="danger" data-test="error">{{ error }}</SfAlert>
@@ -163,14 +179,16 @@ onMounted(load);
       >
         <span class="font-medium">{{ customer.firstName }} {{ customer.lastName }}</span>
         <span class="text-sm break-all text-text-secondary">{{ customer.email }}</span>
-        <span v-if="customer.archivedAt !== null" class="text-sm text-text-secondary">erased</span>
+        <span v-if="customer.archivedAt !== null" class="text-sm text-text-secondary">
+          {{ t('office.customers.erasedTag') }}
+        </span>
 
         <span class="ml-auto flex gap-2">
           <SfButton variant="ghost" :data-test="`open-${customer.id}`" @click="open(customer)">
-            History
+            {{ t('office.customers.historyButton') }}
           </SfButton>
           <SfButton variant="ghost" :data-test="`edit-${customer.id}`" @click="startEdit(customer)">
-            Edit
+            {{ t('office.customers.editButton') }}
           </SfButton>
           <SfButton
             v-if="session.can('users.manage') && customer.archivedAt === null"
@@ -178,7 +196,7 @@ onMounted(load);
             :data-test="`erase-${customer.id}`"
             @click="erasing = customer"
           >
-            Erase
+            {{ t('office.customers.eraseButton') }}
           </SfButton>
         </span>
       </li>
@@ -190,7 +208,7 @@ onMounted(load);
       data-test="load-more"
       @click="load(nextCursor ?? undefined)"
     >
-      Load more
+      {{ t('office.customers.loadMore') }}
     </SfButton>
 
     <SfCard v-if="detail !== null" as="section" aria-labelledby="detail-heading">
@@ -198,11 +216,13 @@ onMounted(load);
         <h2 id="detail-heading" class="text-lg font-medium">
           {{ detail.firstName }} {{ detail.lastName }}
         </h2>
-        <SfButton variant="ghost" data-test="close-detail" @click="detail = null">Close</SfButton>
+        <SfButton variant="ghost" data-test="close-detail" @click="detail = null">
+          {{ t('office.customers.close') }}
+        </SfButton>
       </div>
 
       <p class="mt-1 text-sm text-text-secondary">
-        Paid over time: {{ money(detail.lifetimeValue) }}
+        {{ t('office.customers.lifetimeValue', { amount: money(detail.lifetimeValue) }) }}
       </p>
       <p v-if="detail.internalNote !== null" class="mt-1 text-sm">{{ detail.internalNote }}</p>
 
@@ -219,28 +239,46 @@ onMounted(load);
           <span class="ml-auto tabular-nums">{{ money(booking.price) }}</span>
         </li>
         <li v-if="detail.bookings.length === 0" class="text-text-secondary">
-          No appointments yet.
+          {{ t('office.customers.noAppointments') }}
         </li>
       </ul>
     </SfCard>
 
     <SfModal
       :open="editing !== null"
-      title="Edit this customer"
-      confirm-label="Save"
+      :title="t('office.customers.editModalTitle')"
+      :confirm-label="t('office.customers.save')"
       :busy="busy"
       @close="editing = null"
       @confirm="submitEdit"
     >
       <div class="space-y-3">
-        <SfInput v-model="form.firstName" label="First name" data-test="first-name" />
-        <SfInput v-model="form.lastName" label="Last name" data-test="last-name" />
-        <SfInput v-model="form.email" type="email" label="Email" data-test="email" />
-        <SfInput v-model="form.phone" type="tel" label="Phone" data-test="phone" />
+        <SfInput
+          v-model="form.firstName"
+          :label="t('office.customers.firstNameLabel')"
+          data-test="first-name"
+        />
+        <SfInput
+          v-model="form.lastName"
+          :label="t('office.customers.lastNameLabel')"
+          data-test="last-name"
+        />
+        <SfInput
+          v-model="form.email"
+          type="email"
+          :label="t('office.customers.emailLabel')"
+          data-test="email"
+        />
+        <SfInput
+          v-model="form.phone"
+          type="tel"
+          :label="t('office.customers.phoneLabel')"
+          data-test="phone"
+        />
         <SfInput
           v-model="form.internalNote"
-          label="Internal note"
-          description="Never shown to the customer."
+          :label="t('office.customers.internalNoteLabel')"
+          :description="t('office.customers.internalNoteHint')"
           data-test="internal-note"
         />
       </div>
@@ -248,19 +286,19 @@ onMounted(load);
 
     <SfModal
       :open="erasing !== null"
-      title="Erase this customer?"
-      confirm-label="Erase"
+      :title="t('office.customers.eraseModalTitle')"
+      :confirm-label="t('office.customers.eraseConfirmLabel')"
       confirm-variant="danger"
       :busy="busy"
       @close="erasing = null"
       @confirm="confirmErase"
     >
       <p>
-        {{ erasing?.firstName }} {{ erasing?.lastName }}'s name, email and phone are replaced and
-        cannot be recovered. <strong>Their appointments stay</strong> — they are the business's own
-        record of what it sold.
+        {{ t('office.customers.eraseIntro', { name: erasingName }) }}
+        <strong>{{ t('office.customers.eraseStays') }}</strong>
+        {{ t('office.customers.eraseReason') }}
       </p>
-      <p class="mt-2">This is refused while a payment or refund is still unsettled.</p>
+      <p class="mt-2">{{ t('office.customers.eraseRefused') }}</p>
     </SfModal>
   </section>
 </template>

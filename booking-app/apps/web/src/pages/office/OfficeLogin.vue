@@ -1,13 +1,18 @@
 <script setup lang="ts">
 import { SfAlert, SfButton, SfInput } from '@shape-and-flow/booking-ui';
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { useRouter } from 'vue-router';
 
 import { ApiError } from '../../api/client.js';
 import OfficeAuthCard from '../../components/office/OfficeAuthCard.vue';
+import { registerOfficeMessages } from '../../office/i18n/index.js';
 import { officeMessage } from '../../office/messages.js';
 import { useSession } from '../../stores/session.js';
 
+registerOfficeMessages();
+
+const { t } = useI18n();
 const router = useRouter();
 const session = useSession();
 
@@ -26,7 +31,7 @@ const problem = ref<string | null>(null);
  * is an account-enumeration oracle. Saying more here than the API does would give that
  * back after the server went to the trouble of withholding it.
  */
-const GENERIC_FAILURE = 'Those details were not accepted.';
+const GENERIC_FAILURE = computed(() => t('office.login.genericFailure'));
 
 async function submit(): Promise<void> {
   submitting.value = true;
@@ -53,16 +58,21 @@ async function submit(): Promise<void> {
 </script>
 
 <template>
-  <OfficeAuthCard heading="Sign in">
-    <SfAlert v-if="session.expired" tone="info" title="Session ended">
-      You were signed out after a period of inactivity. Sign in to carry on where you left off.
+  <OfficeAuthCard :heading="t('office.login.heading')">
+    <SfAlert v-if="session.expired" tone="info" :title="t('office.login.sessionEndedTitle')">
+      {{ t('office.login.sessionEndedBody') }}
     </SfAlert>
 
-    <SfAlert v-if="failed" tone="danger" title="Sign-in failed" data-test="failed">
+    <SfAlert v-if="failed" tone="danger" :title="t('office.login.failedTitle')" data-test="failed">
       {{ GENERIC_FAILURE }}
     </SfAlert>
 
-    <SfAlert v-if="problem !== null" tone="warning" title="Could not sign in" data-test="problem">
+    <SfAlert
+      v-if="problem !== null"
+      tone="warning"
+      :title="t('office.login.problemTitle')"
+      data-test="problem"
+    >
       {{ problem }}
     </SfAlert>
 
@@ -70,7 +80,7 @@ async function submit(): Promise<void> {
       <SfInput
         v-model="email"
         data-test="email"
-        label="Email"
+        :label="t('office.login.emailLabel')"
         type="email"
         autocomplete="username"
         required
@@ -80,7 +90,7 @@ async function submit(): Promise<void> {
       <SfInput
         v-model="password"
         data-test="password"
-        label="Password"
+        :label="t('office.login.passwordLabel')"
         type="password"
         autocomplete="current-password"
         required
@@ -91,10 +101,10 @@ async function submit(): Promise<void> {
         type="submit"
         data-test="sign-in"
         :loading="submitting"
-        loading-label="Signing in"
+        :loading-label="t('office.login.submittingLabel')"
         block
       >
-        Sign in
+        {{ t('office.login.submitLabel') }}
       </SfButton>
     </form>
 
@@ -103,7 +113,7 @@ async function submit(): Promise<void> {
         :to="{ name: 'office-forgot-password' }"
         class="rounded-sf underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
       >
-        Forgotten your password?
+        {{ t('office.login.forgotPassword') }}
       </RouterLink>
     </template>
   </OfficeAuthCard>

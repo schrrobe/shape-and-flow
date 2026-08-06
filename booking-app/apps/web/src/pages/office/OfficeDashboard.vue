@@ -1,13 +1,17 @@
 <script setup lang="ts">
 import { SfAlert, SfCard, SfSkeleton } from '@shape-and-flow/booking-ui';
 import { computed, onMounted } from 'vue';
+import { useI18n } from 'vue-i18n';
 
 import { api } from '../../api/client.js';
 import StatusBadge from '../../components/office/StatusBadge.vue';
 import { useAsyncData } from '../../composables/useAsyncData.js';
 import { useFocusStep } from '../../composables/useFocusStep.js';
+import { registerOfficeMessages } from '../../office/i18n/index.js';
 import { money, time } from '../../office/format.js';
 import { officeMessage } from '../../office/messages.js';
+
+registerOfficeMessages();
 
 /**
  * The morning screen.
@@ -18,6 +22,7 @@ import { officeMessage } from '../../office/messages.js';
  * diagnostics block is one nobody reads on the day it matters.
  */
 const { data, errorKey, loading, run } = useAsyncData((signal) => api.office.dashboard(signal));
+const { t } = useI18n();
 
 useFocusStep('Office overview');
 onMounted(run);
@@ -28,11 +33,27 @@ const operations = computed(() => {
   if (health === undefined) return [];
 
   return [
-    { label: 'Failed jobs', value: health.failedJobs, to: null },
-    { label: 'Stuck outbox rows', value: health.stuckOutboxRows, to: null },
-    { label: 'Notifications pending', value: health.pendingNotifications, to: null },
-    { label: 'Webhooks unprocessed', value: health.unprocessedWebhooks, to: null },
-    { label: 'Overdue completions', value: health.overdueCompletions, to: null },
+    { label: t('office.dashboard.operations.failedJobs'), value: health.failedJobs, to: null },
+    {
+      label: t('office.dashboard.operations.stuckOutboxRows'),
+      value: health.stuckOutboxRows,
+      to: null,
+    },
+    {
+      label: t('office.dashboard.operations.pendingNotifications'),
+      value: health.pendingNotifications,
+      to: null,
+    },
+    {
+      label: t('office.dashboard.operations.unprocessedWebhooks'),
+      value: health.unprocessedWebhooks,
+      to: null,
+    },
+    {
+      label: t('office.dashboard.operations.overdueCompletions'),
+      value: health.overdueCompletions,
+      to: null,
+    },
   ];
 });
 
@@ -43,7 +64,7 @@ const operationsQuiet = computed(() => operations.value.every((row) => row.value
 <template>
   <section class="space-y-4">
     <h1 ref="heading" tabindex="-1" class="text-xl font-semibold tracking-tight outline-none">
-      Overview
+      {{ t('office.dashboard.heading') }}
     </h1>
 
     <SfAlert v-if="errorKey !== null" tone="danger" data-test="error">
@@ -61,7 +82,7 @@ const operationsQuiet = computed(() => operations.value.every((row) => row.value
           class="rounded-sf border border-border bg-surface p-4 hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
           data-test="tile-today"
         >
-          <p class="text-sm text-text-secondary">Today</p>
+          <p class="text-sm text-text-secondary">{{ t('office.dashboard.today') }}</p>
           <p class="text-2xl font-semibold">{{ data.today.length }}</p>
         </RouterLink>
 
@@ -70,7 +91,7 @@ const operationsQuiet = computed(() => operations.value.every((row) => row.value
           class="rounded-sf border border-border bg-surface p-4 hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
           data-test="tile-next7"
         >
-          <p class="text-sm text-text-secondary">Next seven days</p>
+          <p class="text-sm text-text-secondary">{{ t('office.dashboard.nextSevenDays') }}</p>
           <p class="text-2xl font-semibold">{{ data.next7DaysCount }}</p>
         </RouterLink>
 
@@ -79,28 +100,34 @@ const operationsQuiet = computed(() => operations.value.every((row) => row.value
           class="rounded-sf border border-border bg-surface p-4 hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
           data-test="tile-requests"
         >
-          <p class="text-sm text-text-secondary">Open requests</p>
+          <p class="text-sm text-text-secondary">{{ t('office.dashboard.openRequests') }}</p>
           <p class="text-2xl font-semibold">
             {{ data.pendingCancellationRequests + data.pendingRescheduleRequests }}
           </p>
           <p class="text-xs text-text-secondary">
-            {{ data.pendingCancellationRequests }} cancel ·
-            {{ data.pendingRescheduleRequests }} move
+            {{
+              t('office.dashboard.requestsBreakdown', {
+                cancel: data.pendingCancellationRequests,
+                move: data.pendingRescheduleRequests,
+              })
+            }}
           </p>
         </RouterLink>
 
         <div class="rounded-sf border border-border bg-surface p-4" data-test="tile-revenue">
-          <p class="text-sm text-text-secondary">Taken today</p>
+          <p class="text-sm text-text-secondary">{{ t('office.dashboard.takenToday') }}</p>
           <p class="text-2xl font-semibold">{{ money(data.todayRevenue) }}</p>
-          <p class="text-xs text-text-secondary">{{ data.unpaidConfirmedBookings }} still to pay</p>
+          <p class="text-xs text-text-secondary">
+            {{ t('office.dashboard.stillToPay', { count: data.unpaidConfirmedBookings }) }}
+          </p>
         </div>
       </div>
 
       <SfCard as="section" aria-labelledby="today-heading">
-        <h2 id="today-heading" class="text-lg font-medium">Today</h2>
+        <h2 id="today-heading" class="text-lg font-medium">{{ t('office.dashboard.today') }}</h2>
 
         <p v-if="data.today.length === 0" class="mt-2 text-text-secondary" data-test="today-empty">
-          Nothing booked for today.
+          {{ t('office.dashboard.nothingBookedToday') }}
         </p>
 
         <ul v-else class="mt-3 divide-y divide-border">
@@ -130,14 +157,16 @@ const operationsQuiet = computed(() => operations.value.every((row) => row.value
         :data-quiet="operationsQuiet"
         aria-labelledby="operations-heading"
       >
-        <h2 id="operations-heading" class="text-sm font-medium text-text-secondary">Operations</h2>
+        <h2 id="operations-heading" class="text-sm font-medium text-text-secondary">
+          {{ t('office.dashboard.operationsHeading') }}
+        </h2>
 
         <dl class="mt-2 flex flex-wrap gap-x-6 gap-y-2 text-sm">
           <div v-for="row in operations" :key="row.label" class="flex items-baseline gap-2">
             <dt class="text-text-secondary">{{ row.label }}</dt>
             <dd class="font-medium tabular-nums" :data-test="`ops-${row.label}`">
               <!-- `-1` is the API saying it could not read the figure, not a count. -->
-              {{ row.value < 0 ? 'unknown' : row.value }}
+              {{ row.value < 0 ? t('office.dashboard.operations.unknown') : row.value }}
             </dd>
           </div>
         </dl>

@@ -7,11 +7,13 @@ import {
   SfModal,
   SfSkeleton,
 } from '@shape-and-flow/booking-ui';
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
+import { useI18n } from 'vue-i18n';
 
 import { api } from '../../api/client.js';
 import { useFocusStep } from '../../composables/useFocusStep.js';
 import { today } from '../../office/format.js';
+import { registerOfficeMessages } from '../../office/i18n/index.js';
 import { officeMessage } from '../../office/messages.js';
 import { blockingBookingCount, useCrudResource } from '../../office/useCrudResource.js';
 
@@ -34,7 +36,11 @@ import type {
  * comes back in the error's `details`, so the message says how many rather than only that
  * it did not work.
  */
-useFocusStep('Team');
+registerOfficeMessages();
+
+const { t } = useI18n();
+
+useFocusStep(t('office.employees.title'));
 
 const includeArchived = ref(false);
 
@@ -50,6 +56,9 @@ const form = ref({ firstName: '', lastName: '', displayName: '', email: '', phon
 
 /** Whose archive was refused, so the count in the message has something to link to. */
 const blockedEmployeeId = ref<string | null>(null);
+
+/** How many appointments are in the way of an archive, so the message can pluralize once. */
+const blockedCount = computed(() => blockingBookingCount(employees.errorDetails.value));
 
 /** Whose week is open, and what the last save reported. */
 const hours = ref<{
@@ -176,21 +185,27 @@ async function toggleArchived(): Promise<void> {
   <section class="space-y-4">
     <div class="flex flex-wrap items-center justify-between gap-3">
       <h1 ref="heading" tabindex="-1" class="text-xl font-semibold tracking-tight outline-none">
-        Team
+        {{ t('office.employees.title') }}
       </h1>
 
       <div class="flex gap-2">
         <SfButton variant="ghost" data-test="toggle-archived" @click="toggleArchived">
-          {{ includeArchived ? 'Hide archived' : 'Show archived' }}
+          {{
+            includeArchived
+              ? t('office.employees.hideArchived')
+              : t('office.employees.showArchived')
+          }}
         </SfButton>
-        <SfButton data-test="add-employee" @click="startCreate">Add somebody</SfButton>
+        <SfButton data-test="add-employee" @click="startCreate">
+          {{ t('office.employees.addButton') }}
+        </SfButton>
       </div>
     </div>
 
     <SfAlert v-if="employees.error.value !== null" tone="danger" data-test="error">
       {{ employees.error.value }}
-      <template v-if="blockingBookingCount(employees.errorDetails.value) !== null">
-        {{ blockingBookingCount(employees.errorDetails.value) }} appointment(s) are in the way.
+      <template v-if="blockedCount !== null">
+        {{ t('office.employees.blockedAppointments', { count: blockedCount }, blockedCount) }}
         <!--
           The archive dialog stays open on a refusal, so the person being archived is still
           known and the link can point at their appointments. Closing it first would leave
@@ -201,7 +216,7 @@ async function toggleArchived(): Promise<void> {
           :to="{ name: 'office-bookings', query: { employeeId: blockedEmployeeId } }"
           class="underline"
         >
-          Show them
+          {{ t('office.employees.showThemLink') }}
         </RouterLink>
       </template>
     </SfAlert>
@@ -216,9 +231,11 @@ async function toggleArchived(): Promise<void> {
         :data-test="`employee-${employee.id}`"
       >
         <span class="font-medium">{{ employee.displayName }}</span>
-        <span class="text-sm text-text-secondary">{{ employee.email ?? 'no email' }}</span>
+        <span class="text-sm text-text-secondary">
+          {{ employee.email ?? t('office.employees.noEmail') }}
+        </span>
         <span v-if="employee.archivedAt !== null" class="text-sm text-text-secondary">
-          archived
+          {{ t('office.employees.archivedTag') }}
         </span>
 
         <span class="ml-auto flex flex-wrap gap-2">
@@ -227,10 +244,10 @@ async function toggleArchived(): Promise<void> {
             :data-test="`hours-${employee.id}`"
             @click="openHours(employee)"
           >
-            Working hours
+            {{ t('office.employees.workingHoursButton') }}
           </SfButton>
           <SfButton variant="ghost" :data-test="`edit-${employee.id}`" @click="startEdit(employee)">
-            Edit
+            {{ t('office.employees.editButton') }}
           </SfButton>
           <SfButton
             v-if="employee.archivedAt === null"
@@ -238,7 +255,7 @@ async function toggleArchived(): Promise<void> {
             :data-test="`archive-${employee.id}`"
             @click="archiving = employee"
           >
-            Archive
+            {{ t('office.employees.archiveButton') }}
           </SfButton>
         </span>
       </li>
@@ -247,9 +264,11 @@ async function toggleArchived(): Promise<void> {
     <SfCard v-if="hours !== null" as="section" aria-labelledby="hours-heading">
       <div class="flex items-baseline justify-between">
         <h2 id="hours-heading" class="text-lg font-medium">
-          {{ hours.employee.displayName }}'s week
+          {{ t('office.employees.weekHeading', { name: hours.employee.displayName }) }}
         </h2>
-        <SfButton variant="ghost" data-test="close-hours" @click="hours = null">Close</SfButton>
+        <SfButton variant="ghost" data-test="close-hours" @click="hours = null">
+          {{ t('office.employees.close') }}
+        </SfButton>
       </div>
 
       <WorkingHoursEditor
@@ -263,8 +282,8 @@ async function toggleArchived(): Promise<void> {
 
     <SfModal
       :open="creating || editing !== null"
-      :title="creating ? 'Add somebody to the team' : 'Edit this person'"
-      confirm-label="Save"
+      :title="creating ? t('office.employees.addModalTitle') : t('office.employees.editModalTitle')"
+      :confirm-label="t('office.employees.save')"
       :busy="employees.saving.value"
       @close="
         creating = false;
@@ -273,31 +292,50 @@ async function toggleArchived(): Promise<void> {
       @confirm="creating ? submitCreate() : submitEdit()"
     >
       <div class="space-y-3">
-        <SfInput v-model="form.firstName" label="First name" required data-test="first-name" />
-        <SfInput v-model="form.lastName" label="Last name" required data-test="last-name" />
+        <SfInput
+          v-model="form.firstName"
+          :label="t('office.employees.firstNameLabel')"
+          required
+          data-test="first-name"
+        />
+        <SfInput
+          v-model="form.lastName"
+          :label="t('office.employees.lastNameLabel')"
+          required
+          data-test="last-name"
+        />
         <SfInput
           v-model="form.displayName"
-          label="Shown to customers"
-          description="Leave empty to use the first and last name."
+          :label="t('office.employees.displayNameLabel')"
+          :description="t('office.employees.displayNameHint')"
           data-test="display-name"
         />
-        <SfInput v-model="form.email" type="email" label="Email" data-test="email" />
-        <SfInput v-model="form.phone" type="tel" label="Phone" data-test="phone" />
+        <SfInput
+          v-model="form.email"
+          type="email"
+          :label="t('office.employees.emailLabel')"
+          data-test="email"
+        />
+        <SfInput
+          v-model="form.phone"
+          type="tel"
+          :label="t('office.employees.phoneLabel')"
+          data-test="phone"
+        />
       </div>
     </SfModal>
 
     <SfModal
       :open="archiving !== null"
-      title="Archive this person?"
-      confirm-label="Archive"
+      :title="t('office.employees.archiveModalTitle')"
+      :confirm-label="t('office.employees.archiveConfirmLabel')"
       confirm-variant="danger"
       :busy="employees.saving.value"
       @close="archiving = null"
       @confirm="confirmArchive"
     >
       <p>
-        {{ archiving?.displayName }} stops being bookable. Past appointments keep their record. This
-        is refused if they still have appointments to come.
+        {{ t('office.employees.archiveBody', { name: archiving?.displayName ?? '' }) }}
       </p>
     </SfModal>
   </section>
