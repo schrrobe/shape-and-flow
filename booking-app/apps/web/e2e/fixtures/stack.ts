@@ -311,10 +311,7 @@ export async function selectDateWithSlots(page: Page, onOrAfter: string): Promis
     .locator('[data-test="calendar-day"][data-has-slots="true"]')
     .evaluateAll((elements) => elements.map((element) => element.getAttribute('data-date') ?? ''));
 
-  const chosen = dates
-    .filter((date) => date >= onOrAfter)
-    .sort()
-    .at(0);
+  const chosen = dates.filter((date) => date >= onOrAfter).sort().at(0);
   if (chosen === undefined) {
     throw new Error(`No day with a slot on or after ${onOrAfter} in ${targetMonth}.`);
   }

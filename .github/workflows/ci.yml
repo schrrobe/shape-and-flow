@@ -111,6 +111,11 @@ jobs:
     name: End-to-end tests
     runs-on: ubuntu-latest
     needs: [integration]
+    # Opening or updating a PR only — not a push to main/fusion. Those pushes are merges
+    # already covered by e2e during the PR's own run; re-running here would only slow the
+    # deploy down. `deploy` below still needs this job: on a push event it's skipped, which
+    # `needs` treats as a pass, so the deploy proceeds without waiting on it.
+    if: github.event_name == 'pull_request'
     services:
       postgres:
         image: postgres:17@sha256:a426e44bac0b759c95894d68e1a0ac03ecc20b619f498a91aae373bf06d8508d

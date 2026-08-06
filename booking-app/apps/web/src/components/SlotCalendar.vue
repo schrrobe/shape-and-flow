@@ -56,9 +56,7 @@ const leadingBlanks = computed(() => {
 
 const cells = computed(() => {
   const first = new Date(`${props.monthAnchor}T12:00:00Z`);
-  const daysInMonth = new Date(
-    Date.UTC(first.getUTCFullYear(), first.getUTCMonth() + 1, 0),
-  ).getUTCDate();
+  const daysInMonth = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth() + 1, 0)).getUTCDate();
   const hasSlotsByDate = new Map(props.days.map((day) => [day.date, day.slots.length > 0]));
   const monthPrefix = props.monthAnchor.slice(0, 7);
 
@@ -128,7 +126,11 @@ function onDayKeydown(event: KeyboardEvent, date: string): void {
 </script>
 
 <template>
-  <div class="flex flex-col gap-3" data-test="calendar" :data-loading="loading ? 'true' : 'false'">
+  <div
+    class="flex flex-col gap-3"
+    data-test="calendar"
+    :data-loading="loading ? 'true' : 'false'"
+  >
     <div class="flex items-center justify-between">
       <SfButton
         variant="ghost"
