@@ -52,7 +52,15 @@
     "expired": "Expired",
     "paymentFailed": "Payment failed",
     "cancellationRequested": "Cancellation requested",
-    "moveRequested": "Move requested"
+    "moveRequested": "Move requested",
+    "paymentStatusPending": "Pending",
+    "paymentStatusSucceeded": "Paid",
+    "paymentStatusPartiallyRefunded": "Partially refunded",
+    "paymentStatusRefunded": "Refunded",
+    "refundStatusPending": "Pending",
+    "refundStatusSucceeded": "Completed",
+    "refundStatusFailed": "Failed",
+    "refundStatusCanceled": "Canceled"
   },
   "availability": {
     "title": "Availability",
@@ -172,7 +180,8 @@
     "paymentMethodOther": "Other",
     "refundReasonGoodwill": "Goodwill",
     "refundReasonBusinessCancellation": "We cancelled",
-    "refundReasonDuplicatePayment": "Paid twice"
+    "refundReasonDuplicatePayment": "Paid twice",
+    "refundReasonCustomerCancellation": "Customer cancelled"
   },
   "calendar": {
     "heading": "Calendar",
@@ -494,6 +503,11 @@
     "save": "Save the week",
     "saving": "Saving",
     "invalidTimeFormat": "Every time must be written as HH:MM, for example {example}.",
+    "problemEndAfterStart": "The end time must be after the start time.",
+    "problemBreakEndAfterStart": "A break must end after it starts.",
+    "problemBreakInsideSegment": "A break must lie inside its shift.",
+    "problemBreaksOverlap": "Breaks must not overlap each other.",
+    "problemSegmentsOverlap": "Shifts on the same day must not overlap.",
     "weekdays": {
       "monday": "Monday",
       "tuesday": "Tuesday",

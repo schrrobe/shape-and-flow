@@ -13,14 +13,17 @@ import { useI18n } from 'vue-i18n';
 import { useRoute } from 'vue-router';
 
 import { api } from '../../api/client.js';
+import { STATUS_PRESENTATION } from '../../components/office/status-presentation.js';
 import StatusBadge from '../../components/office/StatusBadge.vue';
 import { useAsyncData } from '../../composables/useAsyncData.js';
 import { useFocusStep } from '../../composables/useFocusStep.js';
-import { registerOfficeMessages } from '../../office/i18n/index.js';
 import { dateTime, difference, hasPassed, money, time } from '../../office/format.js';
+import { registerOfficeMessages } from '../../office/i18n/index.js';
 import { officeMessage } from '../../office/messages.js';
 import { useOfficeAction } from '../../office/useOfficeAction.js';
 import { useSession } from '../../stores/session.js';
+
+import type { PaymentStatus, RefundReason, RefundStatus } from '@shape-and-flow/booking-contracts';
 
 /**
  * One booking, and every action that can be taken on it.
@@ -77,6 +80,31 @@ const REFUND_REASONS = computed(() => [
   },
   { value: 'DUPLICATE_PAYMENT', label: t('office.bookingDetail.refundReasonDuplicatePayment') },
 ]);
+
+/** Every reason a refund can carry, including `CUSTOMER_CANCELLATION` — recorded
+ * automatically by the cancellation flow, so absent from `REFUND_REASONS` above but still
+ * something the history list must be able to display. */
+const REFUND_REASON_LABEL_KEYS: Record<RefundReason, string> = {
+  CUSTOMER_CANCELLATION: 'office.bookingDetail.refundReasonCustomerCancellation',
+  BUSINESS_CANCELLATION: 'office.bookingDetail.refundReasonBusinessCancellation',
+  GOODWILL: 'office.bookingDetail.refundReasonGoodwill',
+  DUPLICATE_PAYMENT: 'office.bookingDetail.refundReasonDuplicatePayment',
+};
+
+const PAYMENT_STATUS_LABEL_KEYS: Record<PaymentStatus, string> = {
+  PENDING: 'office.status.paymentStatusPending',
+  SUCCEEDED: 'office.status.paymentStatusSucceeded',
+  FAILED: 'office.status.paymentFailed',
+  PARTIALLY_REFUNDED: 'office.status.paymentStatusPartiallyRefunded',
+  REFUNDED: 'office.status.paymentStatusRefunded',
+};
+
+const REFUND_STATUS_LABEL_KEYS: Record<RefundStatus, string> = {
+  PENDING: 'office.status.refundStatusPending',
+  SUCCEEDED: 'office.status.refundStatusSucceeded',
+  FAILED: 'office.status.refundStatusFailed',
+  CANCELED: 'office.status.refundStatusCanceled',
+};
 
 const cancelReason = ref('');
 const cancelRefundEuros = ref('');
@@ -416,7 +444,10 @@ onMounted(run);
 
           <ul class="mt-3 space-y-1 text-sm" data-test="money">
             <li v-for="payment in data.payments" :key="payment.id" class="flex justify-between">
-              <span>{{ t('office.bookingDetail.cardPayment') }} · {{ payment.status }}</span>
+              <span>
+                {{ t('office.bookingDetail.cardPayment') }} ·
+                {{ t(PAYMENT_STATUS_LABEL_KEYS[payment.status]) }}
+              </span>
               <span class="tabular-nums">{{ money(payment.amount) }}</span>
             </li>
             <li
@@ -433,7 +464,11 @@ onMounted(run);
               <span class="tabular-nums">{{ money(payment.amount) }}</span>
             </li>
             <li v-for="refund in data.refunds" :key="refund.id" class="flex justify-between">
-              <span>{{ t('office.bookingDetail.refund') }} · {{ refund.reason }} · {{ refund.status }}</span>
+              <span>
+                {{ t('office.bookingDetail.refund') }} ·
+                {{ t(REFUND_REASON_LABEL_KEYS[refund.reason]) }} ·
+                {{ t(REFUND_STATUS_LABEL_KEYS[refund.status]) }}
+              </span>
               <span class="tabular-nums">−{{ money(refund.amount) }}</span>
             </li>
             <li
@@ -478,7 +513,14 @@ onMounted(run);
           <ol class="mt-3 space-y-1 text-sm" data-test="history">
             <li v-for="entry in data.statusHistory" :key="entry.id" class="flex flex-wrap gap-x-3">
               <span class="tabular-nums text-text-secondary">{{ dateTime(entry.createdAt) }}</span>
-              <span>{{ entry.fromStatus ?? t('office.bookingDetail.created') }} → {{ entry.toStatus }}</span>
+              <span>
+                {{
+                  entry.fromStatus === null
+                    ? t('office.bookingDetail.created')
+                    : t(STATUS_PRESENTATION[entry.fromStatus].labelKey)
+                }}
+                → {{ t(STATUS_PRESENTATION[entry.toStatus].labelKey) }}
+              </span>
               <span class="text-text-secondary">{{ entry.actorType }}</span>
               <span v-if="entry.reason !== null" class="text-text-secondary">
                 {{ entry.reason }}

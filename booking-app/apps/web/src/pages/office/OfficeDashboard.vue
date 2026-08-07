@@ -7,8 +7,8 @@ import { api } from '../../api/client.js';
 import StatusBadge from '../../components/office/StatusBadge.vue';
 import { useAsyncData } from '../../composables/useAsyncData.js';
 import { useFocusStep } from '../../composables/useFocusStep.js';
-import { registerOfficeMessages } from '../../office/i18n/index.js';
 import { money, time } from '../../office/format.js';
+import { registerOfficeMessages } from '../../office/i18n/index.js';
 import { officeMessage } from '../../office/messages.js';
 
 registerOfficeMessages();
@@ -24,7 +24,7 @@ registerOfficeMessages();
 const { data, errorKey, loading, run } = useAsyncData((signal) => api.office.dashboard(signal));
 const { t } = useI18n();
 
-useFocusStep('Office overview');
+useFocusStep(() => t('office.dashboard.heading'));
 onMounted(run);
 
 /** The operations figures, with `-1` meaning "could not be counted". */
@@ -33,23 +33,32 @@ const operations = computed(() => {
   if (health === undefined) return [];
 
   return [
-    { label: t('office.dashboard.operations.failedJobs'), value: health.failedJobs, to: null },
     {
+      id: 'failed-jobs',
+      label: t('office.dashboard.operations.failedJobs'),
+      value: health.failedJobs,
+      to: null,
+    },
+    {
+      id: 'stuck-outbox-rows',
       label: t('office.dashboard.operations.stuckOutboxRows'),
       value: health.stuckOutboxRows,
       to: null,
     },
     {
+      id: 'pending-notifications',
       label: t('office.dashboard.operations.pendingNotifications'),
       value: health.pendingNotifications,
       to: null,
     },
     {
+      id: 'unprocessed-webhooks',
       label: t('office.dashboard.operations.unprocessedWebhooks'),
       value: health.unprocessedWebhooks,
       to: null,
     },
     {
+      id: 'overdue-completions',
       label: t('office.dashboard.operations.overdueCompletions'),
       value: health.overdueCompletions,
       to: null,
@@ -162,9 +171,9 @@ const operationsQuiet = computed(() => operations.value.every((row) => row.value
         </h2>
 
         <dl class="mt-2 flex flex-wrap gap-x-6 gap-y-2 text-sm">
-          <div v-for="row in operations" :key="row.label" class="flex items-baseline gap-2">
+          <div v-for="row in operations" :key="row.id" class="flex items-baseline gap-2">
             <dt class="text-text-secondary">{{ row.label }}</dt>
-            <dd class="font-medium tabular-nums" :data-test="`ops-${row.label}`">
+            <dd class="font-medium tabular-nums" :data-test="`ops-${row.id}`">
               <!-- `-1` is the API saying it could not read the figure, not a count. -->
               {{ row.value < 0 ? t('office.dashboard.operations.unknown') : row.value }}
             </dd>

@@ -47,6 +47,21 @@ const WEEKDAY_LABELS: Record<Weekday, string> = {
   SUNDAY: 'office.workingHours.weekdays.sunday',
 };
 
+/**
+ * Every fixed English string `replaceWorkingHoursSchema`'s refinements can produce, mapped
+ * to a translation key. The schema's own `issue.message` is what the API and the browser
+ * agree on, so it is the map's key rather than `issue.code`/`issue.path` — several
+ * refinements share the same path and would not be distinguishable otherwise.
+ */
+const VALIDATION_MESSAGE_KEYS: Record<string, string> = {
+  'endMinute must be after startMinute': 'office.workingHours.problemEndAfterStart',
+  'a break must end after it starts': 'office.workingHours.problemBreakEndAfterStart',
+  'a break must lie inside the segment that contains it':
+    'office.workingHours.problemBreakInsideSegment',
+  'breaks must not overlap each other': 'office.workingHours.problemBreaksOverlap',
+  'segments on the same weekday must not overlap': 'office.workingHours.problemSegmentsOverlap',
+};
+
 const WEEKDAYS = weekdaySchema.options;
 const WEEKDAY_OPTIONS = computed(() =>
   WEEKDAYS.map((day) => ({
@@ -139,7 +154,12 @@ const problems = computed<string[]>(() => {
 
   // De-duplicated: one overlap produces the same message once per affected segment, and
   // an operator does not need to be told three times.
-  return [...new Set(result.error.issues.map((issue) => issue.message))];
+  const messages = result.error.issues.map((issue) => {
+    const key = VALIDATION_MESSAGE_KEYS[issue.message];
+    return key === undefined ? issue.message : t(key);
+  });
+
+  return [...new Set(messages)];
 });
 
 const valid = computed(() => problems.value.length === 0);

@@ -40,7 +40,7 @@ registerOfficeMessages();
 
 const { t } = useI18n();
 
-useFocusStep(t('office.employees.title'));
+useFocusStep(() => t('office.employees.title'));
 
 const includeArchived = ref(false);
 

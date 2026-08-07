@@ -213,4 +213,36 @@ describe('WorkingHoursEditor', () => {
 
     expect(savedBody(wrapper).segments).toEqual([]);
   });
+
+  it('flags an overlap in German, not the raw Zod message', async () => {
+    i18n.global.locale.value = 'de';
+
+    const wrapper = mount(WorkingHoursEditor, {
+      props: { segments: [seg('MONDAY', 540, 720)] },
+      global: { plugins: [i18n] },
+    });
+
+    await addSegment(wrapper, { weekday: 'MONDAY', start: '11:00', end: '14:00' });
+
+    expect(wrapper.text()).toMatch(/überschneiden/i);
+    expect(wrapper.text()).not.toMatch(/must not overlap/i);
+
+    i18n.global.locale.value = 'en';
+  });
+
+  it('flags a break outside its shift in German, not the raw Zod message', async () => {
+    i18n.global.locale.value = 'de';
+
+    const wrapper = mount(WorkingHoursEditor, {
+      props: { segments: [seg('MONDAY', 540, 720)] },
+      global: { plugins: [i18n] },
+    });
+
+    await addBreak(wrapper, 0, { start: '13:00', end: '13:30' });
+
+    expect(wrapper.text()).toMatch(/innerhalb/i);
+    expect(wrapper.text()).not.toMatch(/must lie inside/i);
+
+    i18n.global.locale.value = 'en';
+  });
 });

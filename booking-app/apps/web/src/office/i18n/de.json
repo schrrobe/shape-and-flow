@@ -52,7 +52,15 @@
     "expired": "Abgelaufen",
     "paymentFailed": "Zahlung fehlgeschlagen",
     "cancellationRequested": "Stornierung angefragt",
-    "moveRequested": "Verschiebung angefragt"
+    "moveRequested": "Verschiebung angefragt",
+    "paymentStatusPending": "Ausstehend",
+    "paymentStatusSucceeded": "Bezahlt",
+    "paymentStatusPartiallyRefunded": "Teilweise erstattet",
+    "paymentStatusRefunded": "Erstattet",
+    "refundStatusPending": "Ausstehend",
+    "refundStatusSucceeded": "Abgeschlossen",
+    "refundStatusFailed": "Fehlgeschlagen",
+    "refundStatusCanceled": "Storniert"
   },
   "availability": {
     "title": "Verfügbarkeit",
@@ -172,7 +180,8 @@
     "paymentMethodOther": "Sonstiges",
     "refundReasonGoodwill": "Kulanz",
     "refundReasonBusinessCancellation": "Wir haben storniert",
-    "refundReasonDuplicatePayment": "Doppelt bezahlt"
+    "refundReasonDuplicatePayment": "Doppelt bezahlt",
+    "refundReasonCustomerCancellation": "Kunde hat storniert"
   },
   "calendar": {
     "heading": "Kalender",
@@ -494,6 +503,11 @@
     "save": "Woche speichern",
     "saving": "Wird gespeichert",
     "invalidTimeFormat": "Jede Uhrzeit muss als HH:MM geschrieben werden, zum Beispiel {example}.",
+    "problemEndAfterStart": "Die Endzeit muss nach der Startzeit liegen.",
+    "problemBreakEndAfterStart": "Eine Pause muss enden, nachdem sie beginnt.",
+    "problemBreakInsideSegment": "Eine Pause muss innerhalb der Schicht liegen.",
+    "problemBreaksOverlap": "Pausen dürfen sich nicht überschneiden.",
+    "problemSegmentsOverlap": "Schichten am selben Tag dürfen sich nicht überschneiden.",
     "weekdays": {
       "monday": "Montag",
       "tuesday": "Dienstag",

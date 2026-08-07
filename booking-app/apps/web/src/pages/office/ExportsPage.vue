@@ -5,6 +5,7 @@ import { computed, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 
 import { api } from '../../api/client.js';
+import { STATUS_PRESENTATION } from '../../components/office/status-presentation.js';
 import { useFocusStep } from '../../composables/useFocusStep.js';
 import { addDays } from '../../composables/useLocalDate.js';
 import { localDateLabel, today } from '../../office/format.js';
@@ -27,7 +28,7 @@ registerOfficeMessages();
 
 const { t } = useI18n();
 
-useFocusStep('Exports');
+useFocusStep(() => t('office.exports.title'));
 
 const from = ref(addDays(today(), -30));
 const to = ref(today());
@@ -36,7 +37,10 @@ const includeCustomerNote = ref(false);
 
 const STATUS_OPTIONS = computed(() => [
   { value: '', label: t('office.exports.everyStatusOption') },
-  ...bookingStatusSchema.options.map((value) => ({ value, label: value })),
+  ...bookingStatusSchema.options.map((value) => ({
+    value,
+    label: t(STATUS_PRESENTATION[value].labelKey),
+  })),
 ]);
 
 const rangeValid = computed(() => from.value !== '' && to.value !== '' && from.value <= to.value);

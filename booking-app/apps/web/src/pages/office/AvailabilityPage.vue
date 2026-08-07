@@ -44,7 +44,7 @@ registerOfficeMessages();
 const session = useSession();
 const { t } = useI18n();
 
-useFocusStep('Availability');
+useFocusStep(() => t('office.availability.title'));
 
 // Derived from the contract rather than written as a number.
 //

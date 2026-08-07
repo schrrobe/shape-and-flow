@@ -10,8 +10,8 @@ import CalendarGrid from '../../components/office/CalendarGrid.vue';
 import { useAsyncData } from '../../composables/useAsyncData.js';
 import { useFocusStep } from '../../composables/useFocusStep.js';
 import { addDays } from '../../composables/useLocalDate.js';
-import { registerOfficeMessages } from '../../office/i18n/index.js';
 import { localDateLabel, today } from '../../office/format.js';
+import { registerOfficeMessages } from '../../office/i18n/index.js';
 import { officeMessage } from '../../office/messages.js';
 import { useSession } from '../../stores/session.js';
 
@@ -32,7 +32,7 @@ const router = useRouter();
 const session = useSession();
 const { t } = useI18n();
 
-useFocusStep('Calendar');
+useFocusStep(() => t('office.calendar.heading'));
 
 /**
  * The day on screen, and it has to be a real one.

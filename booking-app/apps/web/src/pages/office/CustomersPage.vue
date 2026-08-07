@@ -32,7 +32,7 @@ registerOfficeMessages();
 const { t } = useI18n();
 const session = useSession();
 
-useFocusStep(t('office.customers.title'));
+useFocusStep(() => t('office.customers.title'));
 
 const items = ref<OfficeCustomer[]>([]);
 const nextCursor = ref<string | null>(null);
