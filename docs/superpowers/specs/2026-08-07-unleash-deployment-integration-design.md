@@ -31,10 +31,10 @@ Repository deployment names map to Unleash environment names as follows:
 | Repository name | Unleash environment | Public host examples |
 |---|---|---|
 | `dev` | `development` | `dev.buchung.shapeandflow.de`, `dev.shapeandflow.de` |
-| `stage` | `staging` | `stage.buchung.shapeandflow.de`, `stage.shapeandflow.de` |
+| `stage` | `development` | `stage.buchung.shapeandflow.de`, `stage.shapeandflow.de` |
 | `production` | `production` | `buchung.shapeandflow.de`, `shapeandflow.de` |
 
-One Unleash project named `shape-and-flow` owns all flags and all six runtime tokens.
+Unleash OSS exposes only the built-in `default` project and the `development` and `production` environments. The `default` project owns all flags and all six runtime tokens. Dev and stage receive distinct tokens scoped to `development`; the `deployment` context property (`dev`, `stage`, or `production`) distinguishes them in strategies when needed.
 
 ## Token and Credential Model
 
@@ -85,14 +85,15 @@ The typed environment schema adds:
 - `UNLEASH_BACKEND_TOKEN`
 - `UNLEASH_FRONTEND_TOKEN`
 - `UNLEASH_ENVIRONMENT`
+- `UNLEASH_DEPLOYMENT`
 
-Production-like environments require all four values. Tests may omit them and receive an explicitly disabled feature-flag service.
+Production-like environments require all five values. Tests may omit them and receive an explicitly disabled feature-flag service. Every server-side evaluation adds the configured `deployment` property to its Unleash context.
 
 ### Browser runtime
 
-The static Vue image remains environment-neutral. The booking API exposes an unauthenticated, non-secret runtime configuration endpoint under `/api/public/feature-flags/config`. It returns only the frontend URL, frontend token, environment, and browser application name. Returning a frontend token is intentional: the same value is necessarily visible to any browser using the SDK, and its permissions are restricted in Unleash.
+The static Vue image remains environment-neutral. The booking API exposes an unauthenticated, non-secret runtime configuration endpoint under `/api/public/feature-flags/config`. It returns only the frontend URL, frontend token, environment, deployment, and browser application name. Returning a frontend token is intentional: the same value is necessarily visible to any browser using the SDK, and its permissions are restricted in Unleash.
 
-The Vue application adds `unleash-proxy-client`, initializes it after loading runtime configuration, and exposes a reactive `useFeatureFlag(flagName, fallback = false)` composable. Components can therefore render directly from Unleash flags without creating environment-specific frontend images. Until the first successful synchronization, the composable returns its fallback. The client SDK may reuse its last locally cached state during a temporary outage.
+The Vue application adds `unleash-proxy-client`, initializes it after loading runtime configuration, includes `deployment` in the browser context, and exposes a reactive `useFeatureFlag(flagName, fallback = false)` composable. Components can therefore render directly from Unleash flags without creating environment-specific frontend images. Until the first successful synchronization, the composable returns its fallback. The client SDK may reuse its last locally cached state during a temporary outage.
 
 The booking `.env.example` and `.env.production.example` document names and safe placeholders. The ignored local `booking-app/.env` receives development values. GitHub Environment `ENV_FILE` secrets and the mode `0600` VPS files under `/opt/booking/dev` and `/opt/booking/stage` receive their matching values. Production values are prepared in the production example/local ignored configuration even though no production booking stack currently exists on the VPS.
 
@@ -107,6 +108,7 @@ Private runtime configuration uses:
 - `NUXT_UNLEASH_URL`
 - `NUXT_UNLEASH_BACKEND_TOKEN`
 - `NUXT_UNLEASH_ENVIRONMENT`
+- `NUXT_UNLEASH_DEPLOYMENT`
 
 ### Browser runtime
 
@@ -115,12 +117,13 @@ Nuxt adds `unleash-proxy-client`. A client-only plugin creates one browser SDK i
 - `NUXT_PUBLIC_UNLEASH_URL`
 - `NUXT_PUBLIC_UNLEASH_FRONTEND_TOKEN`
 - `NUXT_PUBLIC_UNLEASH_ENVIRONMENT`
+- `NUXT_PUBLIC_UNLEASH_DEPLOYMENT`
 
-The Docker Compose file explicitly passes the six Unleash runtime variables. The deploy workflow reads backend tokens from GitHub Environment secrets and frontend tokens plus URL/environment from GitHub Environment variables, then writes them into the existing mode `0600` files at `/opt/landing/{dev,stage,production}/.env.<env>`. Backend tokens are never echoed by smoke tests or failure diagnostics.
+The Docker Compose file explicitly passes the eight Unleash runtime variables. The deploy workflow reads backend tokens from GitHub Environment secrets and frontend tokens plus URL/environment/deployment from GitHub Environment variables, then writes them into the existing mode `0600` files at `/opt/landing/{dev,stage,production}/.env.<env>`. Backend tokens are never echoed by smoke tests or failure diagnostics.
 
 ## Unleash Configuration
 
-The installation creates the `shape-and-flow` project, enables `development`, `staging`, and `production`, and provisions the six scoped tokens. A flag named `system.unleash-integration-smoke` exists in the project and is disabled in all environments. Automated and manual checks evaluate it as `false`; it is not referenced by visible UI markup.
+The installation uses the OSS `default` project and its built-in `development` and `production` environments, then provisions six scoped tokens: separate dev and stage tokens both target `development`, while production tokens target `production`. A flag named `system.unleash-integration-smoke` exists in `default` and is disabled in both environments. Automated and manual checks evaluate it as `false`; it is not referenced by visible UI markup.
 
 Browser access uses `https://unleash.shapeandflow.de/api/frontend`. Nginx limits browser origins to `https://buchung.shapeandflow.de`, `https://stage.buchung.shapeandflow.de`, `https://dev.buchung.shapeandflow.de`, `https://shapeandflow.de`, `https://stage.shapeandflow.de`, `https://dev.shapeandflow.de`, `http://localhost:5173`, and `http://localhost:3000`. Server SDKs use `https://unleash.shapeandflow.de/api/` with backend tokens.
 
@@ -141,7 +144,7 @@ The work is accepted when all of the following hold:
 
 1. `https://unleash.shapeandflow.de` presents a valid certificate and the generated administrator can sign in.
 2. Docker reports both Unleash services healthy; PostgreSQL and port 4242 are not externally reachable.
-3. The `shape-and-flow` project, three environments, six correctly scoped tokens, and disabled smoke flag exist.
+3. The OSS `default` project, two built-in environments, six correctly scoped tokens, and disabled smoke flag exist; dev and stage use `development` with distinct `deployment` contexts.
 4. Each server SDK authenticates with its environment's backend token and evaluates the smoke flag as `false`.
 5. Each browser SDK authenticates with its environment's frontend token and reactively evaluates the smoke flag as `false` without exposing any backend token.
 6. Unit tests cover configuration validation, fallback behavior, singleton lifecycle, and reactive composables in both repositories.
