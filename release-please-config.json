@@ -1,0 +1,10 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "release-type": "node",
+  "bootstrap-sha": "4cca39f379712f7929b0d3d4622c7bdc4dbf677e",
+  "packages": {
+    ".": {
+      "package-name": "shape-and-flow"
+    }
+  }
+}

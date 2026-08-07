@@ -318,3 +318,50 @@ jobs:
       # environment: `gh workflow run deploy.yml -f env_name=dev -f seed=true`.
       seed: false
     secrets: inherit
+
+  # ── Release ─────────────────────────────────────────────────────────────────
+  #
+  # Runs release-please on every green push to main. Most runs just update (or open) the
+  # standing "Release PR" that accumulates conventional-commit changes — release_created is
+  # false, and deploy-production below does nothing. Merging that PR is itself a push to main,
+  # so this job runs again on the merge commit, and *that* run is the one where release-please
+  # actually cuts the GitHub Release/tag and release_created flips to true.
+  #
+  # This intentionally does not use release-please-action's own `release: published` trigger
+  # for the next step. That trigger fires from an API call made with this job's GITHUB_TOKEN,
+  # and GitHub does not let a GITHUB_TOKEN-driven event start a *new* workflow run (recursive-
+  # trigger protection) — it would silently never fire without a PAT or GitHub App token.
+  # Reading the output within this same run sidesteps that entirely.
+  release:
+    name: Release please
+    needs: [lint, test, integration, e2e, build, deploy-check]
+    if: ${{ github.event_name == 'push' && github.ref_name == 'main' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+    steps:
+      - uses: googleapis/release-please-action@0dfd8538845b8e92600d271a895a5372865d4062 # v5.0.0
+        id: release
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  # Only runs on the release commit itself (release_created), and only after the exact same
+  # gate stage already goes through — a release is not a shortcut around testing.
+  deploy-production:
+    name: Deploy
+    needs: [release]
+    if: needs.release.outputs.release_created == 'true'
+    permissions:
+      contents: read
+      # See the comment on `deploy` above: granted here because a reusable workflow's token
+      # can only be downgraded from the caller's.
+      packages: write
+    uses: ./.github/workflows/deploy.yml
+    with:
+      env_name: production
+      seed: false
+    secrets: inherit
