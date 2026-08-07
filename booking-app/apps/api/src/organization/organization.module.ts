@@ -6,6 +6,9 @@ import { TENANT_PRISMA, createTenantGuardedClient } from '../prisma/tenant.exten
 
 import { OfficeTenantMiddleware } from './office-tenant.middleware.js';
 import { OrganizationContextService } from './organization-context.service.js';
+import { OrganizationRegistrationController } from './organization-registration.controller.js';
+import { OrganizationRegistrationService } from './organization-registration.service.js';
+import { StripeConnectService } from './stripe-connect.service.js';
 import { TenantResolutionMiddleware } from './tenant-resolution.middleware.js';
 
 import type { TenantPrismaClient } from '../prisma/tenant.extension.js';
@@ -26,10 +29,13 @@ import type { TenantPrismaClient } from '../prisma/tenant.extension.js';
 @Global()
 @Module({
   imports: [AuthModule],
+  controllers: [OrganizationRegistrationController],
   providers: [
     OrganizationContextService,
     TenantResolutionMiddleware,
     OfficeTenantMiddleware,
+    OrganizationRegistrationService,
+    StripeConnectService,
     {
       provide: TENANT_PRISMA,
       inject: [PrismaService, OrganizationContextService],
