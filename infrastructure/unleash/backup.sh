@@ -19,6 +19,6 @@ docker compose --env-file .env -f compose.yml exec -T postgres \
 
 test -s "$temporary_file"
 mv "$temporary_file" "$final_file"
-find "$backup_dir" -type f -name 'unleash-*.sql.gz' -mtime +7 -delete
+find "$backup_dir" -type f -name 'unleash-*.sql.gz' -mmin +10080 -delete
 
 printf 'Backup written: %s\n' "$final_file"

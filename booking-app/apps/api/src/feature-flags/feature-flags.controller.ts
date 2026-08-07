@@ -23,8 +23,11 @@ export class FeatureFlagsController {
       throw new ServiceUnavailableException('Feature flags are not configured');
     }
 
+    const unleashUrl = new URL(UNLEASH_URL);
+    unleashUrl.pathname = `${unleashUrl.pathname.replace(/\/$/, '')}/`;
+
     return featureFlagClientConfigSchema.parse({
-      url: new URL('frontend', UNLEASH_URL).toString(),
+      url: new URL('frontend', unleashUrl).toString(),
       clientKey: UNLEASH_FRONTEND_TOKEN,
       appName: 'shape-and-flow-booking-web',
       environment: UNLEASH_ENVIRONMENT,

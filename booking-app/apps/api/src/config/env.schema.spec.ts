@@ -247,6 +247,32 @@ describe('envSchema', () => {
     expect(parsed.UNLEASH_DEPLOYMENT).toBe('stage');
   });
 
+  it('rejects an HTTP Unleash URL with a backend token in production', () => {
+    const result = parseConfig({
+      ...valid,
+      NODE_ENV: 'production',
+      PAYMENT_PROVIDER: 'stripe',
+      STRIPE_SECRET_KEY: 'sk_live_x',
+      STRIPE_WEBHOOK_SECRET: 'whsec_live_x',
+      EMAIL_PROVIDER: 'resend',
+      RESEND_API_KEY: 're_live_x',
+      RESEND_WEBHOOK_SECRET: 'whsec_live_x',
+      SMS_PROVIDER: 'twilio',
+      TWILIO_ACCOUNT_SID: 'AC_live_x',
+      TWILIO_AUTH_TOKEN: 'twilio_live_x',
+      TWILIO_FROM_NUMBER: '+4915100000000',
+      TWILIO_STATUS_CALLBACK_URL: 'https://buchung.shapeandflow.de/api/webhooks/twilio',
+      UNLEASH_URL: 'http://unleash.shapeandflow.de/api/',
+      UNLEASH_BACKEND_TOKEN: 'default:production.backend-token',
+      UNLEASH_FRONTEND_TOKEN: 'default:production.frontend-token',
+      UNLEASH_ENVIRONMENT: 'production',
+      UNLEASH_DEPLOYMENT: 'production',
+    });
+
+    expect(result.success).toBe(false);
+    expect(paths(result)).toContain('UNLEASH_URL');
+  });
+
   it('rejects a partial Unleash configuration and names every missing setting', () => {
     const result = parseConfig({
       ...valid,

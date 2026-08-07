@@ -31,6 +31,19 @@ describe('FeatureFlagsController', () => {
     expect(response).not.toHaveProperty('backendToken');
   });
 
+  it('preserves the base path when UNLEASH_URL has no trailing slash', () => {
+    const controller = new FeatureFlagsController({
+      UNLEASH_URL: 'https://unleash.shapeandflow.de/api',
+      UNLEASH_FRONTEND_TOKEN: 'frontend-test-token',
+      UNLEASH_ENVIRONMENT: 'development',
+      UNLEASH_DEPLOYMENT: 'stage',
+    } as AppConfig);
+
+    expect(controller.config()).toMatchObject({
+      url: 'https://unleash.shapeandflow.de/api/frontend',
+    });
+  });
+
   it('fails closed when browser configuration is absent', () => {
     const controller = new FeatureFlagsController({ NODE_ENV: 'test' } as AppConfig);
 

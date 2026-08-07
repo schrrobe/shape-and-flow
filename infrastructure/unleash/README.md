@@ -32,8 +32,8 @@ cd /opt/unleash
 docker compose --env-file .env -f compose.yml stop unleash
 gzip -dc backups/unleash-YYYYMMDDTHHMMSSZ.sql.gz \
   | docker compose --env-file .env -f compose.yml exec -T postgres \
-      psql --username unleash --dbname unleash
-docker compose --env-file .env -f compose.yml start unleash
+      sh -ceu 'psql --set=ON_ERROR_STOP=on --username="$POSTGRES_USER" --dbname="$POSTGRES_DB"' &&
+  docker compose --env-file .env -f compose.yml start unleash
 ```
 
 Local backups older than seven days are removed after each successful run. Copy backups off the

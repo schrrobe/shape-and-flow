@@ -46,7 +46,7 @@ Expected: non-zero because the deployment files do not exist.
 
 - [ ] **Step 2: Create the hardened Compose definition**
 
-Define `postgres:17-alpine` and `unleashorg/unleash-server:8.0.2` with named volume persistence, health checks, `restart: unless-stopped`, bounded JSON logs, `no-new-privileges`, and only `127.0.0.1:4242:4242`. Pass these required values from `.env`: `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `UNLEASH_DEFAULT_ADMIN_USERNAME`, `UNLEASH_DEFAULT_ADMIN_PASSWORD`, `INIT_ADMIN_API_TOKENS`, and `UNLEASH_FRONTEND_API_ORIGINS`. Set `DATABASE_SSL=false`, `UNLEASH_URL=https://unleash.shapeandflow.de`, and `LOG_LEVEL=warn`.
+Define `postgres:17-alpine` and `unleashorg/unleash-server:8.0.2` with named volume persistence, health checks, `restart: unless-stopped`, bounded JSON logs, `no-new-privileges`, and only `127.0.0.1:4242:4242`. Pass these required values from `.env`: `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `UNLEASH_SECRET`, `UNLEASH_DEFAULT_ADMIN_USERNAME`, `UNLEASH_DEFAULT_ADMIN_PASSWORD`, `INIT_ADMIN_API_TOKENS`, and `UNLEASH_FRONTEND_API_ORIGINS`. Set `DATABASE_SSL=false`, `UNLEASH_URL=https://unleash.shapeandflow.de`, and `LOG_LEVEL=warn`.
 
 - [ ] **Step 3: Create the edge and backup assets**
 
@@ -57,7 +57,8 @@ The Nginx template must redirect HTTP, proxy HTTPS to `127.0.0.1:4242`, forward 
 Run with non-secret fixture values:
 
 ```bash
-rtk proxy env POSTGRES_USER=unleash POSTGRES_PASSWORD=test-only POSTGRES_DB=unleash UNLEASH_DEFAULT_ADMIN_USERNAME=admin UNLEASH_DEFAULT_ADMIN_PASSWORD=test-only INIT_ADMIN_API_TOKENS='*:*.test-only' UNLEASH_FRONTEND_API_ORIGINS=https://shapeandflow.de docker compose -f infrastructure/unleash/compose.yml config --quiet
+rtk proxy env POSTGRES_USER=unleash POSTGRES_PASSWORD=test-only POSTGRES_DB=unleash UNLEASH_SECRET=test-only UNLEASH_DEFAULT_ADMIN_USERNAME=admin UNLEASH_DEFAULT_ADMIN_PASSWORD=test-only INIT_ADMIN_API_TOKENS='*:*.test-only' UNLEASH_FRONTEND_API_ORIGINS=https://shapeandflow.de docker compose -f infrastructure/unleash/compose.yml config --quiet
+rtk proxy sh -c '! env -u UNLEASH_SECRET POSTGRES_USER=unleash POSTGRES_PASSWORD=test-only POSTGRES_DB=unleash UNLEASH_DEFAULT_ADMIN_USERNAME=admin UNLEASH_DEFAULT_ADMIN_PASSWORD=test-only INIT_ADMIN_API_TOKENS="*:*.test-only" UNLEASH_FRONTEND_API_ORIGINS=https://shapeandflow.de docker compose -f infrastructure/unleash/compose.yml config --quiet >/dev/null 2>&1'
 rtk proxy bash -n infrastructure/unleash/backup.sh
 rtk proxy sh -c 'test "$(stat -f %Lp infrastructure/unleash/backup.sh)" = 755'
 ```
@@ -95,7 +96,7 @@ Expected: non-zero because Unleash is not installed.
 
 - [ ] **Step 2: Install assets and generate secrets without stdout**
 
-Create `/opt/unleash` as `robert:docker` mode `0750`, upload the Compose/example/backup assets, and generate hexadecimal PostgreSQL password, administrator password, and bootstrap admin API token with `openssl rand`. Write `.env` and `credentials.env` under `umask 077`; store `INIT_ADMIN_API_TOKENS` in the valid `*:*.<random>` form. Do not use shell tracing.
+Create `/opt/unleash` as `robert:docker` mode `0750`, upload the Compose/example/backup assets, and independently generate a hexadecimal PostgreSQL password, administrator password, bootstrap admin API token, and 64-character `UNLEASH_SECRET` with `openssl rand -hex 32`. Write `.env` and `credentials.env` under `umask 077`; store `INIT_ADMIN_API_TOKENS` in the valid `*:*.<random>` form. Do not use shell tracing.
 
 - [ ] **Step 3: Start and inspect the stack**
 
@@ -127,6 +128,7 @@ Expected: port 4242 is loopback-only and one non-empty compressed dump exists.
 ### Task 3: Provision OSS Tokens and the Smoke Flag
 
 **Files:**
+- Modify remotely: `/opt/unleash/.env`
 - Modify remotely: `/opt/unleash/credentials.env`
 - Modify remotely: `/opt/booking/dev/.env.dev`
 - Modify remotely: `/opt/booking/stage/.env.stage`
@@ -134,27 +136,14 @@ Expected: port 4242 is loopback-only and one non-empty compressed dump exists.
 - Modify in GitHub: landing secrets/variables for `dev`, `stage`, and `production`
 
 **Interfaces:**
-- Consumes: bootstrap admin API token from Task 2.
-- Produces: three backend tokens and three frontend tokens with exact deployment ownership.
+- Consumes: bootstrap admin API token from Task 2, then revokes and removes it.
+- Produces: three backend tokens and three frontend tokens with exact deployment ownership, with no wildcard token remaining.
 
-- [ ] **Step 1: Verify only OSS resources are visible**
+- [ ] **Step 1: Verify only OSS resources and the bootstrap wildcard token are visible**
 
-Authenticate with the bootstrap admin token and assert `GET /api/admin/projects` contains only `default` and `GET /api/admin/environments` contains `development` and `production`.
+Authenticate with the bootstrap admin token and assert `GET /api/admin/projects` contains only `default`, `GET /api/admin/environments` contains `development` and `production`, and `GET /api/admin/api-tokens` contains exactly one wildcard token: the bootstrap admin token. Inspect metadata only; do not print any token secret.
 
-- [ ] **Step 2: Create six tokens through `POST /api/admin/api-tokens`**
-
-Use these exact request mappings and write each returned `secret` directly into `/opt/unleash/credentials.env` without printing it:
-
-```text
-shape-and-flow-backend-development  backend   default  development  deployment=dev
-shape-and-flow-backend-staging      backend   default  development  deployment=stage
-shape-and-flow-backend-production   backend   default  production   deployment=production
-shape-and-flow-frontend-development frontend  default  development  deployment=dev
-shape-and-flow-frontend-staging     frontend  default  development  deployment=stage
-shape-and-flow-frontend-production  frontend  default  production   deployment=production
-```
-
-- [ ] **Step 3: Create the inert smoke flag**
+- [ ] **Step 2: Create the inert smoke flag**
 
 Call `POST /api/admin/projects/default/features` with:
 
@@ -169,13 +158,30 @@ Call `POST /api/admin/projects/default/features` with:
 
 Leave it disabled in both built-in environments.
 
-- [ ] **Step 4: Update deployment environments safely**
+- [ ] **Step 3: Create six tokens through `POST /api/admin/api-tokens`**
+
+Use these exact request mappings. For each response, assert its non-secret name, type, project, environment, and deployment metadata, then write the returned `secret` directly into `/opt/unleash/credentials.env` without printing it:
+
+```text
+shape-and-flow-backend-development  backend   default  development  deployment=dev
+shape-and-flow-backend-staging      backend   default  development  deployment=stage
+shape-and-flow-backend-production   backend   default  production   deployment=production
+shape-and-flow-frontend-development frontend  default  development  deployment=dev
+shape-and-flow-frontend-staging     frontend  default  development  deployment=stage
+shape-and-flow-frontend-production  frontend  default  production   deployment=production
+```
+
+- [ ] **Step 4: Delete the bootstrap token and remove its live configuration**
+
+Immediately after the sixth named token is stored, call `DELETE /api/admin/api-tokens/<secret>` with the bootstrap admin token's URL-encoded secret. Remove the `INIT_ADMIN_API_TOKENS` line from `/opt/unleash/.env` atomically without displaying the file, preserving owner and mode `0600`. Then assert the variable is absent and that authenticating an Admin API request with the deleted bootstrap token returns HTTP 401. Together with Step 1's single-wildcard assertion and Step 3's scoped token metadata, this verifies that no wildcard token remains. Do not retain the bootstrap secret in `/opt/unleash/credentials.env`.
+
+- [ ] **Step 5: Update deployment environments safely**
 
 Append `UNLEASH_URL`, `UNLEASH_BACKEND_TOKEN`, `UNLEASH_FRONTEND_TOKEN`, `UNLEASH_ENVIRONMENT`, and `UNLEASH_DEPLOYMENT` to booking dev/stage env files while preserving owner `deploy:deploy` and mode `0600`. Stream the resulting files directly into `rtk gh secret set ENV_FILE --env <env> --body -`; never display their values. For landing, set `UNLEASH_BACKEND_TOKEN` as an Environment secret and set URL, frontend token, environment, and deployment as Environment variables for dev/stage/production.
 
-- [ ] **Step 5: Verify token scopes without revealing secrets**
+- [ ] **Step 6: Verify token scopes without revealing secrets**
 
-List token metadata through the Admin API and assert names/types/project/environment. Authenticate once with every backend token at `/api/client/features` and every frontend token at `/api/frontend`; assert HTTP 200 and that the smoke flag is absent or disabled.
+Authenticate once with every backend token at `/api/client/features` and every frontend token at `/api/frontend`; assert HTTP 200 and that the smoke flag is absent or disabled. Recheck the non-secret creation metadata captured in Step 3 against the six exact mappings; no Admin API token should exist after Step 4.
 
 ### Task 4: Add Booking Configuration Contracts
 
@@ -496,4 +502,4 @@ Expected: removal succeeds and the final `sudo -n true` fails.
 
 - [ ] **Step 7: Handoff credentials once**
 
-Read `/opt/unleash/credentials.env` only for the final private handoff. Provide the administrator URL/username/password, six named runtime tokens with their OSS scopes, both PR URLs, and rotation guidance. Do not repeat secrets in PRs or later summaries.
+Read `/opt/unleash/credentials.env` only for the final private handoff. Provide the administrator URL/username/password, six named runtime tokens with their OSS scopes, both PR URLs, and rotation guidance. Document `UNLEASH_SECRET` rotation without disclosing its value: under `umask 077`, generate a fresh value with `openssl rand -hex 32` without stdout, atomically replace only its line in `/opt/unleash/.env` while preserving owner and mode `0600`, force-recreate the Unleash service, wait for its health check, and confirm that existing UI sessions must authenticate again. Do not repeat secrets in PRs or later summaries.

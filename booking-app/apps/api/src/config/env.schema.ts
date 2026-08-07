@@ -169,6 +169,20 @@ export const envSchema = z
       }
     }
 
+    if (
+      env.NODE_ENV === 'production' &&
+      !isPlaceholder(env.UNLEASH_BACKEND_TOKEN) &&
+      env.UNLEASH_URL !== undefined &&
+      new URL(env.UNLEASH_URL).protocol === 'http:'
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['UNLEASH_URL'],
+        message:
+          'UNLEASH_URL must use HTTPS when NODE_ENV is "production" and UNLEASH_BACKEND_TOKEN is configured',
+      });
+    }
+
     if (env.PAYMENT_PROVIDER === 'stripe') {
       requireCredential('STRIPE_SECRET_KEY', 'PAYMENT_PROVIDER is "stripe"');
       requireCredential('STRIPE_WEBHOOK_SECRET', 'PAYMENT_PROVIDER is "stripe"');
