@@ -26,32 +26,34 @@ const config = (overrides: Partial<AppConfig> = {}): AppConfig =>
   }) as AppConfig;
 
 const fakeClient = () => {
-  const listeners = new Map<string, Array<(value: unknown) => void>>();
+  const listeners = new Map<string, ((value: unknown) => void)[]>();
+  const isEnabled = vi.fn().mockReturnValue(true);
+  const destroy = vi.fn();
   const client: FeatureFlagClient = {
-    isEnabled: vi.fn().mockReturnValue(true),
+    isEnabled,
     on: vi.fn((event: string, listener: (value: unknown) => void) => {
       listeners.set(event, [...(listeners.get(event) ?? []), listener]);
       return client;
     }),
-    destroy: vi.fn(),
+    destroy,
   };
 
-  return { client, listeners };
+  return { client, listeners, isEnabled, destroy };
 };
 
-async function createService(
+function createService(
   env: AppConfig,
   factory: FeatureFlagClientFactory,
 ): Promise<FeatureFlagsService> {
-  const module = await Test.createTestingModule({
+  return Test.createTestingModule({
     providers: [
       FeatureFlagsService,
       { provide: ENV, useValue: env },
       { provide: UNLEASH_CLIENT_FACTORY, useValue: factory },
     ],
-  }).compile();
-
-  return module.get(FeatureFlagsService);
+  })
+    .compile()
+    .then((module) => module.get(FeatureFlagsService));
 }
 
 describe('FeatureFlagsService', () => {
@@ -92,7 +94,7 @@ describe('FeatureFlagsService', () => {
   });
 
   it('merges deployment into caller context and forwards the explicit fallback', async () => {
-    const { client } = fakeClient();
+    const { client, isEnabled } = fakeClient();
     const factory = vi.fn<FeatureFlagClientFactory>().mockReturnValue(client);
     const service = await createService(config(), factory);
 
@@ -103,7 +105,7 @@ describe('FeatureFlagsService', () => {
         false,
       ),
     ).toBe(true);
-    expect(client.isEnabled).toHaveBeenCalledWith(
+    expect(isEnabled).toHaveBeenCalledWith(
       'booking.new-flow',
       { userId: 'customer-1', properties: { locale: 'de', deployment: 'stage' } },
       false,
@@ -147,9 +149,9 @@ describe('FeatureFlagsService', () => {
   });
 
   it('returns the fallback when SDK evaluation fails', async () => {
-    const { client } = fakeClient();
+    const { client, isEnabled } = fakeClient();
     const sdkError = new Error('evaluation failed');
-    vi.mocked(client.isEnabled).mockImplementation(() => {
+    isEnabled.mockImplementation(() => {
       throw sdkError;
     });
     const errorSpy = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
@@ -160,11 +162,11 @@ describe('FeatureFlagsService', () => {
   });
 
   it('destroys the SDK client during Nest shutdown', async () => {
-    const { client } = fakeClient();
+    const { client, destroy } = fakeClient();
     const service = await createService(config(), () => client);
 
     service.onModuleDestroy();
 
-    expect(client.destroy).toHaveBeenCalledOnce();
+    expect(destroy).toHaveBeenCalledOnce();
   });
 });
