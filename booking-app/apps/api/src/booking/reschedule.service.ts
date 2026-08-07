@@ -310,7 +310,7 @@ export class RescheduleService {
         ...(booking.customerNote === null ? {} : { customerNote: booking.customerNote }),
         locale: booking.locale,
         // The lineage link: which appointment this one replaced. An audit trail, not a
-        // lookup path — the payment itself is moved below.
+        // lookup path — `financialRootBookingId` below is what the money is read through.
         rescheduledFromBookingId: booking.id,
         // Copied, not chained. After two moves the charge would otherwise be two hops
         // away and every financial read a different length of walk; this keeps the
@@ -319,17 +319,6 @@ export class RescheduleService {
         financialRootBookingId: booking.financialRootBookingId ?? booking.id,
       },
       select: { id: true, endsAt: true },
-    });
-
-    // The money follows the appointment. `rescheduledFromBookingId` records where the
-    // replacement came from, but nothing reads payments through that link — so leaving the
-    // payment on the cancelled original means the replacement looks unpaid, and cancelling
-    // it later would compute a fee against zero and refund nothing. The refund rows stay
-    // where they are: a refund is something that happened to the earlier booking, and the
-    // balance that matters travels with the payment's own `refundedAmountCents`.
-    await tx.payment.updateMany({
-      where: { bookingId: booking.id, organizationId: booking.organizationId },
-      data: { bookingId: created.id },
     });
 
     assertTransition(booking.status, BookingStatus.CANCELED_BY_BUSINESS);
