@@ -215,6 +215,9 @@ jobs:
               -e 's/^PAYMENT_PROVIDER=stripe/PAYMENT_PROVIDER=fake/' \
               -e 's/^EMAIL_PROVIDER=resend/EMAIL_PROVIDER=fake/' \
               -e 's/^SMS_PROVIDER=twilio/SMS_PROVIDER=fake/' \
+              -e 's#^UNLEASH_URL=.*#UNLEASH_URL=http://127.0.0.1:1/api/#' \
+              -e 's/^UNLEASH_BACKEND_TOKEN=.*/UNLEASH_BACKEND_TOKEN=default:production.ci-backend-token/' \
+              -e 's/^UNLEASH_FRONTEND_TOKEN=.*/UNLEASH_FRONTEND_TOKEN=default:production.ci-frontend-token/' \
               -e 's/replace_me_with_a_long_random_string/ci-throwaway-password/g' \
               booking-app/.env.production.example > booking-app/.env.production
 

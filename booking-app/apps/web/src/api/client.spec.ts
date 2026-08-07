@@ -63,6 +63,21 @@ afterEach(() => {
 });
 
 describe('the api client', () => {
+  it('loads browser feature-flag configuration from the exact public endpoint', async () => {
+    const runtimeConfig = {
+      url: 'https://unleash.shapeandflow.de/api/frontend',
+      clientKey: 'frontend-test-token',
+      appName: 'shape-and-flow-booking-web',
+      environment: 'development',
+      deployment: 'dev',
+    } as const;
+    queue(() => json(runtimeConfig));
+
+    await expect(api.public.featureFlagConfig()).resolves.toEqual(runtimeConfig);
+    expect(calls[0]?.url).toBe('/api/public/feature-flags/config');
+    expect(calls[0]?.init.method).toBe('GET');
+  });
+
   it('parses the error envelope into an ApiError carrying the code', async () => {
     queue(() => json({ code: 'SLOT_UNAVAILABLE', message: 'taken', correlationId: 'c1' }, 409));
 
