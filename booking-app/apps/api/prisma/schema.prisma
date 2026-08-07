@@ -209,6 +209,13 @@ enum AuditAction {
   // happened.
   CUSTOMER_UPDATED
   CUSTOMER_ERASED
+  ORGANIZATION_ONBOARDING_LINK_REQUESTED
+}
+
+enum EntityType {
+  INDIVIDUAL
+  SOLE_PROPRIETORSHIP
+  ORGANIZATION
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -233,7 +240,17 @@ model Organization {
   defaultLocale   Locale   @default(de) @map("default_locale")
   /// Always null in Phase 1. Present so the Stripe Connect migration is a
   /// backfill rather than a schema change.
-  stripeAccountId String?  @map("stripe_account_id")
+  stripeAccountId String?  @unique @map("stripe_account_id")
+
+  entityType             EntityType?
+  taxId                  String?
+  vatId                  String?
+  isSmallBusiness        Boolean     @default(false)
+  ownerFirstName         String?
+  ownerLastName          String?
+  stripeDetailsSubmitted Boolean     @default(false)
+  stripeChargesEnabled   Boolean     @default(false)
+
   createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
