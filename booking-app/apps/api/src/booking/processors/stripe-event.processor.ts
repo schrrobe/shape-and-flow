@@ -3,6 +3,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { AppError } from '../../common/errors/app-error.js';
 import { CLOCK } from '../../domain/time/clock.js';
 import { InboxRecorder } from '../../messaging/inbox/inbox.recorder.js';
+import { OrganizationWebhookHandler } from '../../organization/organization-webhook.handler.js';
 import { RefundWebhookHandler } from '../../payment/refund-webhook.handler.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import { BookingConfirmationService } from '../booking-confirmation.service.js';
@@ -80,6 +81,7 @@ export class StripeEventProcessor {
     private readonly inbox: InboxRecorder,
     private readonly confirmations: BookingConfirmationService,
     private readonly refunds: RefundWebhookHandler,
+    private readonly organizations: OrganizationWebhookHandler,
     @Inject(CLOCK) private readonly clock: Clock,
   ) {}
 
@@ -124,6 +126,13 @@ export class StripeEventProcessor {
     // about, and that one decides what a refund event means.
     if (this.refunds.handles(type)) {
       await this.refunds.handle(type, object);
+      return;
+    }
+
+    // Same split as refunds: Connect account verification is a concern of the organization,
+    // not the booking, so it is handed off rather than grown into this switch.
+    if (this.organizations.handles(type)) {
+      await this.organizations.handle(type, object);
       return;
     }
 
