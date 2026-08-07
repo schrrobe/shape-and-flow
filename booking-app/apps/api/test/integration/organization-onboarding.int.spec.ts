@@ -217,3 +217,38 @@ describe('POST /api/office/organization/onboarding-link', () => {
     expect((response.body as { code: string }).code).toBe('UNAUTHENTICATED');
   });
 });
+
+describe('GET /api/office/organization', () => {
+  it('returns stripeChargesEnabled for any authenticated office role', async () => {
+    const admin = await prisma.officeUser.create({
+      data: {
+        organizationId: ctx.organization.id,
+        email: 'admin-status@shape-and-flow.example',
+        passwordHash: await testApp.app.get(PasswordService).hash(ADMIN_PASSWORD),
+        firstName: 'Test',
+        lastName: 'Admin',
+        role: OfficeUserRole.ADMIN,
+        canIssueRefunds: true,
+      },
+      select: { id: true, email: true },
+    });
+
+    const loginResponse = await login({ email: admin.email, password: ADMIN_PASSWORD }).expect(
+      200,
+    );
+    const cookie = cookieFrom(loginResponse);
+
+    const response = await request(server())
+      .get('/api/office/organization')
+      .set('Cookie', cookie)
+      .expect(200);
+
+    expect(response.body).toEqual({ stripeChargesEnabled: false });
+  });
+
+  it('rejects an unauthenticated caller with 401', async () => {
+    const response = await request(server()).get('/api/office/organization').expect(401);
+
+    expect((response.body as { code: string }).code).toBe('UNAUTHENTICATED');
+  });
+});

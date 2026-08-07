@@ -1,4 +1,4 @@
-import { Controller, Inject, Post, UseGuards } from '@nestjs/common';
+import { Controller, Get, Inject, Post, UseGuards } from '@nestjs/common';
 
 import { CsrfHeaderGuard } from '../auth/csrf-header.guard.js';
 import { OfficeRoute } from '../auth/office-session.guard.js';
@@ -34,6 +34,12 @@ export class OrganizationOnboardingController {
     private readonly prisma: PrismaService,
     @Inject(ENV) private readonly config: AppConfig,
   ) {}
+
+  @Get()
+  @Roles('OWNER', 'ADMIN', 'EMPLOYEE')
+  current(): { stripeChargesEnabled: boolean } {
+    return { stripeChargesEnabled: this.organizations.get().stripeChargesEnabled };
+  }
 
   @Post('onboarding-link')
   @Roles('OWNER')
