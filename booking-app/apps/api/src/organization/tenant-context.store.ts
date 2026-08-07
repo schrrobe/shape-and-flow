@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 
 import type { OrganizationWithSettings } from './organization-context.service.js';
+import type { PrismaService } from '../prisma/prisma.service.js';
 
 /**
  * The tenant resolved for the current request, carried without threading it
@@ -32,4 +33,27 @@ export function currentTenant(): OrganizationWithSettings | undefined {
 /** True when a tenant scope is active, for assertions and diagnostics. */
 export function hasTenant(): boolean {
   return storage.getStore() !== undefined;
+}
+
+/**
+ * Run `fn` inside the tenant scope for an explicit organization id.
+ *
+ * Workers have no request to resolve a tenant from, so this is the queue-side
+ * equivalent of the two request middlewares: load the organization once, then open the
+ * same ALS scope they open, so anything the job calls that reads `OrganizationContextService`
+ * resolves the job's own organization instead of the bootstrap default.
+ */
+export async function runWithOrganization<T>(
+  organizationId: string,
+  prisma: PrismaService,
+  fn: () => T | Promise<T>,
+): Promise<T> {
+  const organization = await prisma.organization.findUniqueOrThrow({
+    where: { id: organizationId },
+    include: { settings: true },
+  });
+  if (!organization.settings) {
+    throw new Error(`Organization "${organizationId}" has no settings row.`);
+  }
+  return await runWithTenant({ ...organization, settings: organization.settings }, fn);
 }
