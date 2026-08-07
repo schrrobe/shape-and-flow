@@ -342,7 +342,7 @@ async function ensureUser(
   },
 ): Promise<boolean> {
   const existing = await prisma.officeUser.findUnique({
-    where: { organizationId_email: { organizationId: user.organizationId, email: user.email } },
+    where: { email: user.email },
   });
 
   // An existing password is never overwritten: re-seeding a database somebody is

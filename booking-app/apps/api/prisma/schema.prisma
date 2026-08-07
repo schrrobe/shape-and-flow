@@ -335,7 +335,7 @@ model ClosedDay {
 model OfficeUser {
   id                  String         @id @default(cuid())
   organizationId      String         @map("organization_id")
-  email               String
+  email               String         @unique
   passwordHash        String         @map("password_hash")
   firstName           String         @map("first_name")
   lastName            String         @map("last_name")
@@ -364,7 +364,6 @@ model OfficeUser {
   bookingStatusHistory   BookingStatusHistory[]
   notifications          Notification[]
 
-  @@unique([organizationId, email])
   @@index([organizationId, role])
   @@index([organizationId, archivedAt])
   @@map("office_users")

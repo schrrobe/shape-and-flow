@@ -25,6 +25,7 @@ export const errorCodeSchema = z.enum([
   // 404 — also returned for a resource owned by another organization, because a
   // 403 would confirm the id exists.
   'NOT_FOUND',
+  'ORGANIZATION_NOT_FOUND',
   // 409
   'SLOT_UNAVAILABLE',
   'IDEMPOTENT_REQUEST_IN_PROGRESS',
@@ -42,6 +43,7 @@ export const errorCodeSchema = z.enum([
   'OUTSIDE_BOOKING_WINDOW',
   'INVALID_STATUS_TRANSITION',
   'ORGANIZATION_CREATE_ERROR',
+  'ORGANIZATION_ONBOARDING_INCOMPLETE',
   // 429
   'RATE_LIMITED',
   // 500
@@ -67,6 +69,7 @@ export const ERROR_STATUS: Record<ErrorCode, number> = {
   FORBIDDEN_ROLE: 403,
 
   NOT_FOUND: 404,
+  ORGANIZATION_NOT_FOUND: 404,
 
   SLOT_UNAVAILABLE: 409,
   IDEMPOTENT_REQUEST_IN_PROGRESS: 409,
@@ -88,6 +91,7 @@ export const ERROR_STATUS: Record<ErrorCode, number> = {
   OUTSIDE_BOOKING_WINDOW: 422,
   INVALID_STATUS_TRANSITION: 422,
   ORGANIZATION_CREATE_ERROR: 422,
+  ORGANIZATION_ONBOARDING_INCOMPLETE: 422,
 
   RATE_LIMITED: 429,
 

@@ -65,6 +65,11 @@ describe('error codes', () => {
     expect(ERROR_STATUS.ORGANIZATION_CREATE_ERROR).toBe(422);
     expect(ERROR_STATUS.ONBOARDING_LINK_ERROR).toBe(500);
   });
+
+  it('has a status for ORGANIZATION_NOT_FOUND and ORGANIZATION_ONBOARDING_INCOMPLETE', () => {
+    expect(ERROR_STATUS.ORGANIZATION_NOT_FOUND).toBe(404);
+    expect(ERROR_STATUS.ORGANIZATION_ONBOARDING_INCOMPLETE).toBe(422);
+  });
 });
 
 describe('primitives', () => {

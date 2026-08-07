@@ -149,6 +149,8 @@
     "OUTSIDE_BOOKING_WINDOW": "Dieser Termin liegt außerhalb des Buchungszeitraums.",
     "INVALID_STATUS_TRANSITION": "Das ist im aktuellen Status nicht möglich.",
     "ORGANIZATION_CREATE_ERROR": "Ihr Konto konnte nicht angelegt werden. Bitte überprüfen Sie Ihre Angaben und versuchen Sie es erneut.",
+    "ORGANIZATION_NOT_FOUND": "Wir konnten diesen Anbieter nicht finden.",
+    "ORGANIZATION_ONBOARDING_INCOMPLETE": "Dieser Anbieter hat die Zahlungseinrichtung noch nicht abgeschlossen. Bitte versuchen Sie es später erneut.",
     "RATE_LIMITED": "Zu viele Anfragen. Bitte in {seconds} Sekunden erneut versuchen.",
     "INTERNAL_ERROR": "Bei uns ist etwas schiefgegangen. Bitte versuchen Sie es später erneut.",
     "ONBOARDING_LINK_ERROR": "Stripe konnte nicht erreicht werden. Bitte versuchen Sie es gleich noch einmal.",

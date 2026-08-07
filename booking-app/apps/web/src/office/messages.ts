@@ -38,6 +38,8 @@ const MESSAGES: Record<MessageKey, string> = {
   INVALID_STATUS_TRANSITION: 'That is not possible in the current status.',
   INVALID_RETURN_URL: 'That link is not valid. Please try again.',
   ORGANIZATION_CREATE_ERROR: 'The account could not be created. Check the details and try again.',
+  ORGANIZATION_NOT_FOUND: 'That organizer could not be found.',
+  ORGANIZATION_ONBOARDING_INCOMPLETE: 'This organizer has not finished setting up payments yet.',
   RATE_LIMITED: 'Too many attempts. Wait a moment and try again.',
   INTERNAL_ERROR: 'Something went wrong on our side. Try again in a moment.',
   ONBOARDING_LINK_ERROR: 'Could not reach Stripe. Please try again in a moment.',

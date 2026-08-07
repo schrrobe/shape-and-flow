@@ -149,6 +149,8 @@
     "OUTSIDE_BOOKING_WINDOW": "That time is outside the booking window.",
     "INVALID_STATUS_TRANSITION": "That is not possible in the current status.",
     "ORGANIZATION_CREATE_ERROR": "We could not create your account. Please check your details and try again.",
+    "ORGANIZATION_NOT_FOUND": "We could not find that organizer.",
+    "ORGANIZATION_ONBOARDING_INCOMPLETE": "This organizer has not finished setting up payments yet. Please check back soon.",
     "RATE_LIMITED": "Too many requests. Please try again in {seconds} seconds.",
     "INTERNAL_ERROR": "Something went wrong on our side. Please try again later.",
     "ONBOARDING_LINK_ERROR": "We could not reach Stripe. Please try again in a moment.",
