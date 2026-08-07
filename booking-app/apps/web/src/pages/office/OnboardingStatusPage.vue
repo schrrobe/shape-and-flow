@@ -35,9 +35,11 @@ async function retry(): Promise<void> {
   <div class="mx-auto flex max-w-md flex-col gap-4 p-6">
     <p v-if="state.status === 'checking'">Checking your Stripe onboarding status…</p>
     <p v-else-if="state.status === 'ready'">Your account is ready. <a href="/office">Go to the dashboard</a>.</p>
-    <p v-else-if="state.status === 'pending'">
-      Stripe is still processing your details. Reload this page in a minute.
-    </p>
+    <div v-else-if="state.status === 'pending'">
+      <p>Stripe is still processing your details. Reload this page in a minute, or retry now.</p>
+      <button type="button" @click="retry">Retry onboarding</button>
+      <p v-if="state.error">{{ state.error }}</p>
+    </div>
     <div v-else>
       <p>Something went wrong finishing your Stripe onboarding.</p>
       <button type="button" @click="retry">Retry onboarding</button>
