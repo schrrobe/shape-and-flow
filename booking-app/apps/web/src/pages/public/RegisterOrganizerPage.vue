@@ -2,11 +2,13 @@
 import { SfInput, SfSelect } from '@shape-and-flow/booking-ui';
 import { computed, reactive } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { useRouter } from 'vue-router';
 
 import { api } from '../../api/client.js';
 import { messageKeyFor } from '../../api/errors.js';
 
 const { t } = useI18n();
+const router = useRouter();
 
 const form = reactive({
   entityType: 'INDIVIDUAL',
@@ -56,6 +58,12 @@ async function onSubmit(): Promise<void> {
 
     if (result.onboardingLink) {
       window.location.href = result.onboardingLink;
+    } else {
+      // The organization and owner are already created and the owner is already logged
+      // in (the Set-Cookie from this same response) — only the Stripe call failed. The
+      // onboarding-status page is where that retry lives, so send them there rather than
+      // leaving the form sitting on a response with nothing to show for it.
+      await router.push({ name: 'onboarding-status' });
     }
   } catch (caught) {
     error.key = messageKeyFor(caught);
