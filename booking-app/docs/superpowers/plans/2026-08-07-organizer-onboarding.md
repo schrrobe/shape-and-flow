@@ -393,7 +393,7 @@ git commit -m "feat(contracts): add registerOrganizationRequestSchema"
 - Modify: `apps/api/src/organization/organization.module.ts`
 - Modify: `apps/api/src/main.ts`
 - Test: `apps/api/src/organization/tenant-context.store.spec.ts`
-- Test: `apps/api/src/organization/organization-context.service.spec.ts` (new file, or extend if one already exists — none was found, so create it)
+- Modify (test): `apps/api/src/organization/organization-context.service.spec.ts` — **this file already exists on `main` with 5 passing tests covering bootstrap/refresh behavior. Do not overwrite it — append the two new `it()` blocks from Step 5 below to its existing `describe('OrganizationContextService', ...)` block, matching its existing construction style (`new OrganizationContextService(config, prisma)`, no NestJS `Test.createTestingModule`).**
 
 **Interfaces:**
 - Consumes: `OrganizationWithSettings` type (already exported from `organization-context.service.ts`), `PrismaService`, `SessionStore`/`OfficeSession` from `apps/api/src/auth/session.store.ts`, `readCookie` from `apps/api/src/auth/office-session.guard.ts`, `ENV`/`AppConfig` from `apps/api/src/config/env.schema.ts`.
@@ -475,80 +475,45 @@ Expected: PASS.
 
 - [ ] **Step 5: Write the failing `OrganizationContextService` test**
 
-Create `apps/api/src/organization/organization-context.service.spec.ts`:
+Modify `apps/api/src/organization/organization-context.service.spec.ts` — add the import and the two new `it()` blocks below to the existing file, without touching its 5 existing tests. Add the import alongside the existing ones at the top:
 
 ```typescript
-import { Test } from '@nestjs/testing';
-import { describe, expect, it, vi } from 'vitest';
-
-import { ENV } from '../config/env.schema.js';
-import { PrismaService } from '../prisma/prisma.service.js';
-
-import { OrganizationContextService } from './organization-context.service.js';
 import { runWithTenant } from './tenant-context.store.js';
+```
 
-import type { AppConfig } from '../config/env.schema.js';
-import type { OrganizationWithSettings } from './organization-context.service.js';
+Add these two cases inside the existing `describe('OrganizationContextService', () => { ... })` block, after the existing tests:
 
-const BOOTSTRAP_ORG = {
-  id: 'org_bootstrap',
-  slug: 'default',
-  timezone: 'Europe/Berlin',
-  settings: { id: 'settings_bootstrap' },
-} as unknown as OrganizationWithSettings;
-
-const SCOPED_ORG = {
-  id: 'org_scoped',
-  slug: 'acme',
-  timezone: 'Europe/Berlin',
-  settings: { id: 'settings_scoped' },
-} as unknown as OrganizationWithSettings;
-
-async function buildService(): Promise<OrganizationContextService> {
-  const prisma = {
-    organization: {
-      findUnique: vi.fn().mockResolvedValue({
-        ...BOOTSTRAP_ORG,
-        settings: BOOTSTRAP_ORG.settings,
-      }),
-    },
-  };
-  const config: Partial<AppConfig> = { DEFAULT_ORGANIZATION_SLUG: 'default' };
-
-  const moduleRef = await Test.createTestingModule({
-    providers: [
-      OrganizationContextService,
-      { provide: PrismaService, useValue: prisma },
-      { provide: ENV, useValue: config },
-    ],
-  }).compile();
-
-  const service = moduleRef.get(OrganizationContextService);
-  await service.onApplicationBootstrap();
-  return service;
-}
-
-describe('OrganizationContextService with ALS scope', () => {
+```typescript
   it('returns the bootstrap organization outside any tenant scope', async () => {
-    const service = await buildService();
-    expect(service.get().id).toBe('org_bootstrap');
+    const { service } = serviceReturning(organization);
+
+    await service.onApplicationBootstrap();
+
+    expect(service.get().id).toBe('org-1');
   });
 
   it('returns the scoped organization inside runWithTenant', async () => {
-    const service = await buildService();
-    runWithTenant(SCOPED_ORG, () => {
-      expect(service.get().id).toBe('org_scoped');
-      expect(service.getOrganizationId()).toBe('org_scoped');
+    const { service } = serviceReturning(organization);
+    await service.onApplicationBootstrap();
+
+    const scoped = {
+      ...organization,
+      id: 'org-2',
+      slug: 'acme',
+    } as OrganizationWithSettings;
+
+    runWithTenant(scoped, () => {
+      expect(service.get().id).toBe('org-2');
+      expect(service.getOrganizationId()).toBe('org-2');
       expect(service.getTimezone()).toBe('Europe/Berlin');
     });
   });
-});
 ```
 
 - [ ] **Step 6: Run it to verify it fails**
 
 Run: `pnpm --filter @shape-and-flow/booking-api test -- organization-context.service`
-Expected: FAIL — `service.get()` inside `runWithTenant` still returns `org_bootstrap`.
+Expected: FAIL — `service.get()` inside `runWithTenant` still returns `org-1`, not `org-2`.
 
 - [ ] **Step 7: Modify `OrganizationContextService.get()`**
 
