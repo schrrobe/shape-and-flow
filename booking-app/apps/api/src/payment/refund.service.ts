@@ -11,7 +11,7 @@ import { JOB } from '../messaging/queues/job-contracts.js';
 import { OrganizationContextService } from '../organization/organization-context.service.js';
 import { PaymentStatus, Prisma, RefundStatus } from '../prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
-import { PAYMENT_PROVIDER } from '../providers/payment/payment-provider.js';
+import { connectAccountId, PAYMENT_PROVIDER } from '../providers/payment/payment-provider.js';
 import { isRetryableStripeError } from '../providers/payment/stripe.errors.js';
 
 import { BookingFinancialsService } from './booking-financials.service.js';
@@ -316,10 +316,7 @@ export class RefundService {
 
     try {
       const result = await this.payments.createRefund(
-        {
-          organizationId: organization.id,
-          stripeAccountId: organization.stripeAccountId ?? undefined,
-        },
+        { organizationId: organization.id, stripeAccountId: connectAccountId(organization) },
         {
           chargeId,
           amount: Money.fromCents(refund.amountCents, refund.currency),

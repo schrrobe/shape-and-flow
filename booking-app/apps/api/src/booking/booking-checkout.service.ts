@@ -6,7 +6,7 @@ import { Money } from '../domain/money/money.js';
 import { OrganizationContextService } from '../organization/organization-context.service.js';
 import { PaymentStatus } from '../prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
-import { PAYMENT_PROVIDER } from '../providers/payment/payment-provider.js';
+import { connectAccountId, PAYMENT_PROVIDER } from '../providers/payment/payment-provider.js';
 
 import type { Booking } from '../prisma/client.js';
 import type { PaymentProvider } from '../providers/payment/payment-provider.js';
@@ -71,7 +71,7 @@ export class BookingCheckoutService {
     const session = await this.payments.createCheckoutSession(
       {
         organizationId: organization.id,
-        stripeAccountId: organization.stripeAccountId ?? undefined,
+        stripeAccountId: connectAccountId(organization),
       },
       {
         bookingId: booking.id,

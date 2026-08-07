@@ -7,7 +7,7 @@ import { JOB } from '../messaging/queues/job-contracts.js';
 import { OrganizationContextService } from '../organization/organization-context.service.js';
 import { BookingStatus, Prisma } from '../prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
-import { PAYMENT_PROVIDER } from '../providers/payment/payment-provider.js';
+import { connectAccountId, PAYMENT_PROVIDER } from '../providers/payment/payment-provider.js';
 
 import { BookingConfirmationService } from './booking-confirmation.service.js';
 import { assertTransition } from './booking-status.machine.js';
@@ -152,10 +152,7 @@ export class ExpiryService {
     const organization = this.organizations.require(booking.organizationId);
 
     const result = await this.payments.expireCheckoutSession(
-      {
-        organizationId: organization.id,
-        stripeAccountId: organization.stripeAccountId ?? undefined,
-      },
+      { organizationId: organization.id, stripeAccountId: connectAccountId(organization) },
       booking.stripeCheckoutSessionId,
     );
 
@@ -243,10 +240,7 @@ export class ExpiryService {
     const organization = this.organizations.require(organizationId);
 
     const session = await this.payments.retrieveCheckoutSession(
-      {
-        organizationId: organization.id,
-        stripeAccountId: organization.stripeAccountId ?? undefined,
-      },
+      { organizationId: organization.id, stripeAccountId: connectAccountId(organization) },
       sessionId,
     );
 

@@ -19,6 +19,24 @@ export interface PaymentAccountContext {
   stripeAccountId?: string | undefined;
 }
 
+/**
+ * The Stripe Connect account to route to, or `undefined` to charge the platform account.
+ *
+ * Presence of `stripeAccountId` alone is not enough: the onboarding-link retry endpoint
+ * persists it the moment a Stripe Express account is *created*, before onboarding
+ * completes. Routing must wait for Stripe's own `account.updated` confirmation
+ * (`stripeChargesEnabled`), or an organization mid-onboarding would have its checkout,
+ * expiry, and refund calls silently rerouted to an account that cannot yet take charges.
+ */
+export function connectAccountId(organization: {
+  stripeAccountId: string | null;
+  stripeChargesEnabled: boolean;
+}): string | undefined {
+  return organization.stripeAccountId !== null && organization.stripeChargesEnabled
+    ? organization.stripeAccountId
+    : undefined;
+}
+
 export interface CreateCheckoutSessionInput {
   bookingId: string;
   /**
