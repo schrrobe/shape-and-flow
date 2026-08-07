@@ -142,6 +142,19 @@ describe('design tokens', () => {
     );
   });
 
+  it('keeps the brand orange readable as text, not just as a surface', () => {
+    // Die Buchungsstrecke setzt das Orange fast nur als Fläche ein, deshalb fehlte diese
+    // Zusicherung bisher. Die Landingpage im selben Markensystem trägt damit Links, Eyebrows und
+    // den aktiven Navigationspunkt — ohne die Zusicherung ist ein aufgehelltes Orange hier ein
+    // stiller Fehler dort. #C2540A kam auf dem Beige nur auf 4.02:1 und liess alle 13 Seiten der
+    // Landingpage an axe scheitern.
+    expect(contrast(tokenValue('primary'), tokenValue('background'))).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(tokenValue('primary'), tokenValue('surface-muted'))).toBeGreaterThanOrEqual(
+      4.5,
+    );
+    expect(contrast(tokenValue('primary'), tokenValue('surface'))).toBeGreaterThanOrEqual(4.5);
+  });
+
   it('keeps the hover state readable too', () => {
     // A hover colour that fails contrast fails it exactly while somebody is pointing at the
     // thing they are about to click.

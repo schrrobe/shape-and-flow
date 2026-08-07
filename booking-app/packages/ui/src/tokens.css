@@ -7,9 +7,20 @@
  * the web app.
  *
  * The palette is beige, black and orange. The orange is darker than a brand orange usually
- * is (#C2540A rather than something around #E8710A) for one reason: white text on it has to
- * reach 4.5:1, and a lighter orange does not. A button label nobody can read is not a
- * design decision.
+ * is (#A04607 rather than something around #E8710A) because it has to work in both
+ * directions:
+ *
+ *   - White text *on* the orange — the button label. Any orange up to about #C2540A manages
+ *     this, and it is the reason the palette was already dark.
+ *   - The orange *as* text on the beige — a link, an eyebrow, an active nav item. This needs
+ *     the orange itself to be dark, and #C2540A was not: 4.02:1 on `--sf-background` and
+ *     3.65:1 on `--sf-surface-muted`, both short of the 4.5:1 WCAG AA asks of text.
+ *
+ * Die zweite Richtung fällt hier kaum auf — die Buchungsstrecke ist ein Formular und setzt das
+ * Orange fast nur als Fläche ein. Auf der Landingpage trägt es Links, `.sf-eyebrow` und den
+ * aktiven Navigationspunkt, und dort scheiterten alle 13 Seiten an axe. Die Tokens sind
+ * gemeinsam, also geht die Korrektur gemeinsam: unterschiedliche Orangetöne zwischen Website
+ * und Buchungsstrecke wären die schlechtere Alternative.
  */
 :root {
   /* Surfaces, warm rather than grey — the beige is the page, not an accent. */
@@ -24,8 +35,10 @@
   --sf-border: #d9cdba;
 
   /* Action. */
-  --sf-primary: #c2540a;
-  --sf-primary-hover: #a34608;
+  --sf-primary: #a04607;
+  /* Muss dunkler bleiben als --sf-primary, sonst wirkt der Hover wie ein Zurücksetzen.
+   * Weiß darauf: 7.34:1. */
+  --sf-primary-hover: #8f3e06;
   --sf-primary-contrast: #ffffff;
 
   /* Status surfaces. Backgrounds for a message, not text colours — they carry
@@ -34,9 +47,16 @@
   --sf-warning: #ffe0b2;
   --sf-danger: #f5c6c6;
 
-  /* The focus ring is near-black rather than the brand orange: it has to be visible on the
-   * orange button too, where an orange ring would disappear. */
-  --sf-focus-ring: #16130f;
+  /*
+   * The focus ring is black rather than the brand orange: it has to be visible on the orange
+   * button too, where an orange ring would disappear.
+   *
+   * Schwarz und nicht das Fast-Schwarz von --sf-text-primary. Die Spec unten verlangt 3:1
+   * zwischen Ring und --sf-primary, und #16130F kam auf dem abgedunkelten Orange nur noch auf
+   * 2,97:1 — die beiden ziehen in entgegengesetzte Richtungen. Schwarz hat auf beiden Seiten
+   * Luft: 3,37:1 auf dem Orange, 18,37:1 auf dem Beige.
+   */
+  --sf-focus-ring: #000000;
 
   --sf-radius: 0.5rem;
   --sf-shadow-card: 0 1px 2px rgb(22 19 15 / 8%), 0 4px 12px rgb(22 19 15 / 6%);
