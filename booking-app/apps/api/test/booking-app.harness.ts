@@ -300,8 +300,13 @@ export async function createBookingTestApp(options: {
    * The correlation middleware is registered with `app.use()` in production rather than
    * as Nest middleware, so a suite that asserts on correlation ids has to mount it the
    * same way or it would be proving something about a different wiring.
+   *
+   * A `[prefix, handler]` pair mounts as `app.use(prefix, handler)` — the same call
+   * `main.ts` makes for `TenantResolutionMiddleware` and `OfficeTenantMiddleware` — so a
+   * suite exercising either one gets Express's own path scoping rather than a hand-rolled
+   * reimplementation of it.
    */
-  middleware?: RequestHandler[];
+  middleware?: (RequestHandler | readonly [string, RequestHandler])[];
   /**
    * Count Prisma operations, so a suite can assert an N+1 has not appeared.
    *
@@ -330,7 +335,14 @@ export async function createBookingTestApp(options: {
   // `rawBody: true` for the same reason production sets it: the webhook verifies a
   // signature over the bytes as sent.
   const app = moduleRef.createNestApplication({ rawBody: true });
-  for (const handler of options.middleware ?? []) app.use(handler);
+  for (const entry of options.middleware ?? []) {
+    if (Array.isArray(entry)) {
+      const [prefix, handler] = entry;
+      app.use(prefix, handler);
+    } else {
+      app.use(entry);
+    }
+  }
   if (options.globalPrefix !== undefined) app.setGlobalPrefix(options.globalPrefix);
   app.use(
     `${options.globalPrefix === undefined ? '' : `/${options.globalPrefix}`}/webhooks`,
