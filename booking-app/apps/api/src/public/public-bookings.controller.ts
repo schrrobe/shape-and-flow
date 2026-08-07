@@ -62,6 +62,13 @@ export class PublicBookingsController {
     this.assertAllowedRedirect(body.successUrl);
     this.assertAllowedRedirect(body.cancelUrl);
 
+    const organization = this.organizations.get();
+    if (organization.stripeAccountId !== null && !organization.stripeChargesEnabled) {
+      throw new AppError('ORGANIZATION_ONBOARDING_INCOMPLETE', {
+        message: 'This organizer has not finished setting up payments yet.',
+      });
+    }
+
     // Resume first. An attempt that reserved and then failed at the provider left a
     // hold this key names; reserving again would ask for a slot the customer is
     // already holding and be refused SLOT_UNAVAILABLE by their own first attempt.
