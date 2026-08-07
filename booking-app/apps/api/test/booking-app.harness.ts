@@ -15,6 +15,7 @@ import { EnqueueService, QUEUE_REGISTRY } from '../src/messaging/queues/enqueue.
 import { QUEUES } from '../src/messaging/queues/job-contracts.js';
 import { REDIS } from '../src/messaging/queues/redis.provider.js';
 import { OrganizationContextService } from '../src/organization/organization-context.service.js';
+import { currentTenant } from '../src/organization/tenant-context.store.js';
 import { PrismaService } from '../src/prisma/prisma.service.js';
 import { EMAIL_PROVIDER } from '../src/providers/email/email-provider.js';
 import { FakeEmailProvider } from '../src/providers/email/fake-email.provider.js';
@@ -70,6 +71,13 @@ let currentClock: FixedClock | null = null;
 
 function organizationStub(): Partial<OrganizationContextService> {
   const read = (): OrganizationWithSettings => {
+    // Mirrors the real OrganizationContextService.get(): a suite that wires
+    // TenantResolutionMiddleware and opens a runWithTenant() scope (public routes
+    // resolved by ?organizer=<slug>) gets that organization; everything else falls
+    // back to the snapshot set by createBookingTestApp.
+    const scoped = currentTenant();
+    if (scoped) return scoped;
+
     if (currentOrganization === null) {
       throw new Error('Organization not set. Call createBookingTestApp from a beforeEach.');
     }
