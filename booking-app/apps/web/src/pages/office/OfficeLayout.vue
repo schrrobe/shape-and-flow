@@ -5,8 +5,8 @@ import { useI18n } from 'vue-i18n';
 import { useRouter } from 'vue-router';
 
 import LocaleSwitch from '../../components/LocaleSwitch.vue';
-import { NAVIGATION } from '../../office/navigation.js';
 import { registerOfficeMessages } from '../../office/i18n/index.js';
+import { NAVIGATION } from '../../office/navigation.js';
 import { useSession } from '../../stores/session.js';
 
 registerOfficeMessages();

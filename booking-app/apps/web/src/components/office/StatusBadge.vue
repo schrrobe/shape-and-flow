@@ -39,4 +39,3 @@ const label = computed(() => i18n.global.t(presentation.value.labelKey));
     <span :class="compact === true ? 'sr-only sm:not-sr-only' : ''">{{ label }}</span>
   </span>
 </template>
-

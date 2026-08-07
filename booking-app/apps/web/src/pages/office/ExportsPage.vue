@@ -78,7 +78,12 @@ function download(kind: 'bookings' | 'payments'): void {
       <h2 id="range-heading" class="text-lg font-medium">{{ t('office.exports.rangeHeading') }}</h2>
 
       <div class="mt-3 grid gap-3 sm:grid-cols-3">
-        <SfInput v-model="from" type="date" :label="t('office.exports.fromLabel')" data-test="from" />
+        <SfInput
+          v-model="from"
+          type="date"
+          :label="t('office.exports.fromLabel')"
+          data-test="from"
+        />
         <SfInput v-model="to" type="date" :label="t('office.exports.toLabel')" data-test="to" />
         <SfSelect
           :model-value="status"
@@ -94,7 +99,9 @@ function download(kind: 'bookings' | 'payments'): void {
       </SfAlert>
 
       <p v-else class="mt-3 text-sm text-text-secondary" data-test="range-summary">
-        {{ t('office.exports.rangeSummary', { from: localDateLabel(from), to: localDateLabel(to) }) }}
+        {{
+          t('office.exports.rangeSummary', { from: localDateLabel(from), to: localDateLabel(to) })
+        }}
       </p>
     </SfCard>
 

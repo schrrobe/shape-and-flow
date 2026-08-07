@@ -176,7 +176,9 @@ async function confirmArchive(): Promise<void> {
         >
           {{ includeArchived ? t('office.users.hideArchived') : t('office.users.showArchived') }}
         </SfButton>
-        <SfButton data-test="add-user" @click="startCreate">{{ t('office.users.addUser') }}</SfButton>
+        <SfButton data-test="add-user" @click="startCreate">{{
+          t('office.users.addUser')
+        }}</SfButton>
       </div>
     </div>
 

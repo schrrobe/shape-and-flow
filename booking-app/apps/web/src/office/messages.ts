@@ -20,7 +20,7 @@ export const OFFICE_MESSAGE_KEYS: readonly MessageKey[] = [
  * wording differs on purpose. An operator can act on "somebody else changed this — reload
  * and try again"; a customer cannot.
  */
-export function officeMessageKeyFor(error: unknown): `office.errors.${MessageKey}` {
+function officeMessageKeyFor(error: unknown): `office.errors.${MessageKey}` {
   if (error instanceof ApiError) return `office.errors.${error.code}`;
 
   // A `TypeError` from `fetch` means the request never got an answer.

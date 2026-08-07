@@ -692,7 +692,11 @@ onMounted(run);
     >
       <div class="space-y-3">
         <p>
-          {{ t('office.bookingDetail.theyHavePaid', { amount: data === null ? '' : money(data.paid) }) }}
+          {{
+            t('office.bookingDetail.theyHavePaid', {
+              amount: data === null ? '' : money(data.paid),
+            })
+          }}
         </p>
 
         <SfInput

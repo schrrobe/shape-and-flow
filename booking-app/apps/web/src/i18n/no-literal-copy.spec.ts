@@ -86,8 +86,8 @@ describe('app copy', () => {
   });
 
   it('does not flag a `>` inside a quoted attribute expression', () => {
-    expect(
-      literalSentences('<template><p v-if="amount > 0">{{ amount }}</p></template>'),
-    ).toEqual([]);
+    expect(literalSentences('<template><p v-if="amount > 0">{{ amount }}</p></template>')).toEqual(
+      [],
+    );
   });
 });

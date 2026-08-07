@@ -103,7 +103,11 @@ async function submit(): Promise<void> {
     </SfAlert>
 
     <template v-else>
-      <SfAlert v-if="problem !== null" tone="danger" :title="t('office.resetPassword.problemTitle')">
+      <SfAlert
+        v-if="problem !== null"
+        tone="danger"
+        :title="t('office.resetPassword.problemTitle')"
+      >
         {{ problem }}
       </SfAlert>
 

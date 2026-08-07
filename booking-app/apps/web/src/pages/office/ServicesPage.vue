@@ -190,7 +190,9 @@ async function confirmArchiveCategory(): Promise<void> {
             categories.reload();
           "
         >
-          {{ includeArchived ? t('office.services.hideArchived') : t('office.services.showArchived') }}
+          {{
+            includeArchived ? t('office.services.hideArchived') : t('office.services.showArchived')
+          }}
         </SfButton>
         <SfButton data-test="add-service" @click="startCreate">
           {{ t('office.services.addTreatment') }}
@@ -298,7 +300,9 @@ async function confirmArchiveCategory(): Promise<void> {
 
     <SfModal
       :open="creating || editing !== null"
-      :title="creating ? t('office.services.addTreatment') : t('office.services.editTreatmentTitle')"
+      :title="
+        creating ? t('office.services.addTreatment') : t('office.services.editTreatmentTitle')
+      "
       :confirm-label="t('office.services.saveAction')"
       :busy="services.saving.value"
       @close="
