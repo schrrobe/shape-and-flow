@@ -1,6 +1,8 @@
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { i18n } from '../../i18n/index.js';
 
 import SettingsPage from './SettingsPage.vue';
 
@@ -91,7 +93,7 @@ afterEach(() => {
 });
 
 async function mountPage() {
-  const wrapper = mount(SettingsPage, { global: { plugins: [pinia] } });
+  const wrapper = mount(SettingsPage, { global: { plugins: [pinia, i18n] } });
   await flushPromises();
 
   return wrapper;
@@ -105,6 +107,14 @@ function lastPatch(): Record<string, unknown> {
 }
 
 describe('SettingsPage', () => {
+  beforeAll(() => {
+    i18n.global.locale.value = 'en';
+  });
+
+  afterAll(() => {
+    i18n.global.locale.value = 'de';
+  });
+
   it('switches the cancellation fee on, which is the whole point of the policy', async () => {
     const wrapper = await mountPage();
 

@@ -2,7 +2,9 @@
 import { computed } from 'vue';
 
 import { addDays } from '../../composables/useLocalDate.js';
+import { i18n } from '../../i18n/index.js';
 import { minuteOfDay, money, time } from '../../office/format.js';
+import { registerOfficeMessages } from '../../office/i18n/index.js';
 
 import {
   hasTimeOff,
@@ -37,6 +39,13 @@ const emit = defineEmits<{
   changeDate: [date: string];
   select: [bookingId: string];
 }>();
+
+registerOfficeMessages();
+
+const gridAriaLabel = computed(() => i18n.global.t('office.calendarGrid.gridAriaLabel'));
+const closedLabel = computed(() => i18n.global.t('office.calendarGrid.closed'));
+const onLeaveLabel = computed(() => i18n.global.t('office.calendarGrid.onLeave'));
+const blockedDefaultLabel = computed(() => i18n.global.t('office.calendarGrid.blockedDefault'));
 
 const weekday = computed(() => weekdayOf(props.date));
 
@@ -120,7 +129,7 @@ function onKeydown(event: KeyboardEvent): void {
     data-test="grid"
     tabindex="0"
     role="group"
-    aria-label="Day calendar. Use the left and right arrow keys to change day."
+    :aria-label="gridAriaLabel"
     class="rounded-sf border border-border bg-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
     @keydown="onKeydown"
   >
@@ -130,7 +139,7 @@ function onKeydown(event: KeyboardEvent): void {
       aria-disabled="true"
       class="border-b border-border bg-surface-muted px-3 py-2 text-sm text-text-secondary"
     >
-      Closed{{ closedDay.reason === null ? '' : ` — ${closedDay.reason}` }}
+      {{ closedLabel }}{{ closedDay.reason === null ? '' : ` — ${closedDay.reason}` }}
     </div>
 
     <div class="flex">
@@ -177,7 +186,7 @@ function onKeydown(event: KeyboardEvent): void {
               class="col-start-1 row-start-1 flex items-start justify-center bg-surface-muted px-1 py-1 text-xs text-text-secondary"
               :style="rowStyle({ startMinute: range.from, endMinute: range.to })"
             >
-              On leave
+              {{ onLeaveLabel }}
             </div>
 
             <div
@@ -188,7 +197,7 @@ function onKeydown(event: KeyboardEvent): void {
               class="col-start-1 overflow-hidden rounded-sf border border-border bg-surface-muted px-1 text-xs text-text-secondary"
               :style="rowStyle(blocked)"
             >
-              {{ blocked.reason ?? 'Blocked' }}
+              {{ blocked.reason ?? blockedDefaultLabel }}
             </div>
 
             <!-- Buffers first, so an appointment paints over its own band edges. -->

@@ -10,12 +10,14 @@ import {
   SfTextarea,
 } from '@shape-and-flow/booking-ui';
 import { computed, onMounted, ref, watch } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { useRoute, useRouter } from 'vue-router';
 
 import { api } from '../../api/client.js';
 import { ApiError } from '../../api/errors.js';
 import { useFocusStep } from '../../composables/useFocusStep.js';
 import { money, time, today } from '../../office/format.js';
+import { registerOfficeMessages } from '../../office/i18n/index.js';
 import { officeMessage } from '../../office/messages.js';
 import { useSession } from '../../stores/session.js';
 
@@ -43,6 +45,9 @@ import type {
 const route = useRoute();
 const router = useRouter();
 const session = useSession();
+
+registerOfficeMessages();
+const { t } = useI18n();
 
 useFocusStep('New booking');
 
@@ -87,7 +92,7 @@ const idempotencyKey = ref<string | null>(null);
 
 /** Only what the office can actually sell. Reserving refuses anything else. */
 const serviceOptions = computed(() => [
-  { value: '', label: 'Choose a treatment' },
+  { value: '', label: t('office.newBooking.chooseTreatment') },
   ...services.value
     .filter((service) => service.archivedAt === null && service.isBookableOnline)
     .map((service) => ({
@@ -104,7 +109,7 @@ const employeeOptions = computed(() => {
 
   return candidates.map((id) => ({
     value: id,
-    label: employeeNames.value.get(id) ?? 'Unknown',
+    label: employeeNames.value.get(id) ?? t('office.newBooking.unknownPerson'),
   }));
 });
 
@@ -270,11 +275,11 @@ watch([serviceId, date], loadSlots);
 <template>
   <section class="space-y-4">
     <h1 ref="heading" tabindex="-1" class="text-xl font-semibold tracking-tight outline-none">
-      New booking
+      {{ t('office.newBooking.heading') }}
     </h1>
 
     <SfAlert v-if="!mayCreate" tone="warning" data-test="forbidden">
-      Only an owner or an administrator may create a booking.
+      {{ t('office.newBooking.forbidden') }}
     </SfAlert>
 
     <template v-else>
@@ -287,27 +292,35 @@ watch([serviceId, date], loadSlots);
 
       <form v-else class="space-y-4" @submit.prevent="submit">
         <SfCard as="section" aria-labelledby="what-heading">
-          <h2 id="what-heading" class="text-lg font-medium">Treatment and day</h2>
+          <h2 id="what-heading" class="text-lg font-medium">
+            {{ t('office.newBooking.whatHeading') }}
+          </h2>
 
           <div class="mt-3 grid gap-3 sm:grid-cols-2">
             <SfSelect
               :model-value="serviceId"
-              label="Treatment"
+              :label="t('office.newBooking.treatmentLabel')"
               :options="serviceOptions"
               data-test="service"
               @update:model-value="(value) => (serviceId = value)"
             />
 
-            <SfInput v-model="date" type="date" label="Day" data-test="date" />
+            <SfInput
+              v-model="date"
+              type="date"
+              :label="t('office.newBooking.dayLabel')"
+              data-test="date"
+            />
           </div>
         </SfCard>
 
         <SfCard as="section" aria-labelledby="when-heading">
-          <h2 id="when-heading" class="text-lg font-medium">Time</h2>
+          <h2 id="when-heading" class="text-lg font-medium">
+            {{ t('office.newBooking.whenHeading') }}
+          </h2>
 
           <p class="mt-1 text-sm text-text-secondary">
-            Everything free on this day, including times too close for a customer to book
-            themselves.
+            {{ t('office.newBooking.slotsHint') }}
           </p>
 
           <SfAlert v-if="slotsError !== null" tone="danger" class="mt-3" data-test="slots-error">
@@ -317,11 +330,11 @@ watch([serviceId, date], loadSlots);
           <SfSkeleton v-else-if="loadingSlots" class="mt-3 h-20" />
 
           <p v-else-if="serviceId === ''" class="mt-3 text-sm text-text-secondary">
-            Choose a treatment first.
+            {{ t('office.newBooking.chooseTreatmentFirst') }}
           </p>
 
           <p v-else-if="slots.length === 0" class="mt-3 text-sm" data-test="no-slots">
-            Nothing is free on this day. Try another day, or free the time up under Availability.
+            {{ t('office.newBooking.noSlots') }}
           </p>
 
           <ul v-else class="mt-3 flex flex-wrap gap-2">
@@ -341,8 +354,11 @@ watch([serviceId, date], loadSlots);
           <div v-if="startsAt !== ''" class="mt-3 max-w-sm">
             <SfSelect
               :model-value="employeeId"
-              label="With"
-              :options="[{ value: '', label: 'Choose a person' }, ...employeeOptions]"
+              :label="t('office.newBooking.withLabel')"
+              :options="[
+                { value: '', label: t('office.newBooking.choosePerson') },
+                ...employeeOptions,
+              ]"
               data-test="employee"
               @update:model-value="(value) => (employeeId = value)"
             />
@@ -350,7 +366,9 @@ watch([serviceId, date], loadSlots);
         </SfCard>
 
         <SfCard as="section" aria-labelledby="who-heading">
-          <h2 id="who-heading" class="text-lg font-medium">Customer</h2>
+          <h2 id="who-heading" class="text-lg font-medium">
+            {{ t('office.newBooking.whoHeading') }}
+          </h2>
 
           <div v-if="customer !== null" class="mt-3 flex flex-wrap items-baseline gap-3">
             <p data-test="chosen-customer">
@@ -358,7 +376,7 @@ watch([serviceId, date], loadSlots);
               <span class="text-text-secondary">{{ customer.email }}</span>
             </p>
             <SfButton variant="ghost" data-test="clear-customer" @click="clearCustomer">
-              Someone else
+              {{ t('office.newBooking.someoneElse') }}
             </SfButton>
           </div>
 
@@ -367,19 +385,19 @@ watch([serviceId, date], loadSlots);
               <div class="min-w-60 flex-1">
                 <SfInput
                   v-model="search"
-                  label="Find an existing customer"
-                  description="Name, email or phone."
+                  :label="t('office.newBooking.findCustomerLabel')"
+                  :description="t('office.newBooking.findCustomerHint')"
                   data-test="customer-search"
                 />
               </div>
               <SfButton
                 variant="secondary"
                 :loading="searching"
-                loading-label="Searching"
+                :loading-label="t('office.newBooking.searching')"
                 data-test="search"
                 @click="runSearch"
               >
-                Search
+                {{ t('office.newBooking.search') }}
               </SfButton>
             </div>
 
@@ -398,26 +416,39 @@ watch([serviceId, date], loadSlots);
             </ul>
 
             <p v-else-if="searched" class="mt-3 text-sm text-text-secondary" data-test="no-matches">
-              Nobody found. Fill in the fields below to book someone new.
+              {{ t('office.newBooking.noMatches') }}
             </p>
 
             <div class="mt-4 grid gap-3 sm:grid-cols-2">
-              <SfInput v-model="newCustomer.firstName" label="First name" data-test="first-name" />
-              <SfInput v-model="newCustomer.lastName" label="Last name" data-test="last-name" />
+              <SfInput
+                v-model="newCustomer.firstName"
+                :label="t('office.newBooking.firstNameLabel')"
+                data-test="first-name"
+              />
+              <SfInput
+                v-model="newCustomer.lastName"
+                :label="t('office.newBooking.lastNameLabel')"
+                data-test="last-name"
+              />
               <SfInput
                 v-model="newCustomer.email"
                 type="email"
-                label="Email"
-                description="Where the confirmation and the management link go."
+                :label="t('office.newBooking.emailLabel')"
+                :description="t('office.newBooking.emailHint')"
                 data-test="email"
               />
-              <SfInput v-model="newCustomer.phone" type="tel" label="Phone" data-test="phone" />
+              <SfInput
+                v-model="newCustomer.phone"
+                type="tel"
+                :label="t('office.newBooking.phoneLabel')"
+                data-test="phone"
+              />
               <SfSelect
                 :model-value="newCustomer.locale"
-                label="Writes to them in"
+                :label="t('office.newBooking.localeLabel')"
                 :options="[
-                  { value: 'de', label: 'German' },
-                  { value: 'en', label: 'English' },
+                  { value: 'de', label: t('office.newBooking.localeGerman') },
+                  { value: 'en', label: t('office.newBooking.localeEnglish') },
                 ]"
                 data-test="locale"
                 @update:model-value="(value) => (newCustomer.locale = value)"
@@ -428,8 +459,8 @@ watch([serviceId, date], loadSlots);
           <div class="mt-3">
             <SfTextarea
               v-model="note"
-              label="Note"
-              description="Shown with the appointment. This is the customer's note."
+              :label="t('office.newBooking.noteLabel')"
+              :description="t('office.newBooking.noteHint')"
               :maxlength="2000"
               data-test="note"
             />
@@ -450,11 +481,11 @@ watch([serviceId, date], loadSlots);
         <SfButton
           :disabled="problems.length > 0"
           :loading="saving"
-          loading-label="Booking"
+          :loading-label="t('office.newBooking.bookingLoading')"
           data-test="create"
           @click="submit"
         >
-          Book it
+          {{ t('office.newBooking.submit') }}
         </SfButton>
       </form>
     </template>

@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { SfCard } from '@shape-and-flow/booking-ui';
 
+import LocaleSwitch from '../../components/LocaleSwitch.vue';
 import { useFocusStep } from '../../composables/useFocusStep.js';
-import { useEnglishDocument } from '../../office/useEnglishDocument.js';
+import { registerOfficeMessages } from '../../office/i18n/index.js';
 
 /**
  * The chrome the three authentication screens share.
@@ -13,13 +14,16 @@ import { useEnglishDocument } from '../../office/useEnglishDocument.js';
  */
 const props = defineProps<{ heading: string }>();
 
-useEnglishDocument();
+registerOfficeMessages();
 useFocusStep(props.heading);
 </script>
 
 <template>
   <div class="mx-auto flex min-h-dvh w-full max-w-md flex-col justify-center gap-6 px-4 py-10">
-    <p class="text-sm uppercase tracking-widest text-text-secondary">Shape and Flow</p>
+    <div class="flex items-center justify-between">
+      <p class="text-sm uppercase tracking-widest text-text-secondary">Shape and Flow</p>
+      <LocaleSwitch />
+    </div>
 
     <SfCard as="section">
       <h1

@@ -2,12 +2,15 @@
 import { bookingSortSchema, bookingStatusSchema } from '@shape-and-flow/booking-contracts';
 import { SfAlert, SfButton, SfInput, SfSelect, SfSkeleton } from '@shape-and-flow/booking-ui';
 import { computed, onMounted, ref, watch } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { useRoute, useRouter } from 'vue-router';
 
 import { api } from '../../api/client.js';
+import { STATUS_PRESENTATION } from '../../components/office/status-presentation.js';
 import StatusBadge from '../../components/office/StatusBadge.vue';
 import { useFocusStep } from '../../composables/useFocusStep.js';
 import { dateTime, money, today } from '../../office/format.js';
+import { registerOfficeMessages } from '../../office/i18n/index.js';
 import { officeMessage } from '../../office/messages.js';
 import { useSession } from '../../stores/session.js';
 
@@ -28,23 +31,32 @@ import type {
  * opaque and one-directional: there is no page 4 to jump to, and pretending otherwise
  * would mean an interface that cannot honour its own controls.
  */
+registerOfficeMessages();
+const { t } = useI18n();
+
 const route = useRoute();
 const router = useRouter();
 const session = useSession();
 
 useFocusStep('Bookings');
 
-const statusOptions = [
-  { value: '', label: 'Any status' },
-  ...bookingStatusSchema.options.map((status) => ({ value: status, label: status })),
-];
+// Reuses the same label keys as `StatusBadge`: a persisted `BookingStatus` is a subset of
+// the `DisplayStatus` the presentation map covers, so the filter and the badge always
+// agree on what a status is called.
+const statusOptions = computed(() => [
+  { value: '', label: t('office.bookingList.anyStatus') },
+  ...bookingStatusSchema.options.map((status) => ({
+    value: status,
+    label: t(STATUS_PRESENTATION[status].labelKey),
+  })),
+]);
 
-const SORT_OPTIONS = [
-  { value: 'startsAt:desc', label: 'Latest appointment first' },
-  { value: 'startsAt:asc', label: 'Earliest appointment first' },
-  { value: 'createdAt:desc', label: 'Newest booking first' },
-  { value: 'createdAt:asc', label: 'Oldest booking first' },
-];
+const sortOptions = computed(() => [
+  { value: 'startsAt:desc', label: t('office.bookingList.sortLatestAppointmentFirst') },
+  { value: 'startsAt:asc', label: t('office.bookingList.sortEarliestAppointmentFirst') },
+  { value: 'createdAt:desc', label: t('office.bookingList.sortNewestBookingFirst') },
+  { value: 'createdAt:asc', label: t('office.bookingList.sortOldestBookingFirst') },
+]);
 
 const items = ref<OfficeBookingListItem[]>([]);
 const nextCursor = ref<string | null>(null);
@@ -184,7 +196,7 @@ watch(filters, load);
   <section class="space-y-4">
     <div class="flex flex-wrap items-center justify-between gap-3">
       <h1 ref="heading" tabindex="-1" class="text-xl font-semibold tracking-tight outline-none">
-        Bookings
+        {{ t('office.bookingList.title') }}
       </h1>
 
       <SfButton
@@ -192,7 +204,7 @@ watch(filters, load);
         data-test="new-booking"
         @click="router.push({ name: 'office-booking-new' })"
       >
-        New booking
+        {{ t('office.bookingList.newBooking') }}
       </SfButton>
     </div>
 
@@ -202,13 +214,13 @@ watch(filters, load);
     >
       <SfInput
         v-model="search"
-        label="Search"
-        placeholder="Reference, name or email"
+        :label="t('office.bookingList.searchLabel')"
+        :placeholder="t('office.bookingList.searchPlaceholder')"
         data-test="search"
       />
 
       <SfSelect
-        label="Status"
+        :label="t('office.bookingList.statusLabel')"
         :model-value="filters.status"
         :options="statusOptions"
         data-test="filter-status"
@@ -217,7 +229,7 @@ watch(filters, load);
 
       <SfInput
         type="date"
-        label="From"
+        :label="t('office.bookingList.fromLabel')"
         :model-value="resolveDate(filters.from)"
         data-test="filter-from"
         @update:model-value="(value) => apply({ from: value })"
@@ -225,22 +237,24 @@ watch(filters, load);
 
       <SfInput
         type="date"
-        label="To"
+        :label="t('office.bookingList.toLabel')"
         :model-value="resolveDate(filters.to)"
         data-test="filter-to"
         @update:model-value="(value) => apply({ to: value })"
       />
 
       <SfSelect
-        label="Order"
+        :label="t('office.bookingList.orderLabel')"
         :model-value="filters.sort"
-        :options="SORT_OPTIONS"
+        :options="sortOptions"
         data-test="filter-sort"
         @update:model-value="(value) => apply({ sort: value })"
       />
 
       <div class="sm:col-span-2 lg:col-span-5">
-        <SfButton type="submit" data-test="apply">Search</SfButton>
+        <SfButton type="submit" data-test="apply">{{
+          t('office.bookingList.searchSubmit')
+        }}</SfButton>
       </div>
     </form>
 
@@ -249,23 +263,39 @@ watch(filters, load);
     <SfSkeleton v-if="loading && items.length === 0" class="h-64" />
 
     <p v-else-if="items.length === 0" class="text-text-secondary" data-test="empty">
-      No bookings match these filters.
+      {{ t('office.bookingList.emptyState') }}
     </p>
 
     <div v-else class="overflow-x-auto rounded-sf border border-border">
       <table class="w-full min-w-160 text-sm">
         <caption class="sr-only">
-          Bookings matching the current filters
+          {{
+            t('office.bookingList.tableCaption')
+          }}
         </caption>
         <thead class="bg-surface-muted text-left">
           <tr>
-            <th scope="col" class="px-3 py-2 font-medium">When</th>
-            <th scope="col" class="px-3 py-2 font-medium">Customer</th>
-            <th scope="col" class="px-3 py-2 font-medium">Treatment</th>
-            <th scope="col" class="px-3 py-2 font-medium">Person</th>
-            <th scope="col" class="px-3 py-2 text-right font-medium">Price</th>
-            <th scope="col" class="px-3 py-2 text-right font-medium">Paid</th>
-            <th scope="col" class="px-3 py-2 font-medium">Status</th>
+            <th scope="col" class="px-3 py-2 font-medium">
+              {{ t('office.bookingList.columnWhen') }}
+            </th>
+            <th scope="col" class="px-3 py-2 font-medium">
+              {{ t('office.bookingList.columnCustomer') }}
+            </th>
+            <th scope="col" class="px-3 py-2 font-medium">
+              {{ t('office.bookingList.columnTreatment') }}
+            </th>
+            <th scope="col" class="px-3 py-2 font-medium">
+              {{ t('office.bookingList.columnPerson') }}
+            </th>
+            <th scope="col" class="px-3 py-2 text-right font-medium">
+              {{ t('office.bookingList.columnPrice') }}
+            </th>
+            <th scope="col" class="px-3 py-2 text-right font-medium">
+              {{ t('office.bookingList.columnPaid') }}
+            </th>
+            <th scope="col" class="px-3 py-2 font-medium">
+              {{ t('office.bookingList.columnStatus') }}
+            </th>
           </tr>
         </thead>
         <tbody class="divide-y divide-border">
@@ -300,11 +330,11 @@ watch(filters, load);
       v-if="nextCursor !== null"
       variant="secondary"
       :loading="loadingMore"
-      loading-label="Loading"
+      :loading-label="t('office.bookingList.loadingLabel')"
       data-test="load-more"
       @click="loadMore"
     >
-      Load more
+      {{ t('office.bookingList.loadMore') }}
     </SfButton>
   </section>
 </template>

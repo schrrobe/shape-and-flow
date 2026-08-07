@@ -13,11 +13,13 @@ import {
   SfSkeleton,
 } from '@shape-and-flow/booking-ui';
 import { computed, onMounted, ref } from 'vue';
+import { useI18n } from 'vue-i18n';
 
 import { api } from '../../api/client.js';
 import { useAsyncData } from '../../composables/useAsyncData.js';
 import { useFocusStep } from '../../composables/useFocusStep.js';
 import { euros } from '../../office/format.js';
+import { registerOfficeMessages } from '../../office/i18n/index.js';
 import { officeMessage } from '../../office/messages.js';
 
 import type {
@@ -36,6 +38,10 @@ import type {
  * Saving reloads: the API refreshes its cached organization context on a successful
  * write, and the response is the state the domain will now use.
  */
+registerOfficeMessages();
+
+const { t } = useI18n();
+
 useFocusStep('Settings');
 
 const { data, errorKey, loading, run } = useAsyncData((signal) => api.office.settings.read(signal));
@@ -60,31 +66,35 @@ const form = ref({
   customerNoteEnabled: 'true',
 });
 
-const INTERVAL_OPTIONS = SETTINGS_BOUNDS.schedulingIntervalMinutes.map((minutes) => ({
-  value: String(minutes),
-  label: `${String(minutes)} minutes`,
-}));
+const INTERVAL_OPTIONS = computed(() =>
+  SETTINGS_BOUNDS.schedulingIntervalMinutes.map((minutes) => ({
+    value: String(minutes),
+    label: t('office.settings.intervalOption', { minutes }),
+  })),
+);
 
-const BOOLEAN_OPTIONS = [
-  { value: 'true', label: 'Yes' },
-  { value: 'false', label: 'No' },
-];
+const BOOLEAN_OPTIONS = computed(() => [
+  { value: 'true', label: t('office.settings.yes') },
+  { value: 'false', label: t('office.settings.no') },
+]);
 
 /**
  * Built from the enum, so a fourth policy cannot be added to the domain and quietly stay
  * unreachable from the only screen that sets it — which is how the percentage below came
  * to be inert for as long as it was.
  */
-const FEE_POLICY_LABELS: Record<string, string> = {
-  NONE: 'Nothing is kept',
-  PERCENTAGE: 'A share of what was paid',
-  FIXED_AMOUNT: 'A fixed amount',
-};
-
-const FEE_POLICY_OPTIONS = cancellationFeePolicySchema.options.map((policy) => ({
-  value: policy,
-  label: FEE_POLICY_LABELS[policy] ?? policy,
+const FEE_POLICY_LABELS = computed<Record<string, string>>(() => ({
+  NONE: t('office.settings.feePolicyNone'),
+  PERCENTAGE: t('office.settings.feePolicyPercentage'),
+  FIXED_AMOUNT: t('office.settings.feePolicyFixedAmount'),
 }));
+
+const FEE_POLICY_OPTIONS = computed(() =>
+  cancellationFeePolicySchema.options.map((policy) => ({
+    value: policy,
+    label: FEE_POLICY_LABELS.value[policy] ?? policy,
+  })),
+);
 
 /** Euros as typed, in cents. Comma or point, because a German keyboard offers both. */
 function toCents(value: string): number {
@@ -181,7 +191,7 @@ onMounted(async () => {
 <template>
   <section class="space-y-4">
     <h1 ref="heading" tabindex="-1" class="text-xl font-semibold tracking-tight outline-none">
-      Settings
+      {{ t('office.settings.title') }}
     </h1>
 
     <SfAlert v-if="errorKey !== null" tone="danger" data-test="error">
@@ -191,7 +201,7 @@ onMounted(async () => {
       saveError
     }}</SfAlert>
     <SfAlert v-if="saved" tone="success" data-test="saved">
-      Saved. New bookings use these rules from now on.
+      {{ t('office.settings.saved') }}
     </SfAlert>
 
     <SfSkeleton v-if="loading && data === null" class="h-96" />
@@ -203,12 +213,14 @@ onMounted(async () => {
     -->
     <form v-else-if="data !== null" class="space-y-4" @submit.prevent="submit">
       <SfCard as="section" aria-labelledby="booking-heading">
-        <h2 id="booking-heading" class="text-lg font-medium">Booking rules</h2>
+        <h2 id="booking-heading" class="text-lg font-medium">
+          {{ t('office.settings.bookingRulesHeading') }}
+        </h2>
 
         <div class="mt-3 grid gap-3 sm:grid-cols-2">
           <SfSelect
             :model-value="form.schedulingIntervalMinutes"
-            label="Slots every"
+            :label="t('office.settings.intervalLabel')"
             :options="INTERVAL_OPTIONS"
             data-test="interval"
             @update:model-value="(value) => (form.schedulingIntervalMinutes = value)"
@@ -217,7 +229,7 @@ onMounted(async () => {
           <SfInput
             v-model="form.bookingHorizonDays"
             type="number"
-            label="Bookable how far ahead (days)"
+            :label="t('office.settings.horizonLabel')"
             :min="SETTINGS_BOUNDS.bookingHorizonDays.min"
             :max="SETTINGS_BOUNDS.bookingHorizonDays.max"
             data-test="horizon"
@@ -226,17 +238,17 @@ onMounted(async () => {
           <SfInput
             v-model="form.minimumNoticeHours"
             type="number"
-            label="Shortest notice (hours)"
+            :label="t('office.settings.noticeLabel')"
             :min="SETTINGS_BOUNDS.minimumNoticeHours.min"
             :max="SETTINGS_BOUNDS.minimumNoticeHours.max"
-            description="The office may still book inside this window."
+            :description="t('office.settings.noticeDescription')"
             data-test="notice"
           />
 
           <SfInput
             v-model="form.reservationTtlMinutes"
             type="number"
-            label="Slot held during payment (minutes)"
+            :label="t('office.settings.reservationTtlLabel')"
             :min="SETTINGS_BOUNDS.reservationTtlMinutes.min"
             :max="SETTINGS_BOUNDS.reservationTtlMinutes.max"
             data-test="reservation-ttl"
@@ -245,20 +257,21 @@ onMounted(async () => {
       </SfCard>
 
       <SfCard as="section" aria-labelledby="cancellation-heading">
-        <h2 id="cancellation-heading" class="text-lg font-medium">Cancellation</h2>
+        <h2 id="cancellation-heading" class="text-lg font-medium">
+          {{ t('office.settings.cancellationHeading') }}
+        </h2>
 
         <p class="mt-1 text-sm text-text-secondary">
-          Inside the free window the fee is only a <em>suggestion</em>: an owner or admin decides
-          the amount when they answer the request, and the decision is recorded beside it. A fixed
-          amount is capped at what the customer actually paid, and nothing is kept from someone who
-          paid nothing.
+          {{ t('office.settings.cancellationNoteBefore') }}
+          <em>{{ t('office.settings.cancellationNoteEmphasis') }}</em>
+          {{ t('office.settings.cancellationNoteAfter') }}
         </p>
 
         <div class="mt-3 grid gap-3 sm:grid-cols-2">
           <SfInput
             v-model="form.freeCancellationHours"
             type="number"
-            label="Free until (hours before)"
+            :label="t('office.settings.freeCancellationLabel')"
             :min="SETTINGS_BOUNDS.freeCancellationHours.min"
             :max="SETTINGS_BOUNDS.freeCancellationHours.max"
             data-test="free-cancellation"
@@ -266,7 +279,7 @@ onMounted(async () => {
 
           <SfSelect
             :model-value="form.cancellationFeePolicy"
-            label="Fee inside that window"
+            :label="t('office.settings.feePolicyLabel')"
             :options="FEE_POLICY_OPTIONS"
             data-test="fee-policy"
             @update:model-value="(value) => (form.cancellationFeePolicy = value)"
@@ -276,7 +289,7 @@ onMounted(async () => {
             v-if="form.cancellationFeePolicy === 'PERCENTAGE'"
             v-model="form.cancellationFeePercent"
             type="number"
-            label="Share of what was paid (%)"
+            :label="t('office.settings.feePercentLabel')"
             :min="SETTINGS_BOUNDS.cancellationFeePercent.min"
             :max="SETTINGS_BOUNDS.cancellationFeePercent.max"
             data-test="fee-percent"
@@ -286,33 +299,35 @@ onMounted(async () => {
             v-if="form.cancellationFeePolicy === 'FIXED_AMOUNT'"
             v-model="form.cancellationFeeAmountEuros"
             inputmode="decimal"
-            label="Amount kept (€)"
+            :label="t('office.settings.feeAmountLabel')"
             data-test="fee-amount"
           />
         </div>
       </SfCard>
 
       <SfCard as="section" aria-labelledby="messages-heading">
-        <h2 id="messages-heading" class="text-lg font-medium">Messages</h2>
+        <h2 id="messages-heading" class="text-lg font-medium">
+          {{ t('office.settings.messagesHeading') }}
+        </h2>
 
         <div class="mt-3 grid gap-3 sm:grid-cols-2">
           <SfInput
             v-model="form.officeNotificationEmail"
             type="email"
-            label="Where the office is notified"
+            :label="t('office.settings.officeEmailLabel')"
             data-test="office-email"
           />
 
           <SfInput
             v-model="form.reminderOffsetsMinutes"
-            label="Reminders (minutes before, comma separated)"
-            description="1440 is a day. Duplicates are removed on save."
+            :label="t('office.settings.remindersLabel')"
+            :description="t('office.settings.remindersDescription')"
             data-test="reminders"
           />
 
           <SfSelect
             :model-value="form.smsRemindersEnabled"
-            label="Send reminders by SMS"
+            :label="t('office.settings.smsLabel')"
             :options="BOOLEAN_OPTIONS"
             data-test="sms"
             @update:model-value="(value) => (form.smsRemindersEnabled = value)"
@@ -320,7 +335,7 @@ onMounted(async () => {
 
           <SfSelect
             :model-value="form.customerNoteEnabled"
-            label="Let customers leave a note"
+            :label="t('office.settings.customerNoteLabel')"
             :options="BOOLEAN_OPTIONS"
             data-test="customer-note"
             @update:model-value="(value) => (form.customerNoteEnabled = value)"
@@ -329,7 +344,7 @@ onMounted(async () => {
           <SfInput
             v-model="form.dataRetentionDays"
             type="number"
-            label="Keep records for (days)"
+            :label="t('office.settings.retentionLabel')"
             :min="SETTINGS_BOUNDS.dataRetentionDays.min"
             :max="SETTINGS_BOUNDS.dataRetentionDays.max"
             data-test="retention"
@@ -346,11 +361,11 @@ onMounted(async () => {
       <SfButton
         :disabled="problems.length > 0"
         :loading="saving"
-        loading-label="Saving"
+        :loading-label="t('office.settings.saving')"
         data-test="save"
         @click="submit"
       >
-        Save the settings
+        {{ t('office.settings.save') }}
       </SfButton>
     </form>
   </section>

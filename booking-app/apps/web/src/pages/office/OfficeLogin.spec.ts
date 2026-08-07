@@ -1,7 +1,8 @@
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { i18n } from '../../i18n/index.js';
 import { router } from '../../router/index.js';
 import { useSession } from '../../stores/session.js';
 
@@ -94,7 +95,7 @@ async function landedOn(path: string): Promise<void> {
  * Pinia — navigating before the mount ran the guard against whatever was left over.
  */
 async function mountPage(): Promise<VueWrapper> {
-  const wrapper = mount(OfficeLogin, { global: { plugins: [pinia, router] } });
+  const wrapper = mount(OfficeLogin, { global: { plugins: [pinia, router, i18n] } });
 
   await router.replace('/office/login');
   await flushPromises();
@@ -103,6 +104,14 @@ async function mountPage(): Promise<VueWrapper> {
 }
 
 describe('OfficeLogin', () => {
+  beforeAll(() => {
+    i18n.global.locale.value = 'en';
+  });
+
+  afterAll(() => {
+    i18n.global.locale.value = 'de';
+  });
+
   it('signs in and goes to the office', async () => {
     const wrapper = await mountPage();
     await submit(wrapper);

@@ -1,4 +1,4 @@
-import { nextTick, onMounted, useTemplateRef } from 'vue';
+import { nextTick, onMounted, toValue, useTemplateRef, watchEffect } from 'vue';
 
 /** The `ref` attribute every step puts on its heading. A convention, so the composable can bind it. */
 const STEP_HEADING_REF = 'heading';
@@ -17,14 +17,17 @@ const STEP_HEADING_REF = 'heading';
  * looked unused and the compiler was right to say so.
  *
  * The document title is set here too: a router does not change it, and it is the first thing a
- * screen reader reads after a navigation.
+ * screen reader reads after a navigation. `title` accepts a getter rather than a plain string so a
+ * translated label keeps the title in sync when the operator switches locale mid-session.
  */
-export function useFocusStep(title: string): void {
+export function useFocusStep(title: string | (() => string)): void {
   const heading = useTemplateRef<HTMLElement>(STEP_HEADING_REF);
 
-  onMounted(async () => {
-    document.title = `${title} — Shape and Flow`;
+  watchEffect(() => {
+    document.title = `${toValue(title)} — Shape and Flow`;
+  });
 
+  onMounted(async () => {
     // After render, or the element does not exist yet.
     await nextTick();
     heading.value?.focus();

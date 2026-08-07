@@ -9,11 +9,13 @@ import {
   SfSkeleton,
 } from '@shape-and-flow/booking-ui';
 import { computed, onMounted, ref } from 'vue';
+import { useI18n } from 'vue-i18n';
 
 import { api } from '../../api/client.js';
 import { useFocusStep } from '../../composables/useFocusStep.js';
 import { addDays } from '../../composables/useLocalDate.js';
 import { dateTime, localDateLabel, today } from '../../office/format.js';
+import { registerOfficeMessages } from '../../office/i18n/index.js';
 import { officeMessage } from '../../office/messages.js';
 import { blockingBookingCount, useCrudResource } from '../../office/useCrudResource.js';
 import { useSession } from '../../stores/session.js';
@@ -37,9 +39,12 @@ import type {
  * `availability.manage` to `own` for them — and the API answers 404 for anyone else's, so
  * the picker is limited rather than the refusal explained afterwards.
  */
-const session = useSession();
+registerOfficeMessages();
 
-useFocusStep('Availability');
+const session = useSession();
+const { t } = useI18n();
+
+useFocusStep(() => t('office.availability.title'));
 
 // Derived from the contract rather than written as a number.
 //
@@ -170,21 +175,28 @@ onMounted(async () => {
 <template>
   <section class="space-y-6">
     <h1 ref="heading" tabindex="-1" class="text-xl font-semibold tracking-tight outline-none">
-      Availability
+      {{ t('office.availability.title') }}
     </h1>
 
     <p class="text-text-secondary">
-      Showing {{ localDateLabel(from) }} to {{ localDateLabel(to) }}.
+      {{
+        t('office.availability.rangeSummary', {
+          from: localDateLabel(from),
+          to: localDateLabel(to),
+        })
+      }}
     </p>
 
     <SfAlert v-if="employeesError !== null" tone="danger" data-test="employees-error">
-      {{ employeesError }} The lists below still load, but the person pickers are empty.
+      {{ employeesError }} {{ t('office.availability.employeesErrorNote') }}
     </SfAlert>
 
     <SfCard as="section" aria-labelledby="blocked-heading">
-      <h2 id="blocked-heading" class="text-lg font-medium">Blocked time</h2>
+      <h2 id="blocked-heading" class="text-lg font-medium">
+        {{ t('office.availability.blockedTitle') }}
+      </h2>
       <p class="text-sm text-text-secondary">
-        An hour somebody is unavailable. Refused if an appointment already sits there.
+        {{ t('office.availability.blockedDescription') }}
       </p>
 
       <SfAlert
@@ -199,15 +211,34 @@ onMounted(async () => {
       <div class="mt-3 grid gap-3 sm:grid-cols-5">
         <SfSelect
           :model-value="blockForm.employeeId"
-          label="Person"
+          :label="t('office.availability.personLabel')"
           :options="employeeOptions"
           data-test="block-employee"
           @update:model-value="(value) => (blockForm.employeeId = value)"
         />
-        <SfInput v-model="blockForm.date" type="date" label="Day" data-test="block-date" />
-        <SfInput v-model="blockForm.start" type="time" label="From" data-test="block-start" />
-        <SfInput v-model="blockForm.end" type="time" label="To" data-test="block-end" />
-        <SfInput v-model="blockForm.reason" label="Why" data-test="block-reason" />
+        <SfInput
+          v-model="blockForm.date"
+          type="date"
+          :label="t('office.availability.dayLabel')"
+          data-test="block-date"
+        />
+        <SfInput
+          v-model="blockForm.start"
+          type="time"
+          :label="t('office.availability.fromLabel')"
+          data-test="block-start"
+        />
+        <SfInput
+          v-model="blockForm.end"
+          type="time"
+          :label="t('office.availability.toLabel')"
+          data-test="block-end"
+        />
+        <SfInput
+          v-model="blockForm.reason"
+          :label="t('office.availability.reasonLabel')"
+          data-test="block-reason"
+        />
       </div>
 
       <SfButton
@@ -216,7 +247,7 @@ onMounted(async () => {
         data-test="add-block"
         @click="addBlock"
       >
-        Block this time
+        {{ t('office.availability.blockButton') }}
       </SfButton>
 
       <SfSkeleton v-if="blocked.loading.value" class="mt-3 h-16" />
@@ -228,26 +259,30 @@ onMounted(async () => {
         >
           <span>{{ nameOf(entry.employeeId) }}</span>
           <span class="tabular-nums">{{ dateTime(entry.startsAt) }}</span>
-          <span class="text-text-secondary">{{ entry.reason ?? 'blocked' }}</span>
+          <span class="text-text-secondary">{{
+            entry.reason ?? t('office.availability.blockedFallback')
+          }}</span>
           <SfButton
             variant="ghost"
             class="ml-auto"
             :data-test="`remove-block-${entry.id}`"
             @click="blocked.save(() => api.office.availability.deleteBlockedTime(entry.id))"
           >
-            Remove
+            {{ t('office.availability.removeButton') }}
           </SfButton>
         </li>
         <li v-if="blocked.items.value.length === 0" class="text-text-secondary">
-          Nothing blocked in this range.
+          {{ t('office.availability.blockedEmpty') }}
         </li>
       </ul>
     </SfCard>
 
     <SfCard v-if="session.can('catalog.manage')" as="section" aria-labelledby="leave-heading">
-      <h2 id="leave-heading" class="text-lg font-medium">Leave</h2>
+      <h2 id="leave-heading" class="text-lg font-medium">
+        {{ t('office.availability.leaveTitle') }}
+      </h2>
       <p class="text-sm text-text-secondary">
-        Whole days. Recorded as approved, which is what takes them off the calendar.
+        {{ t('office.availability.leaveDescription') }}
       </p>
 
       <SfAlert
@@ -258,21 +293,39 @@ onMounted(async () => {
       >
         {{ timeOff.error.value }}
         <template v-if="blockingBookingCount(timeOff.errorDetails.value) !== null">
-          {{ blockingBookingCount(timeOff.errorDetails.value) }} appointment(s) fall in those days.
+          {{
+            t('office.availability.leaveBlockedCount', {
+              count: blockingBookingCount(timeOff.errorDetails.value),
+            })
+          }}
         </template>
       </SfAlert>
 
       <div class="mt-3 grid gap-3 sm:grid-cols-4">
         <SfSelect
           :model-value="leaveForm.employeeId"
-          label="Person"
+          :label="t('office.availability.personLabel')"
           :options="employeeOptions"
           data-test="leave-employee"
           @update:model-value="(value) => (leaveForm.employeeId = value)"
         />
-        <SfInput v-model="leaveForm.startDate" type="date" label="From" data-test="leave-from" />
-        <SfInput v-model="leaveForm.endDate" type="date" label="To" data-test="leave-to" />
-        <SfInput v-model="leaveForm.reason" label="Why" data-test="leave-reason" />
+        <SfInput
+          v-model="leaveForm.startDate"
+          type="date"
+          :label="t('office.availability.fromLabel')"
+          data-test="leave-from"
+        />
+        <SfInput
+          v-model="leaveForm.endDate"
+          type="date"
+          :label="t('office.availability.toLabel')"
+          data-test="leave-to"
+        />
+        <SfInput
+          v-model="leaveForm.reason"
+          :label="t('office.availability.reasonLabel')"
+          data-test="leave-reason"
+        />
       </div>
 
       <SfButton
@@ -281,7 +334,7 @@ onMounted(async () => {
         data-test="add-leave"
         @click="addLeave"
       >
-        Record the leave
+        {{ t('office.availability.leaveButton') }}
       </SfButton>
 
       <ul class="mt-3 space-y-1 text-sm">
@@ -293,14 +346,16 @@ onMounted(async () => {
           <span class="text-text-secondary">{{ entry.status }}</span>
         </li>
         <li v-if="timeOff.items.value.length === 0" class="text-text-secondary">
-          No leave recorded.
+          {{ t('office.availability.leaveEmpty') }}
         </li>
       </ul>
     </SfCard>
 
     <SfCard v-if="session.can('catalog.manage')" as="section" aria-labelledby="closures-heading">
-      <h2 id="closures-heading" class="text-lg font-medium">Closures</h2>
-      <p class="text-sm text-text-secondary">A day the whole studio is shut.</p>
+      <h2 id="closures-heading" class="text-lg font-medium">
+        {{ t('office.availability.closuresTitle') }}
+      </h2>
+      <p class="text-sm text-text-secondary">{{ t('office.availability.closuresDescription') }}</p>
 
       <SfAlert
         v-if="closedDays.error.value !== null"
@@ -312,8 +367,17 @@ onMounted(async () => {
       </SfAlert>
 
       <div class="mt-3 grid gap-3 sm:grid-cols-3">
-        <SfInput v-model="closureForm.date" type="date" label="Day" data-test="closure-date" />
-        <SfInput v-model="closureForm.reason" label="Why" data-test="closure-reason" />
+        <SfInput
+          v-model="closureForm.date"
+          type="date"
+          :label="t('office.availability.dayLabel')"
+          data-test="closure-date"
+        />
+        <SfInput
+          v-model="closureForm.reason"
+          :label="t('office.availability.reasonLabel')"
+          data-test="closure-reason"
+        />
       </div>
 
       <SfButton
@@ -322,24 +386,26 @@ onMounted(async () => {
         data-test="add-closure"
         @click="addClosure"
       >
-        Close this day
+        {{ t('office.availability.closeButton') }}
       </SfButton>
 
       <ul class="mt-3 space-y-1 text-sm">
         <li v-for="day in closedDays.items.value" :key="day.id" class="flex flex-wrap gap-2">
           <span class="tabular-nums">{{ localDateLabel(day.date) }}</span>
-          <span class="text-text-secondary">{{ day.reason ?? 'closed' }}</span>
+          <span class="text-text-secondary">{{
+            day.reason ?? t('office.availability.closedFallback')
+          }}</span>
           <SfButton
             variant="ghost"
             class="ml-auto"
             :data-test="`remove-closure-${day.id}`"
             @click="closedDays.save(() => api.office.availability.deleteClosedDay(day.id))"
           >
-            Reopen
+            {{ t('office.availability.reopenButton') }}
           </SfButton>
         </li>
         <li v-if="closedDays.items.value.length === 0" class="text-text-secondary">
-          Nothing closed in this range.
+          {{ t('office.availability.closedEmpty') }}
         </li>
       </ul>
     </SfCard>

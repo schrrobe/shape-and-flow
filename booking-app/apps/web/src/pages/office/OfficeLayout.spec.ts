@@ -2,6 +2,7 @@ import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { i18n } from '../../i18n/index.js';
 import { NAVIGATION } from '../../office/navigation.js';
 import { router } from '../../router/index.js';
 import { useSession } from '../../stores/session.js';
@@ -54,13 +55,15 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  // `i18n` is the app-wide singleton; one test below switches it, so reset for the next.
+  i18n.global.locale.value = 'de';
 });
 
 function mountLayout(user: OfficeUserDto = officeUser()) {
   useSession(pinia).user = user;
 
   return mount(OfficeLayout, {
-    global: { plugins: [pinia, router], stubs: { RouterView: true } },
+    global: { plugins: [pinia, router, i18n], stubs: { RouterView: true } },
   });
 }
 
@@ -119,11 +122,17 @@ describe('OfficeLayout', () => {
     });
   });
 
-  it('sets the document language to English while it is open', () => {
-    // The office copy is English and the customer side may well have set `lang="de"` first;
-    // leaving it there has a screen reader read English aloud with German phonetics.
-    mountLayout();
+  it('renders in German by default and switches to English on demand', async () => {
+    // The office area used to force `lang="en"` regardless of what the customer side had
+    // chosen. It now follows the same locale switch everyone else does.
+    const wrapper = mountLayout();
 
-    expect(document.documentElement.lang).toBe('en');
+    expect(wrapper.get('[data-test=nav-office-dashboard]').text()).toBe('Übersicht');
+    expect(wrapper.get('[data-test=sign-out]').text()).toBe('Abmelden');
+
+    await wrapper.get('[data-test=locale-en]').trigger('click');
+
+    expect(wrapper.get('[data-test=nav-office-dashboard]').text()).toBe('Overview');
+    expect(wrapper.get('[data-test=sign-out]').text()).toBe('Sign out');
   });
 });

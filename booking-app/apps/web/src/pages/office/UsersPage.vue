@@ -9,12 +9,16 @@ import {
   SfSkeleton,
 } from '@shape-and-flow/booking-ui';
 import { computed, ref } from 'vue';
+import { useI18n } from 'vue-i18n';
 
 import { api } from '../../api/client.js';
 import { useFocusStep } from '../../composables/useFocusStep.js';
 import { dateTime } from '../../office/format.js';
+import { registerOfficeMessages } from '../../office/i18n/index.js';
 import { useCrudResource } from '../../office/useCrudResource.js';
 import { useSession } from '../../stores/session.js';
+
+registerOfficeMessages();
 
 import type { OfficeUserListItem, OfficeUserRole } from '@shape-and-flow/booking-contracts';
 
@@ -31,6 +35,7 @@ import type { OfficeUserListItem, OfficeUserRole } from '@shape-and-flow/booking
  * always 409s is a control that should not be there.
  */
 const session = useSession();
+const { t } = useI18n();
 
 useFocusStep('Users');
 
@@ -45,15 +50,22 @@ const editing = ref<OfficeUserListItem | null>(null);
 const archiving = ref<OfficeUserListItem | null>(null);
 const notice = ref<string | null>(null);
 
-const ROLE_OPTIONS = officeUserRoleSchema.options.map((role) => ({
-  value: role,
-  label: role.charAt(0) + role.slice(1).toLowerCase(),
-}));
+/** The role name a person sees, rather than the raw enum value stored on the record. */
+function roleLabel(role: OfficeUserRole): string {
+  return t(`office.users.role.${role.toLowerCase()}`);
+}
 
-const REFUND_OPTIONS = [
-  { value: 'true', label: 'May issue refunds' },
-  { value: 'false', label: 'May not issue refunds' },
-];
+const ROLE_OPTIONS = computed(() =>
+  officeUserRoleSchema.options.map((role) => ({
+    value: role,
+    label: roleLabel(role),
+  })),
+);
+
+const REFUND_OPTIONS = computed(() => [
+  { value: 'true', label: t('office.users.mayIssueRefunds') },
+  { value: 'false', label: t('office.users.mayNotIssueRefunds') },
+]);
 
 const form = ref<{
   email: string;
@@ -109,7 +121,7 @@ async function submitCreate(): Promise<void> {
 
   if (done) {
     creating.value = false;
-    notice.value = `A link to choose a password has been sent to ${form.value.email.trim()}.`;
+    notice.value = t('office.users.invitationSent', { email: form.value.email.trim() });
   }
 }
 
@@ -128,7 +140,7 @@ async function submitEdit(): Promise<void> {
     if (result.revokedSessions > 0) {
       // Worth saying out loud: the person is signed out right now, and somebody will ask
       // why in about a minute.
-      notice.value = `${form.value.firstName} was signed out, because what they may do changed.`;
+      notice.value = t('office.users.signedOutNotice', { name: form.value.firstName });
     }
   });
 
@@ -141,7 +153,7 @@ async function confirmArchive(): Promise<void> {
 
   if (await users.save(() => api.office.users.archive(user.id))) {
     archiving.value = null;
-    notice.value = 'Archived, and every session they had has ended.';
+    notice.value = t('office.users.archivedNotice');
   }
 }
 </script>
@@ -150,7 +162,7 @@ async function confirmArchive(): Promise<void> {
   <section class="space-y-4">
     <div class="flex flex-wrap items-center justify-between gap-3">
       <h1 ref="heading" tabindex="-1" class="text-xl font-semibold tracking-tight outline-none">
-        Users
+        {{ t('office.users.heading') }}
       </h1>
 
       <div class="flex gap-2">
@@ -162,9 +174,11 @@ async function confirmArchive(): Promise<void> {
             users.reload();
           "
         >
-          {{ includeArchived ? 'Hide archived' : 'Show archived' }}
+          {{ includeArchived ? t('office.users.hideArchived') : t('office.users.showArchived') }}
         </SfButton>
-        <SfButton data-test="add-user" @click="startCreate">Add a user</SfButton>
+        <SfButton data-test="add-user" @click="startCreate">{{
+          t('office.users.addUser')
+        }}</SfButton>
       </div>
     </div>
 
@@ -184,17 +198,23 @@ async function confirmArchive(): Promise<void> {
       >
         <span class="font-medium">{{ user.firstName }} {{ user.lastName }}</span>
         <span class="text-sm break-all text-text-secondary">{{ user.email }}</span>
-        <span class="text-sm">{{ user.role }}</span>
-        <span v-if="user.canIssueRefunds" class="text-sm text-text-secondary">refunds</span>
-        <span v-if="isSelf(user)" class="text-sm text-text-secondary">you</span>
-        <span v-if="user.archivedAt !== null" class="text-sm text-text-secondary">archived</span>
+        <span class="text-sm">{{ roleLabel(user.role) }}</span>
+        <span v-if="user.canIssueRefunds" class="text-sm text-text-secondary">
+          {{ t('office.users.refundsBadge') }}
+        </span>
+        <span v-if="isSelf(user)" class="text-sm text-text-secondary">
+          {{ t('office.users.youBadge') }}
+        </span>
+        <span v-if="user.archivedAt !== null" class="text-sm text-text-secondary">
+          {{ t('office.users.archivedBadge') }}
+        </span>
         <span v-if="user.lockedUntil !== null" class="text-sm text-warning">
-          locked until {{ dateTime(user.lockedUntil) }}
+          {{ t('office.users.lockedUntil', { date: dateTime(user.lockedUntil) }) }}
         </span>
 
         <span class="ml-auto flex gap-2">
           <SfButton variant="ghost" :data-test="`edit-${user.id}`" @click="startEdit(user)">
-            Edit
+            {{ t('office.users.edit') }}
           </SfButton>
           <!--
             Absent for your own row rather than disabled: the API refuses it, and a
@@ -206,7 +226,7 @@ async function confirmArchive(): Promise<void> {
             :data-test="`archive-${user.id}`"
             @click="archiving = user"
           >
-            Archive
+            {{ t('office.users.archive') }}
           </SfButton>
         </span>
       </li>
@@ -214,24 +234,40 @@ async function confirmArchive(): Promise<void> {
 
     <SfModal
       :open="creating"
-      title="Add a user"
-      confirm-label="Send the invitation"
+      :title="t('office.users.addUser')"
+      :confirm-label="t('office.users.sendInvitation')"
       :busy="users.saving.value"
       @close="creating = false"
       @confirm="submitCreate"
     >
       <div class="space-y-3">
         <p class="text-sm text-text-secondary">
-          No password is set here. They get a link and choose their own.
+          {{ t('office.users.noPasswordNote') }}
         </p>
 
-        <SfInput v-model="form.email" type="email" label="Email" required data-test="user-email" />
-        <SfInput v-model="form.firstName" label="First name" required data-test="user-first" />
-        <SfInput v-model="form.lastName" label="Last name" required data-test="user-last" />
+        <SfInput
+          v-model="form.email"
+          type="email"
+          :label="t('office.users.emailLabel')"
+          required
+          data-test="user-email"
+        />
+        <SfInput
+          v-model="form.firstName"
+          :label="t('office.users.firstNameLabel')"
+          required
+          data-test="user-first"
+        />
+        <SfInput
+          v-model="form.lastName"
+          :label="t('office.users.lastNameLabel')"
+          required
+          data-test="user-last"
+        />
 
         <SfSelect
           :model-value="form.role"
-          label="Role"
+          :label="t('office.users.roleLabel')"
           :options="ROLE_OPTIONS"
           data-test="user-role"
           @update:model-value="(value) => (form.role = value as OfficeUserRole)"
@@ -239,9 +275,9 @@ async function confirmArchive(): Promise<void> {
 
         <SfSelect
           :model-value="form.canIssueRefunds"
-          label="Refunds"
+          :label="t('office.users.refundsLabel')"
           :options="REFUND_OPTIONS"
-          description="An owner may always issue refunds."
+          :description="t('office.users.ownerAlwaysRefunds')"
           data-test="user-refunds"
           @update:model-value="(value) => (form.canIssueRefunds = value)"
         />
@@ -250,20 +286,28 @@ async function confirmArchive(): Promise<void> {
 
     <SfModal
       :open="editing !== null"
-      title="Edit this user"
-      confirm-label="Save"
+      :title="t('office.users.editUserTitle')"
+      :confirm-label="t('office.users.save')"
       :busy="users.saving.value"
       @close="editing = null"
       @confirm="submitEdit"
     >
       <div class="space-y-3">
-        <SfInput v-model="form.firstName" label="First name" data-test="user-first" />
-        <SfInput v-model="form.lastName" label="Last name" data-test="user-last" />
+        <SfInput
+          v-model="form.firstName"
+          :label="t('office.users.firstNameLabel')"
+          data-test="user-first"
+        />
+        <SfInput
+          v-model="form.lastName"
+          :label="t('office.users.lastNameLabel')"
+          data-test="user-last"
+        />
 
         <template v-if="editing !== null && !isSelf(editing)">
           <SfSelect
             :model-value="form.role"
-            label="Role"
+            :label="t('office.users.roleLabel')"
             :options="ROLE_OPTIONS"
             data-test="user-role"
             @update:model-value="(value) => (form.role = value as OfficeUserRole)"
@@ -271,35 +315,38 @@ async function confirmArchive(): Promise<void> {
 
           <SfSelect
             :model-value="form.canIssueRefunds"
-            label="Refunds"
+            :label="t('office.users.refundsLabel')"
             :options="REFUND_OPTIONS"
             data-test="user-refunds"
             @update:model-value="(value) => (form.canIssueRefunds = value)"
           />
 
           <p class="text-sm text-text-secondary">
-            Changing either of these signs them out immediately.
+            {{ t('office.users.roleChangeSignsOut') }}
           </p>
         </template>
 
         <p v-else class="text-sm text-text-secondary">
-          You cannot change your own role or refund permission. Ask another owner.
+          {{ t('office.users.cannotChangeSelf') }}
         </p>
       </div>
     </SfModal>
 
     <SfModal
       :open="archiving !== null"
-      title="Archive this user?"
-      confirm-label="Archive"
+      :title="t('office.users.archiveTitle')"
+      :confirm-label="t('office.users.archive')"
       confirm-variant="danger"
       :busy="users.saving.value"
       @close="archiving = null"
       @confirm="confirmArchive"
     >
       <p>
-        {{ archiving?.firstName }} {{ archiving?.lastName }} is signed out immediately and cannot
-        sign in again. What they did stays in the audit log.
+        {{
+          t('office.users.archiveWarning', {
+            name: `${archiving?.firstName ?? ''} ${archiving?.lastName ?? ''}`.trim(),
+          })
+        }}
       </p>
     </SfModal>
   </section>

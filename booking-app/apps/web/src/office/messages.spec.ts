@@ -2,9 +2,10 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import { errorCodeSchema } from '@shape-and-flow/booking-contracts';
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { ApiError, NETWORK_ERROR } from '../api/errors.js';
+import { i18n } from '../i18n/index.js';
 
 import { correlationOf, officeMessage, OFFICE_MESSAGE_KEYS } from './messages.js';
 
@@ -17,6 +18,16 @@ function apiError(code: Parameters<typeof errorCodeSchema.parse>[0], correlation
 }
 
 describe('office messages', () => {
+  // `officeMessage` resolves through the shared i18n instance, whose default is German.
+  // These assertions are all written against the English wording.
+  beforeAll(() => {
+    i18n.global.locale.value = 'en';
+  });
+
+  afterAll(() => {
+    i18n.global.locale.value = 'de';
+  });
+
   it('has a sentence for every error code the API can send', () => {
     // The customer side is guarded by a key-parity test across two JSON files. This is the
     // same guarantee for the office side: a code added to contracts and forgotten here

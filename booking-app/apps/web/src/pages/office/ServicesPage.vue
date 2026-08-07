@@ -9,10 +9,12 @@ import {
   SfSkeleton,
 } from '@shape-and-flow/booking-ui';
 import { computed, ref } from 'vue';
+import { useI18n } from 'vue-i18n';
 
 import { api } from '../../api/client.js';
 import { useFocusStep } from '../../composables/useFocusStep.js';
 import { euros, money } from '../../office/format.js';
+import { registerOfficeMessages } from '../../office/i18n/index.js';
 import {
   blockingBookingCount,
   blockingServiceCount,
@@ -33,6 +35,10 @@ import type { OfficeService, OfficeServiceCategory } from '@shape-and-flow/booki
  * Neither a service nor a category can be deleted, only archived — a booking's foreign
  * key points at these rows. The screen says so rather than offering a delete that 409s.
  */
+registerOfficeMessages();
+
+const { t } = useI18n();
+
 useFocusStep('Treatments');
 
 const includeArchived = ref(false);
@@ -63,7 +69,7 @@ const form = ref({
 });
 
 const categoryOptions = computed(() => [
-  { value: '', label: 'No category' },
+  { value: '', label: t('office.services.noCategoryOption') },
   ...categories.items.value
     .filter((category) => category.archivedAt === null)
     .map((category) => ({ value: category.id, label: category.name })),
@@ -171,7 +177,7 @@ async function confirmArchiveCategory(): Promise<void> {
   <section class="space-y-6">
     <div class="flex flex-wrap items-center justify-between gap-3">
       <h1 ref="heading" tabindex="-1" class="text-xl font-semibold tracking-tight outline-none">
-        Treatments
+        {{ t('office.services.title') }}
       </h1>
 
       <div class="flex gap-2">
@@ -184,16 +190,26 @@ async function confirmArchiveCategory(): Promise<void> {
             categories.reload();
           "
         >
-          {{ includeArchived ? 'Hide archived' : 'Show archived' }}
+          {{
+            includeArchived ? t('office.services.hideArchived') : t('office.services.showArchived')
+          }}
         </SfButton>
-        <SfButton data-test="add-service" @click="startCreate">Add a treatment</SfButton>
+        <SfButton data-test="add-service" @click="startCreate">
+          {{ t('office.services.addTreatment') }}
+        </SfButton>
       </div>
     </div>
 
     <SfAlert v-if="services.error.value !== null" tone="danger" data-test="error">
       {{ services.error.value }}
       <template v-if="blockingBookingCount(services.errorDetails.value) !== null">
-        {{ blockingBookingCount(services.errorDetails.value) }} appointment(s) still to come.
+        {{
+          t(
+            'office.services.blockingAppointments',
+            { count: blockingBookingCount(services.errorDetails.value) },
+            blockingBookingCount(services.errorDetails.value) ?? 0,
+          )
+        }}
       </template>
     </SfAlert>
 
@@ -209,11 +225,13 @@ async function confirmArchiveCategory(): Promise<void> {
         <span class="font-medium">{{ service.name }}</span>
         <span class="text-sm text-text-secondary">{{ service.durationMinutes }} min</span>
         <span class="text-sm tabular-nums">{{ money(service.price) }}</span>
-        <span v-if="service.archivedAt !== null" class="text-sm text-text-secondary">archived</span>
+        <span v-if="service.archivedAt !== null" class="text-sm text-text-secondary">
+          {{ t('office.services.archivedBadge') }}
+        </span>
 
         <span class="ml-auto flex gap-2">
           <SfButton variant="ghost" :data-test="`edit-${service.id}`" @click="startEdit(service)">
-            Edit
+            {{ t('office.services.editAction') }}
           </SfButton>
           <SfButton
             v-if="service.archivedAt === null"
@@ -221,7 +239,7 @@ async function confirmArchiveCategory(): Promise<void> {
             :data-test="`archive-${service.id}`"
             @click="archiving = service"
           >
-            Archive
+            {{ t('office.services.archiveAction') }}
           </SfButton>
         </span>
       </li>
@@ -229,16 +247,24 @@ async function confirmArchiveCategory(): Promise<void> {
 
     <section class="space-y-2" aria-labelledby="categories-heading">
       <div class="flex items-baseline justify-between">
-        <h2 id="categories-heading" class="text-lg font-medium">Categories</h2>
+        <h2 id="categories-heading" class="text-lg font-medium">
+          {{ t('office.services.categoriesHeading') }}
+        </h2>
         <SfButton variant="ghost" data-test="add-category" @click="creatingCategory = true">
-          Add a category
+          {{ t('office.services.addCategory') }}
         </SfButton>
       </div>
 
       <SfAlert v-if="categories.error.value !== null" tone="danger" data-test="category-error">
         {{ categories.error.value }}
         <template v-if="blockingServiceCount(categories.errorDetails.value) !== null">
-          {{ blockingServiceCount(categories.errorDetails.value) }} treatment(s) are still in it.
+          {{
+            t(
+              'office.services.blockingTreatments',
+              { count: blockingServiceCount(categories.errorDetails.value) },
+              blockingServiceCount(categories.errorDetails.value) ?? 0,
+            )
+          }}
         </template>
       </SfAlert>
 
@@ -251,7 +277,13 @@ async function confirmArchiveCategory(): Promise<void> {
         >
           <span class="font-medium">{{ category.name }}</span>
           <span class="text-sm text-text-secondary">
-            {{ category.activeServiceCount }} treatment(s)
+            {{
+              t(
+                'office.services.categoryServiceCount',
+                { count: category.activeServiceCount },
+                category.activeServiceCount,
+              )
+            }}
           </span>
           <SfButton
             v-if="category.archivedAt === null"
@@ -260,7 +292,7 @@ async function confirmArchiveCategory(): Promise<void> {
             :data-test="`archive-category-${category.id}`"
             @click="archivingCategory = category"
           >
-            Archive
+            {{ t('office.services.archiveAction') }}
           </SfButton>
         </li>
       </ul>
@@ -268,8 +300,10 @@ async function confirmArchiveCategory(): Promise<void> {
 
     <SfModal
       :open="creating || editing !== null"
-      :title="creating ? 'Add a treatment' : 'Edit this treatment'"
-      confirm-label="Save"
+      :title="
+        creating ? t('office.services.addTreatment') : t('office.services.editTreatmentTitle')
+      "
+      :confirm-label="t('office.services.saveAction')"
       :busy="services.saving.value"
       @close="
         creating = false;
@@ -278,12 +312,21 @@ async function confirmArchiveCategory(): Promise<void> {
       @confirm="creating ? submitCreate() : submitEdit()"
     >
       <div class="space-y-3">
-        <SfInput v-model="form.name" label="Name" required data-test="service-name" />
-        <SfInput v-model="form.description" label="Description" data-test="service-description" />
+        <SfInput
+          v-model="form.name"
+          :label="t('office.services.nameLabel')"
+          required
+          data-test="service-name"
+        />
+        <SfInput
+          v-model="form.description"
+          :label="t('office.services.descriptionLabel')"
+          data-test="service-description"
+        />
 
         <SfSelect
           :model-value="form.serviceCategoryId"
-          label="Category"
+          :label="t('office.services.categoryLabel')"
           :options="categoryOptions"
           data-test="service-category"
           @update:model-value="(value) => (form.serviceCategoryId = value)"
@@ -292,7 +335,7 @@ async function confirmArchiveCategory(): Promise<void> {
         <SfInput
           v-model="form.durationMinutes"
           type="number"
-          label="Minutes"
+          :label="t('office.services.minutesLabel')"
           :min="SERVICE_BOUNDS.durationMinutes.min"
           :max="SERVICE_BOUNDS.durationMinutes.max"
           data-test="service-duration"
@@ -301,17 +344,17 @@ async function confirmArchiveCategory(): Promise<void> {
         <SfInput
           v-model="form.prepBufferMinutes"
           type="number"
-          label="Preparation before (minutes)"
+          :label="t('office.services.prepLabel')"
           :min="SERVICE_BOUNDS.prepBufferMinutes.min"
           :max="SERVICE_BOUNDS.prepBufferMinutes.max"
-          description="Employee time. The customer never sees it."
+          :description="t('office.services.prepDescription')"
           data-test="service-prep"
         />
 
         <SfInput
           v-model="form.cleanupBufferMinutes"
           type="number"
-          label="Clearing up after (minutes)"
+          :label="t('office.services.cleanupLabel')"
           :min="SERVICE_BOUNDS.cleanupBufferMinutes.min"
           :max="SERVICE_BOUNDS.cleanupBufferMinutes.max"
           data-test="service-cleanup"
@@ -319,7 +362,7 @@ async function confirmArchiveCategory(): Promise<void> {
 
         <SfInput
           v-model="form.priceEuros"
-          label="Price (euros)"
+          :label="t('office.services.priceLabel')"
           inputmode="decimal"
           data-test="service-price"
         />
@@ -334,40 +377,42 @@ async function confirmArchiveCategory(): Promise<void> {
 
     <SfModal
       :open="creatingCategory"
-      title="Add a category"
-      confirm-label="Save"
+      :title="t('office.services.addCategory')"
+      :confirm-label="t('office.services.saveAction')"
       :busy="categories.saving.value"
       @close="creatingCategory = false"
       @confirm="submitCategory"
     >
-      <SfInput v-model="categoryName" label="Name" required data-test="category-name" />
+      <SfInput
+        v-model="categoryName"
+        :label="t('office.services.nameLabel')"
+        required
+        data-test="category-name"
+      />
     </SfModal>
 
     <SfModal
       :open="archiving !== null"
-      title="Archive this treatment?"
-      confirm-label="Archive"
+      :title="t('office.services.archiveServiceTitle')"
+      :confirm-label="t('office.services.archiveAction')"
       confirm-variant="danger"
       :busy="services.saving.value"
       @close="archiving = null"
       @confirm="confirmArchive"
     >
-      <p>
-        It stops being bookable. Past appointments keep the name and price they were sold at. This
-        is refused if appointments for it are still to come.
-      </p>
+      <p>{{ t('office.services.archiveServiceBody') }}</p>
     </SfModal>
 
     <SfModal
       :open="archivingCategory !== null"
-      title="Archive this category?"
-      confirm-label="Archive"
+      :title="t('office.services.archiveCategoryTitle')"
+      :confirm-label="t('office.services.archiveAction')"
       confirm-variant="danger"
       :busy="categories.saving.value"
       @close="archivingCategory = null"
       @confirm="confirmArchiveCategory"
     >
-      <p>This is refused while treatments are still filed under it.</p>
+      <p>{{ t('office.services.archiveCategoryBody') }}</p>
     </SfModal>
   </section>
 </template>

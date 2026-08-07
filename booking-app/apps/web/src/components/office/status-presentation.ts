@@ -13,7 +13,8 @@ import type { DisplayStatus } from '@shape-and-flow/booking-contracts';
  * The tone classes are the four the design tokens define; nothing here names a colour.
  */
 export interface StatusPresentation {
-  label: string;
+  /** i18n key, resolved against the office message namespace at render time. */
+  labelKey: string;
   /** A token class, not a raw colour. The theme owns what "danger" looks like. */
   className: string;
   mark: string;
@@ -26,19 +27,31 @@ const BAD = 'bg-danger text-text-primary';
 
 export const STATUS_PRESENTATION: Readonly<Record<DisplayStatus, StatusPresentation>> = {
   // The slot is held but the money is not settled.
-  PENDING_PAYMENT: { label: 'Awaiting payment', className: WAITING, mark: '\u25D4' },
+  PENDING_PAYMENT: { labelKey: 'office.status.awaitingPayment', className: WAITING, mark: '◔' },
   // The Stripe round trip. Reads the same to an operator as pending, because the
   // difference — which side is waiting — is not something they can act on.
-  EXPIRING: { label: 'Awaiting payment', className: WAITING, mark: '\u25D4' },
-  CONFIRMED: { label: 'Confirmed', className: LIVE, mark: '\u25CF' },
-  COMPLETED: { label: 'Completed', className: NEUTRAL, mark: '\u2713' },
-  NO_SHOW: { label: 'No show', className: BAD, mark: '\u2715' },
-  CANCELED_BY_CUSTOMER: { label: 'Cancelled by customer', className: NEUTRAL, mark: '\u2298' },
-  CANCELED_BY_BUSINESS: { label: 'Cancelled by us', className: NEUTRAL, mark: '\u2298' },
-  EXPIRED: { label: 'Expired', className: NEUTRAL, mark: '\u2298' },
-  PAYMENT_FAILED: { label: 'Payment failed', className: BAD, mark: '\u2715' },
+  EXPIRING: { labelKey: 'office.status.awaitingPayment', className: WAITING, mark: '◔' },
+  CONFIRMED: { labelKey: 'office.status.confirmed', className: LIVE, mark: '●' },
+  COMPLETED: { labelKey: 'office.status.completed', className: NEUTRAL, mark: '✓' },
+  NO_SHOW: { labelKey: 'office.status.noShow', className: BAD, mark: '✕' },
+  CANCELED_BY_CUSTOMER: {
+    labelKey: 'office.status.canceledByCustomer',
+    className: NEUTRAL,
+    mark: '⊘',
+  },
+  CANCELED_BY_BUSINESS: {
+    labelKey: 'office.status.canceledByBusiness',
+    className: NEUTRAL,
+    mark: '⊘',
+  },
+  EXPIRED: { labelKey: 'office.status.expired', className: NEUTRAL, mark: '⊘' },
+  PAYMENT_FAILED: { labelKey: 'office.status.paymentFailed', className: BAD, mark: '✕' },
   // The two derived statuses. Amber rather than red: somebody is waiting for an answer,
   // which is a thing to do rather than a thing that went wrong.
-  CANCELLATION_REQUESTED: { label: 'Cancellation requested', className: WAITING, mark: '!' },
-  RESCHEDULE_REQUESTED: { label: 'Move requested', className: WAITING, mark: '!' },
+  CANCELLATION_REQUESTED: {
+    labelKey: 'office.status.cancellationRequested',
+    className: WAITING,
+    mark: '!',
+  },
+  RESCHEDULE_REQUESTED: { labelKey: 'office.status.moveRequested', className: WAITING, mark: '!' },
 };

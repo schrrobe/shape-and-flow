@@ -1,7 +1,8 @@
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { i18n } from '../../i18n/index.js';
 import { router } from '../../router/index.js';
 import { useSession } from '../../stores/session.js';
 
@@ -180,7 +181,7 @@ async function mountPage(user: Partial<OfficeUserDto> = {}) {
   await router.replace({ name: 'office-booking-new', query: { date: '2026-08-14' } });
   await router.isReady();
 
-  const wrapper = mount(NewBooking, { global: { plugins: [pinia, router] } });
+  const wrapper = mount(NewBooking, { global: { plugins: [pinia, router, i18n] } });
   await flushPromises();
 
   return wrapper;
@@ -211,6 +212,14 @@ function lastWrite(): Call {
 }
 
 describe('NewBooking', () => {
+  beforeAll(() => {
+    i18n.global.locale.value = 'en';
+  });
+
+  afterAll(() => {
+    i18n.global.locale.value = 'de';
+  });
+
   it('offers nothing to a role that may not create bookings', async () => {
     const wrapper = await mountPage({ role: 'EMPLOYEE', employeeId: EMPLOYEE_ONE_ID });
 

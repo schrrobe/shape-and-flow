@@ -2,11 +2,14 @@
 import { bookingStatusSchema } from '@shape-and-flow/booking-contracts';
 import { SfAlert, SfButton, SfCard, SfInput, SfSelect } from '@shape-and-flow/booking-ui';
 import { computed, ref } from 'vue';
+import { useI18n } from 'vue-i18n';
 
 import { api } from '../../api/client.js';
+import { STATUS_PRESENTATION } from '../../components/office/status-presentation.js';
 import { useFocusStep } from '../../composables/useFocusStep.js';
 import { addDays } from '../../composables/useLocalDate.js';
 import { localDateLabel, today } from '../../office/format.js';
+import { registerOfficeMessages } from '../../office/i18n/index.js';
 
 /**
  * The accounting hand-off.
@@ -21,17 +24,24 @@ import { localDateLabel, today } from '../../office/format.js';
  * and a spreadsheet mailed to a bookkeeper is not where it belongs unless somebody decided
  * it does.
  */
-useFocusStep('Exports');
+registerOfficeMessages();
+
+const { t } = useI18n();
+
+useFocusStep(() => t('office.exports.title'));
 
 const from = ref(addDays(today(), -30));
 const to = ref(today());
 const status = ref('');
 const includeCustomerNote = ref(false);
 
-const STATUS_OPTIONS = [
-  { value: '', label: 'Every status' },
-  ...bookingStatusSchema.options.map((value) => ({ value, label: value })),
-];
+const STATUS_OPTIONS = computed(() => [
+  { value: '', label: t('office.exports.everyStatusOption') },
+  ...bookingStatusSchema.options.map((value) => ({
+    value,
+    label: t(STATUS_PRESENTATION[value].labelKey),
+  })),
+]);
 
 const rangeValid = computed(() => from.value !== '' && to.value !== '' && from.value <= to.value);
 
@@ -61,18 +71,23 @@ function download(kind: 'bookings' | 'payments'): void {
 <template>
   <section class="space-y-4">
     <h1 ref="heading" tabindex="-1" class="text-xl font-semibold tracking-tight outline-none">
-      Exports
+      {{ t('office.exports.title') }}
     </h1>
 
     <SfCard as="section" aria-labelledby="range-heading">
-      <h2 id="range-heading" class="text-lg font-medium">Range</h2>
+      <h2 id="range-heading" class="text-lg font-medium">{{ t('office.exports.rangeHeading') }}</h2>
 
       <div class="mt-3 grid gap-3 sm:grid-cols-3">
-        <SfInput v-model="from" type="date" label="From" data-test="from" />
-        <SfInput v-model="to" type="date" label="To" data-test="to" />
+        <SfInput
+          v-model="from"
+          type="date"
+          :label="t('office.exports.fromLabel')"
+          data-test="from"
+        />
+        <SfInput v-model="to" type="date" :label="t('office.exports.toLabel')" data-test="to" />
         <SfSelect
           :model-value="status"
-          label="Status"
+          :label="t('office.exports.statusLabel')"
           :options="STATUS_OPTIONS"
           data-test="status"
           @update:model-value="(value) => (status = value)"
@@ -80,18 +95,22 @@ function download(kind: 'bookings' | 'payments'): void {
       </div>
 
       <SfAlert v-if="!rangeValid" tone="warning" class="mt-3" data-test="range-problem">
-        The first day has to come before the last.
+        {{ t('office.exports.rangeInvalid') }}
       </SfAlert>
 
       <p v-else class="mt-3 text-sm text-text-secondary" data-test="range-summary">
-        {{ localDateLabel(from) }} to {{ localDateLabel(to) }}.
+        {{
+          t('office.exports.rangeSummary', { from: localDateLabel(from), to: localDateLabel(to) })
+        }}
       </p>
     </SfCard>
 
     <SfCard as="section" aria-labelledby="bookings-heading">
-      <h2 id="bookings-heading" class="text-lg font-medium">Appointments</h2>
+      <h2 id="bookings-heading" class="text-lg font-medium">
+        {{ t('office.exports.bookingsHeading') }}
+      </h2>
       <p class="text-sm text-text-secondary">
-        One row per appointment, with what was charged and what came in.
+        {{ t('office.exports.bookingsDescription') }}
       </p>
 
       <label class="mt-3 flex items-center gap-2 text-sm">
@@ -101,7 +120,7 @@ function download(kind: 'bookings' | 'payments'): void {
           class="size-4 rounded-sf border-border"
           data-test="include-note"
         />
-        Include the customer's own note
+        {{ t('office.exports.includeCustomerNote') }}
       </label>
 
       <SfButton
@@ -110,14 +129,16 @@ function download(kind: 'bookings' | 'payments'): void {
         data-test="download-bookings"
         @click="download('bookings')"
       >
-        Download appointments
+        {{ t('office.exports.downloadBookings') }}
       </SfButton>
     </SfCard>
 
     <SfCard as="section" aria-labelledby="payments-heading">
-      <h2 id="payments-heading" class="text-lg font-medium">Money</h2>
+      <h2 id="payments-heading" class="text-lg font-medium">
+        {{ t('office.exports.paymentsHeading') }}
+      </h2>
       <p class="text-sm text-text-secondary">
-        Card payments, cash and refunds in one ledger, in date order. Refunds are negative.
+        {{ t('office.exports.paymentsDescription') }}
       </p>
 
       <SfButton
@@ -126,12 +147,12 @@ function download(kind: 'bookings' | 'payments'): void {
         data-test="download-payments"
         @click="download('payments')"
       >
-        Download the ledger
+        {{ t('office.exports.downloadPayments') }}
       </SfButton>
     </SfCard>
 
     <p class="text-sm text-text-secondary">
-      The files are semicolon-separated UTF-8, which is what German Excel opens without asking.
+      {{ t('office.exports.fileFormatNote') }}
     </p>
 
     <!-- Never displayed. It exists so the browser handles the streamed response itself. -->

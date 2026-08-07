@@ -2,6 +2,7 @@
 import { localDateSchema } from '@shape-and-flow/booking-contracts';
 import { SfAlert, SfButton, SfSelect, SfSkeleton } from '@shape-and-flow/booking-ui';
 import { computed, onMounted, ref, watch } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { useRoute, useRouter } from 'vue-router';
 
 import { api } from '../../api/client.js';
@@ -10,8 +11,11 @@ import { useAsyncData } from '../../composables/useAsyncData.js';
 import { useFocusStep } from '../../composables/useFocusStep.js';
 import { addDays } from '../../composables/useLocalDate.js';
 import { localDateLabel, today } from '../../office/format.js';
+import { registerOfficeMessages } from '../../office/i18n/index.js';
 import { officeMessage } from '../../office/messages.js';
 import { useSession } from '../../stores/session.js';
+
+registerOfficeMessages();
 
 /**
  * The screen the office works from all day.
@@ -26,8 +30,9 @@ import { useSession } from '../../stores/session.js';
 const route = useRoute();
 const router = useRouter();
 const session = useSession();
+const { t } = useI18n();
 
-useFocusStep('Calendar');
+useFocusStep(() => t('office.calendar.heading'));
 
 /**
  * The day on screen, and it has to be a real one.
@@ -69,7 +74,7 @@ const { data, errorKey, loading, run } = useAsyncData((signal) =>
  * put something in it.
  */
 const employeeOptions = computed(() => [
-  { value: '', label: 'Everyone' },
+  { value: '', label: t('office.calendar.everyone') },
   ...employees.value.map((employee) => ({ value: employee.id, label: employee.displayName })),
 ]);
 
@@ -124,17 +129,21 @@ watch([date, employeeFilter], run);
   <section class="space-y-4">
     <div class="flex flex-wrap items-center justify-between gap-3">
       <h1 ref="heading" tabindex="-1" class="text-xl font-semibold tracking-tight outline-none">
-        Calendar
+        {{ t('office.calendar.heading') }}
       </h1>
 
       <div class="flex flex-wrap items-center gap-2">
-        <SfButton variant="secondary" data-test="prev-day" @click="shift(-1)">Previous</SfButton>
+        <SfButton variant="secondary" data-test="prev-day" @click="shift(-1)">
+          {{ t('office.calendar.previous') }}
+        </SfButton>
         <p class="min-w-32 text-center font-medium tabular-nums" data-test="current-date">
           {{ localDateLabel(date) }}
         </p>
-        <SfButton variant="secondary" data-test="next-day" @click="shift(1)">Next</SfButton>
+        <SfButton variant="secondary" data-test="next-day" @click="shift(1)">
+          {{ t('office.calendar.next') }}
+        </SfButton>
         <SfButton variant="ghost" data-test="today" @click="goTo({ date: today() })">
-          Today
+          {{ t('office.calendar.today') }}
         </SfButton>
 
         <!--
@@ -154,7 +163,7 @@ watch([date, employeeFilter], run);
             })
           "
         >
-          New booking
+          {{ t('office.calendar.newBooking') }}
         </SfButton>
       </div>
     </div>
@@ -166,7 +175,7 @@ watch([date, employeeFilter], run);
     -->
     <SfSelect
       v-if="session.can('calendar.viewAll')"
-      label="Person"
+      :label="t('office.calendar.personFilterLabel')"
       :model-value="employeeFilter"
       :options="employeeOptions"
       data-test="employee-filter"
