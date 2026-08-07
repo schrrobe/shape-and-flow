@@ -1,7 +1,6 @@
 import { z } from 'zod';
 
 import { newPasswordSchema } from '../auth/index.js';
-import { entityTypeSchema } from '../enums.js';
 import { cuidSchema } from '../primitives.js';
 
 const baseFields = {
