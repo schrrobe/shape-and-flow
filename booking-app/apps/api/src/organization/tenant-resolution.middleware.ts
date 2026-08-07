@@ -1,11 +1,9 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 
-import { ENV } from '../config/env.schema.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
 import { runWithTenant } from './tenant-context.store.js';
 
-import type { AppConfig } from '../config/env.schema.js';
 import type { NextFunction, Request, Response } from 'express';
 
 /**
@@ -18,10 +16,7 @@ import type { NextFunction, Request, Response } from 'express';
  */
 @Injectable()
 export class TenantResolutionMiddleware {
-  constructor(
-    private readonly prisma: PrismaService,
-    @Inject(ENV) private readonly config: AppConfig,
-  ) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   middleware = async (request: Request, _response: Response, next: NextFunction): Promise<void> => {
     const slug = request.query.organizer;
