@@ -136,6 +136,10 @@ describe('POST /api/public/organizations', () => {
 
     expect(res.status).toBe(201);
     expect(registered(res).slug).toBe('acme-studio');
+    // STRIPE_CLIENT is wired to null in this suite (see module doc comment above),
+    // so a real Stripe call is impossible here -- the endpoint must still return
+    // 201 with onboardingLink: null rather than rolling back or erroring.
+    expect(registered(res).onboardingLink).toBeNull();
     expect(res.headers['set-cookie']).toBeDefined();
 
     const organization = await prisma.organization.findUniqueOrThrow({
