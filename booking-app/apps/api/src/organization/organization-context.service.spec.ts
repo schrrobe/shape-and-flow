@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { OrganizationContextService } from './organization-context.service.js';
+import { runWithTenant } from './tenant-context.store.js';
 
 import type { OrganizationWithSettings } from './organization-context.service.js';
 import type { AppConfig } from '../config/env.schema.js';
@@ -80,5 +81,32 @@ describe('OrganizationContextService', () => {
     await service.refresh();
 
     expect(service.getSettings().schedulingIntervalMinutes).toBe(30);
+  });
+
+  it('returns bootstrap organization outside any tenant scope', async () => {
+    const { service } = serviceReturning(organization);
+
+    await service.onApplicationBootstrap();
+
+    expect(service.get().id).toBe('org-1');
+  });
+
+  it('returns scoped organization inside runWithTenant', async () => {
+    const { service } = serviceReturning(organization);
+    await service.onApplicationBootstrap();
+
+    const scoped = {
+      ...organization,
+      id: 'org-2',
+      slug: 'acme',
+    } as OrganizationWithSettings;
+
+    runWithTenant(scoped, () => {
+      expect(service.get().id).toBe('org-2');
+      expect(service.getOrganizationId()).toBe('org-2');
+      expect(service.getTimezone()).toBe('Europe/Berlin');
+    });
+
+    expect(service.get().id).toBe('org-1');
   });
 });

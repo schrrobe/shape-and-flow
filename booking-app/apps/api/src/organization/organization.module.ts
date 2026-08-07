@@ -1,9 +1,12 @@
 import { Global, Module } from '@nestjs/common';
 
+import { AuthModule } from '../auth/auth.module.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { TENANT_PRISMA, createTenantGuardedClient } from '../prisma/tenant.extension.js';
 
+import { OfficeTenantMiddleware } from './office-tenant.middleware.js';
 import { OrganizationContextService } from './organization-context.service.js';
+import { TenantResolutionMiddleware } from './tenant-resolution.middleware.js';
 
 import type { TenantPrismaClient } from '../prisma/tenant.extension.js';
 
@@ -22,8 +25,11 @@ import type { TenantPrismaClient } from '../prisma/tenant.extension.js';
  */
 @Global()
 @Module({
+  imports: [AuthModule],
   providers: [
     OrganizationContextService,
+    TenantResolutionMiddleware,
+    OfficeTenantMiddleware,
     {
       provide: TENANT_PRISMA,
       inject: [PrismaService, OrganizationContextService],
@@ -36,6 +42,6 @@ import type { TenantPrismaClient } from '../prisma/tenant.extension.js';
         createTenantGuardedClient(prisma, () => organizations.getOrganizationId()),
     },
   ],
-  exports: [OrganizationContextService, TENANT_PRISMA],
+  exports: [OrganizationContextService, TENANT_PRISMA, TenantResolutionMiddleware, OfficeTenantMiddleware],
 })
 export class OrganizationModule {}

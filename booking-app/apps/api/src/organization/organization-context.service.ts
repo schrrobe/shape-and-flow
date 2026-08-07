@@ -4,6 +4,8 @@ import { AppError } from '../common/errors/app-error.js';
 import { ENV } from '../config/env.schema.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
+import { currentTenant } from './tenant-context.store.js';
+
 import type { AppConfig } from '../config/env.schema.js';
 import type { Organization, OrganizationSettings } from '../prisma/client.js';
 import type { OnApplicationBootstrap } from '@nestjs/common';
@@ -73,6 +75,9 @@ export class OrganizationContextService implements OnApplicationBootstrap {
   }
 
   get(): OrganizationWithSettings {
+    const scoped = currentTenant();
+    if (scoped) return scoped;
+
     if (!this.organization) {
       throw new Error(
         'Organization context read before bootstrap completed. ' +
