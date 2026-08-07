@@ -232,4 +232,78 @@ describe('envSchema', () => {
     expect(result.success).toBe(false);
     expect(result.success ? 0 : result.error.issues.length).toBeGreaterThan(5);
   });
+
+  it('accepts a complete Unleash configuration', () => {
+    const parsed = envSchema.parse({
+      ...valid,
+      UNLEASH_URL: 'https://unleash.shapeandflow.de/api/',
+      UNLEASH_BACKEND_TOKEN: 'default:development.backend-test-token',
+      UNLEASH_FRONTEND_TOKEN: 'default:development.frontend-test-token',
+      UNLEASH_ENVIRONMENT: 'development',
+      UNLEASH_DEPLOYMENT: 'stage',
+    });
+
+    expect(parsed.UNLEASH_ENVIRONMENT).toBe('development');
+    expect(parsed.UNLEASH_DEPLOYMENT).toBe('stage');
+  });
+
+  it('rejects a partial Unleash configuration and names every missing setting', () => {
+    const result = parseConfig({
+      ...valid,
+      UNLEASH_URL: 'https://unleash.shapeandflow.de/api/',
+    });
+
+    expect(paths(result)).toEqual(
+      expect.arrayContaining([
+        'UNLEASH_BACKEND_TOKEN',
+        'UNLEASH_FRONTEND_TOKEN',
+        'UNLEASH_ENVIRONMENT',
+        'UNLEASH_DEPLOYMENT',
+      ]),
+    );
+  });
+
+  it('requires a complete Unleash configuration in production', () => {
+    const result = parseConfig({
+      ...valid,
+      NODE_ENV: 'production',
+      PAYMENT_PROVIDER: 'stripe',
+      STRIPE_SECRET_KEY: 'sk_live_x',
+      STRIPE_WEBHOOK_SECRET: 'whsec_live_x',
+      EMAIL_PROVIDER: 'resend',
+      RESEND_API_KEY: 're_live_x',
+      RESEND_WEBHOOK_SECRET: 'whsec_live_x',
+      SMS_PROVIDER: 'twilio',
+      TWILIO_ACCOUNT_SID: 'AC_live_x',
+      TWILIO_AUTH_TOKEN: 'twilio_live_x',
+      TWILIO_FROM_NUMBER: '+4915100000000',
+      TWILIO_STATUS_CALLBACK_URL: 'https://buchung.shapeandflow.de/api/webhooks/twilio',
+    });
+
+    expect(paths(result)).toEqual(
+      expect.arrayContaining([
+        'UNLEASH_URL',
+        'UNLEASH_BACKEND_TOKEN',
+        'UNLEASH_FRONTEND_TOKEN',
+        'UNLEASH_ENVIRONMENT',
+        'UNLEASH_DEPLOYMENT',
+      ]),
+    );
+  });
+
+  it('rejects unknown Unleash environments and deployments', () => {
+    const unleash = {
+      UNLEASH_URL: 'https://unleash.shapeandflow.de/api/',
+      UNLEASH_BACKEND_TOKEN: 'backend-test-token',
+      UNLEASH_FRONTEND_TOKEN: 'frontend-test-token',
+      UNLEASH_ENVIRONMENT: 'staging',
+      UNLEASH_DEPLOYMENT: 'preview',
+    };
+
+    const result = parseConfig({ ...valid, ...unleash });
+
+    expect(paths(result)).toEqual(
+      expect.arrayContaining(['UNLEASH_ENVIRONMENT', 'UNLEASH_DEPLOYMENT']),
+    );
+  });
 });

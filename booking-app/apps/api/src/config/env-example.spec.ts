@@ -35,4 +35,30 @@ describe('.env.example', () => {
     expect(documented.size).toBeGreaterThan(20);
     expect(declared.size).toBe(documented.size);
   });
+
+  it('documents all five Unleash settings with non-secret placeholders', () => {
+    const expected = [
+      'UNLEASH_URL',
+      'UNLEASH_BACKEND_TOKEN',
+      'UNLEASH_FRONTEND_TOKEN',
+      'UNLEASH_ENVIRONMENT',
+      'UNLEASH_DEPLOYMENT',
+    ];
+
+    expect([...documented]).toEqual(expect.arrayContaining(expected));
+    expect(text).toContain('UNLEASH_BACKEND_TOKEN=backend_replace_me');
+    expect(text).toContain('UNLEASH_FRONTEND_TOKEN=frontend_replace_me');
+  });
+});
+
+describe('.env.production.example', () => {
+  const text = readFileSync(new URL('../../../../.env.production.example', import.meta.url), 'utf8');
+
+  it('documents production-scoped Unleash placeholders', () => {
+    expect(text).toContain('UNLEASH_URL=https://unleash.shapeandflow.de/api/');
+    expect(text).toContain('UNLEASH_BACKEND_TOKEN=backend_production_replace_me');
+    expect(text).toContain('UNLEASH_FRONTEND_TOKEN=frontend_production_replace_me');
+    expect(text).toContain('UNLEASH_ENVIRONMENT=production');
+    expect(text).toContain('UNLEASH_DEPLOYMENT=production');
+  });
 });
