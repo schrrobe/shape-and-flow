@@ -114,13 +114,16 @@ describe('FeatureFlagsService', () => {
 
   it('stays disabled and does not create a client when configuration is absent', async () => {
     const factory = vi.fn<FeatureFlagClientFactory>();
-    const service = await createService(config({
-      UNLEASH_URL: undefined,
-      UNLEASH_BACKEND_TOKEN: undefined,
-      UNLEASH_FRONTEND_TOKEN: undefined,
-      UNLEASH_ENVIRONMENT: undefined,
-      UNLEASH_DEPLOYMENT: undefined,
-    }), factory);
+    const service = await createService(
+      config({
+        UNLEASH_URL: undefined,
+        UNLEASH_BACKEND_TOKEN: undefined,
+        UNLEASH_FRONTEND_TOKEN: undefined,
+        UNLEASH_ENVIRONMENT: undefined,
+        UNLEASH_DEPLOYMENT: undefined,
+      }),
+      factory,
+    );
 
     expect(service.isEnabled('booking.new-flow')).toBe(false);
     expect(service.isEnabled('booking.new-flow', {}, true)).toBe(true);

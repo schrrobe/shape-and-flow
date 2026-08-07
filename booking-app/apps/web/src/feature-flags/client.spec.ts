@@ -79,7 +79,10 @@ describe('createFeatureFlagClient', () => {
 
   it('uses the fallback until ready and reacts to SDK updates', async () => {
     const { sdk, emit } = fakeSdk();
-    const client = createFeatureFlagClient(() => Promise.resolve(runtimeConfig), () => sdk);
+    const client = createFeatureFlagClient(
+      () => Promise.resolve(runtimeConfig),
+      () => sdk,
+    );
 
     await client.start();
     expect(client.isEnabled('booking.new-flow', false)).toBe(false);
@@ -108,7 +111,10 @@ describe('createFeatureFlagClient', () => {
     isEnabled.mockImplementation(() => {
       throw new Error('bad cache');
     });
-    const evaluating = createFeatureFlagClient(() => Promise.resolve(runtimeConfig), () => sdk);
+    const evaluating = createFeatureFlagClient(
+      () => Promise.resolve(runtimeConfig),
+      () => sdk,
+    );
     await evaluating.start();
     emit('ready');
     expect(evaluating.isEnabled('booking.new-flow', true)).toBe(true);
@@ -116,7 +122,10 @@ describe('createFeatureFlagClient', () => {
 
   it('detaches all SDK listeners and stops polling', async () => {
     const { sdk, listeners, off, stop } = fakeSdk();
-    const client = createFeatureFlagClient(() => Promise.resolve(runtimeConfig), () => sdk);
+    const client = createFeatureFlagClient(
+      () => Promise.resolve(runtimeConfig),
+      () => sdk,
+    );
     await client.start();
 
     client.stop();

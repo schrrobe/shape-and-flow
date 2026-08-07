@@ -52,7 +52,10 @@ describe('.env.example', () => {
 });
 
 describe('.env.production.example', () => {
-  const text = readFileSync(new URL('../../../../.env.production.example', import.meta.url), 'utf8');
+  const text = readFileSync(
+    new URL('../../../../.env.production.example', import.meta.url),
+    'utf8',
+  );
 
   it('documents production-scoped Unleash placeholders', () => {
     expect(text).toContain('UNLEASH_URL=https://unleash.shapeandflow.de/api/');

@@ -19,12 +19,7 @@ export class FeatureFlagsController {
     const { UNLEASH_URL, UNLEASH_FRONTEND_TOKEN, UNLEASH_ENVIRONMENT, UNLEASH_DEPLOYMENT } =
       this.env;
 
-    if (
-      !UNLEASH_URL ||
-      !UNLEASH_FRONTEND_TOKEN ||
-      !UNLEASH_ENVIRONMENT ||
-      !UNLEASH_DEPLOYMENT
-    ) {
+    if (!UNLEASH_URL || !UNLEASH_FRONTEND_TOKEN || !UNLEASH_ENVIRONMENT || !UNLEASH_DEPLOYMENT) {
       throw new ServiceUnavailableException('Feature flags are not configured');
     }
 
