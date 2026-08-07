@@ -109,4 +109,40 @@ describe('OrganizationContextService', () => {
 
     expect(service.get().id).toBe('org-1');
   });
+
+  it('loads settings for an explicit organization id, independent of ALS or bootstrap state', async () => {
+    const findUnique = vi
+      .fn()
+      .mockResolvedValueOnce(organization) // bootstrap load
+      .mockResolvedValueOnce({ ...organization, id: 'org-2', settings: { ...organization.settings, id: 'settings-2', organizationId: 'org-2', schedulingIntervalMinutes: 30 } });
+    // `getSettingsFor` calls `findUniqueOrThrow`, not `findUnique`; aliased to the same
+    // mock so both bootstrap's `findUnique` call and this method's call draw from the
+    // same queued responses in call order.
+    const prisma = {
+      organization: { findUnique, findUniqueOrThrow: findUnique },
+    } as unknown as PrismaService;
+    const service = new OrganizationContextService(config, prisma);
+    await service.onApplicationBootstrap();
+
+    const settings = await service.getSettingsFor('org-2');
+
+    expect(settings.schedulingIntervalMinutes).toBe(30);
+    expect(service.get().id).toBe('org-1');
+  });
+
+  it('loads the timezone for an explicit organization id', async () => {
+    const findUnique = vi
+      .fn()
+      .mockResolvedValueOnce(organization)
+      .mockResolvedValueOnce({ ...organization, id: 'org-2', timezone: 'America/New_York' });
+    const prisma = {
+      organization: { findUnique, findUniqueOrThrow: findUnique },
+    } as unknown as PrismaService;
+    const service = new OrganizationContextService(config, prisma);
+    await service.onApplicationBootstrap();
+
+    const timezone = await service.getTimezoneFor('org-2');
+
+    expect(timezone).toBe('America/New_York');
+  });
 });

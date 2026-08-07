@@ -310,6 +310,43 @@ describe('GET /manage/booking', () => {
   });
 });
 
+describe('a booking that belongs to a second organization', () => {
+  it("returns that booking's own organization's timezone and cancellation policy, not the default org's", async () => {
+    const other = await seedOrganization(prisma, { slug: 'other-org' });
+    await prisma.organization.update({
+      where: { id: other.organization.id },
+      data: { timezone: 'America/New_York' },
+    });
+    await prisma.organizationSettings.update({
+      where: { organizationId: other.organization.id },
+      data: { cancellationFeePolicy: 'PERCENTAGE', cancellationFeePercent: 50 },
+    });
+
+    const booking = await prisma.booking.create({
+      data: {
+        ...makeBooking(other, { status: 'CONFIRMED', expiresAt: null }),
+        confirmedAt: NOW,
+      },
+    });
+
+    const { token } = await prisma.$transaction((tx) =>
+      tokens.issue(tx, booking.id, other.organization.id, SLOT_FRIDAY_0900),
+    );
+
+    const response = await get('/manage/booking', token).expect(200);
+    const body = response.body as {
+      timezone: string;
+      cancellationPolicy: { feePolicy: string };
+    };
+
+    // The app was bootstrapped for `ctx.organization` (Europe/Berlin, NONE). If the
+    // controller ever falls back to bootstrap/ALS state instead of the token's own
+    // `organizationId`, this comes back as the default org's values instead.
+    expect(body.timezone).toBe('America/New_York');
+    expect(body.cancellationPolicy.feePolicy).toBe('PERCENTAGE');
+  });
+});
+
 describe('tokens that must not work', () => {
   it('rejects a missing Authorization header', async () => {
     const response = await get('/manage/booking').expect(401);

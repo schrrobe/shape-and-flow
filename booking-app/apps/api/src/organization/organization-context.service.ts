@@ -119,4 +119,25 @@ export class OrganizationContextService implements OnApplicationBootstrap {
   getTimezone(): string {
     return this.get().timezone;
   }
+
+  /** Settings for an explicit organization id, bypassing ALS and the bootstrap snapshot. */
+  async getSettingsFor(organizationId: string): Promise<OrganizationSettings> {
+    const organization = await this.prisma.organization.findUniqueOrThrow({
+      where: { id: organizationId },
+      include: { settings: true },
+    });
+    if (!organization.settings) {
+      throw new Error(`Organization "${organizationId}" has no settings row.`);
+    }
+    return organization.settings;
+  }
+
+  /** Timezone for an explicit organization id, bypassing ALS and the bootstrap snapshot. */
+  async getTimezoneFor(organizationId: string): Promise<string> {
+    const organization = await this.prisma.organization.findUniqueOrThrow({
+      where: { id: organizationId },
+      select: { timezone: true },
+    });
+    return organization.timezone;
+  }
 }

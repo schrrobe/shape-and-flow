@@ -114,6 +114,28 @@ function organizationStub(): Partial<OrganizationContextService> {
 
       return organization;
     },
+    // These two bypass ALS and the bootstrap snapshot in production, going straight to
+    // Prisma for an explicit organization id. The stub mirrors that by querying the same
+    // real test database rather than reading `currentOrganization` — a suite proving
+    // `/manage/*` returns a *different* organization's own settings needs this to actually
+    // hit that organization's row, not whichever one this harness instance bootstrapped.
+    getSettingsFor: async (organizationId: string) => {
+      const organization = await prisma.organization.findUniqueOrThrow({
+        where: { id: organizationId },
+        include: { settings: true },
+      });
+      if (!organization.settings) {
+        throw new Error(`Organization "${organizationId}" has no settings row.`);
+      }
+      return organization.settings;
+    },
+    getTimezoneFor: async (organizationId: string) => {
+      const organization = await prisma.organization.findUniqueOrThrow({
+        where: { id: organizationId },
+        select: { timezone: true },
+      });
+      return organization.timezone;
+    },
   };
 }
 

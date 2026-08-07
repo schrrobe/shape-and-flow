@@ -95,6 +95,32 @@ export class BookingFinancialsService {
   }
 
   /**
+   * Same as {@link load}, but scoped to an explicit organization id instead of the ALS
+   * tenant / bootstrap snapshot.
+   *
+   * `/manage/*` has no tenant-resolution middleware (see `ManageController`), so
+   * `getOrganizationId()` there resolves to whichever organization the process
+   * bootstrapped rather than the one the customer's own token names. Without this, a
+   * booking for any organization but the bootstrap default would come back `NOT_FOUND`
+   * here even though the token guard already resolved it to the right booking.
+   */
+  async loadFor(bookingId: string, organizationId: string): Promise<BookingFinancials> {
+    const booking = await this.prisma.booking.findFirst({
+      where: { id: bookingId, organizationId },
+      select: { id: true, financialRootBookingId: true },
+    });
+
+    if (booking === null) {
+      throw new AppError('NOT_FOUND', { message: 'Booking not found.' });
+    }
+
+    const rootBookingId = booking.financialRootBookingId ?? booking.id;
+    const byRoot = await this.readRoots(this.prisma, [rootBookingId]);
+
+    return byRoot.get(rootBookingId) ?? emptyFinancials(rootBookingId);
+  }
+
+  /**
    * Every requested booking's financials, in a constant number of queries.
    *
    * An unknown or foreign id is a `NOT_FOUND` rather than an empty entry: a caller
