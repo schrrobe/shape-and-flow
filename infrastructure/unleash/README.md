@@ -51,4 +51,3 @@ docker compose --env-file .env -f compose.yml logs --tail=200 unleash postgres
 Unleash OSS uses project `default`. Dev and stage tokens are scoped to `development`; production
 tokens are scoped to `production`. Applications additionally send `deployment=dev`,
 `deployment=stage`, or `deployment=production` in the evaluation context.
-

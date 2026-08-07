@@ -60,4 +60,3 @@ services:
 
 volumes:
   unleash-postgres-data:
-
