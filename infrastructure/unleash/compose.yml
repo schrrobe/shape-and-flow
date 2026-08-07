@@ -1,0 +1,63 @@
+name: shape-and-flow-unleash
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: '10m'
+    max-file: '5'
+
+x-hardening: &hardening
+  security_opt:
+    - no-new-privileges:true
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: sf-unleash-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - unleash-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+    logging: *logging
+    <<: *hardening
+
+  unleash:
+    image: unleashorg/unleash-server:8.0.2
+    container_name: sf-unleash
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}
+      DATABASE_SSL: 'false'
+      LOG_LEVEL: warn
+      UNLEASH_URL: https://unleash.shapeandflow.de
+      UNLEASH_DEFAULT_ADMIN_USERNAME: ${UNLEASH_DEFAULT_ADMIN_USERNAME:?UNLEASH_DEFAULT_ADMIN_USERNAME is required}
+      UNLEASH_DEFAULT_ADMIN_PASSWORD: ${UNLEASH_DEFAULT_ADMIN_PASSWORD:?UNLEASH_DEFAULT_ADMIN_PASSWORD is required}
+      INIT_ADMIN_API_TOKENS: ${INIT_ADMIN_API_TOKENS:?INIT_ADMIN_API_TOKENS is required}
+      UNLEASH_FRONTEND_API_ORIGINS: ${UNLEASH_FRONTEND_API_ORIGINS:?UNLEASH_FRONTEND_API_ORIGINS is required}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - '127.0.0.1:4242:4242'
+    healthcheck:
+      test: ['CMD-SHELL', 'wget --quiet --tries=1 --spider http://127.0.0.1:4242/health']
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    restart: unless-stopped
+    logging: *logging
+    <<: *hardening
+
+volumes:
+  unleash-postgres-data:
+
