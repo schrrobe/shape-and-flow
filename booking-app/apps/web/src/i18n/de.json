@@ -108,10 +108,28 @@
     "whatsappAria": "Per WhatsApp Kontakt aufnehmen (öffnet in neuem Tab)",
     "whatsappPrefill": "Buchung {reference}: "
   },
+  "register": {
+    "entityType": "Kontotyp",
+    "entityTypeIndividual": "Einzelperson",
+    "entityTypeSoleProprietorship": "Einzelunternehmen",
+    "entityTypeOrganization": "Organisation",
+    "displayName": "Geschäftsname",
+    "companyName": "Rechtlicher Firmenname",
+    "email": "E-Mail",
+    "password": "Passwort",
+    "firstName": "Vorname",
+    "lastName": "Nachname",
+    "contactPhone": "Telefon",
+    "addressLine1": "Adresse",
+    "postalCode": "Postleitzahl",
+    "city": "Stadt",
+    "submit": "Konto erstellen"
+  },
   "errors": {
     "title": "Das hat nicht funktioniert",
     "correlation": "Referenz für den Support: {id}",
     "VALIDATION_FAILED": "Bitte prüfen Sie Ihre Eingaben.",
+    "INVALID_RETURN_URL": "Dieser Link ist ungültig. Bitte versuchen Sie es erneut.",
     "UNAUTHENTICATED": "Bitte melden Sie sich an.",
     "CSRF_FAILED": "Die Sitzung ist abgelaufen. Bitte laden Sie die Seite neu.",
     "FORBIDDEN_ROLE": "Dafür fehlt Ihnen die Berechtigung.",
@@ -130,8 +148,10 @@
     "IDEMPOTENCY_KEY_REUSED": "Diese Anfrage wurde schon mit anderen Daten gesendet. Bitte starten Sie die Buchung neu.",
     "OUTSIDE_BOOKING_WINDOW": "Dieser Termin liegt außerhalb des Buchungszeitraums.",
     "INVALID_STATUS_TRANSITION": "Das ist im aktuellen Status nicht möglich.",
+    "ORGANIZATION_CREATE_ERROR": "Ihr Konto konnte nicht angelegt werden. Bitte überprüfen Sie Ihre Angaben und versuchen Sie es erneut.",
     "RATE_LIMITED": "Zu viele Anfragen. Bitte in {seconds} Sekunden erneut versuchen.",
     "INTERNAL_ERROR": "Bei uns ist etwas schiefgegangen. Bitte versuchen Sie es später erneut.",
+    "ONBOARDING_LINK_ERROR": "Stripe konnte nicht erreicht werden. Bitte versuchen Sie es gleich noch einmal.",
     "NETWORK": "Keine Verbindung. Bitte prüfen Sie Ihr Internet."
   }
 }

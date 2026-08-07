@@ -58,6 +58,12 @@ const routes: RouteRecordRaw[] = [
   },
 
   {
+    path: '/organizer/registrieren',
+    name: 'register-organizer',
+    component: () => import('../pages/public/RegisterOrganizerPage.vue'),
+  },
+
+  {
     path: '/manage',
     name: 'manage',
     component: () => import('../pages/public/ManageBooking.vue'),
@@ -172,6 +178,11 @@ const routes: RouteRecordRaw[] = [
         path: 'settings',
         name: 'office-settings',
         component: () => import('../pages/office/SettingsPage.vue'),
+      },
+      {
+        path: 'onboarding-status',
+        name: 'onboarding-status',
+        component: () => import('../pages/office/OnboardingStatusPage.vue'),
       },
     ],
   },

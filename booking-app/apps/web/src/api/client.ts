@@ -64,6 +64,8 @@ import type {
   PasswordResetConfirmRequest,
   PasswordResetRequest,
   RefundListResponse,
+  RegisterOrganizationRequest,
+  RegisterOrganizationResponse,
   ReplaceEmployeeServicesRequest,
   ReplaceWorkingHoursRequest,
   ReplaceWorkingHoursResponse,
@@ -322,6 +324,9 @@ export const api = {
         `/public/bookings/by-session/${encodeURIComponent(checkoutSessionId)}`,
         { signal },
       ),
+
+    registerOrganization: (body: RegisterOrganizationRequest) =>
+      request<RegisterOrganizationResponse>('/public/organizations', { method: 'POST', body }),
   },
 
   /**
@@ -367,6 +372,17 @@ export const api = {
   office: {
     dashboard: (signal?: AbortSignal) =>
       request<OfficeDashboardResponse>('/office/dashboard', { session: true, signal }),
+
+    organization: {
+      current: () =>
+        request<{ stripeChargesEnabled: boolean }>('/office/organization', { session: true }),
+
+      requestOnboardingLink: () =>
+        request<{ onboardingLink: string }>('/office/organization/onboarding-link', {
+          method: 'POST',
+          session: true,
+        }),
+    },
 
     calendar: (query: Partial<OfficeCalendarQuery>, signal?: AbortSignal) =>
       request<OfficeCalendarResponse>('/office/calendar', {

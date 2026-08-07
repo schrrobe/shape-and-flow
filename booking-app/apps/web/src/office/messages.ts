@@ -36,8 +36,11 @@ const MESSAGES: Record<MessageKey, string> = {
   IDEMPOTENCY_KEY_REUSED: 'This was already sent with different details. Start again.',
   OUTSIDE_BOOKING_WINDOW: 'That time is outside the booking window.',
   INVALID_STATUS_TRANSITION: 'That is not possible in the current status.',
+  INVALID_RETURN_URL: 'That link is not valid. Please try again.',
+  ORGANIZATION_CREATE_ERROR: 'The account could not be created. Check the details and try again.',
   RATE_LIMITED: 'Too many attempts. Wait a moment and try again.',
   INTERNAL_ERROR: 'Something went wrong on our side. Try again in a moment.',
+  ONBOARDING_LINK_ERROR: 'Could not reach Stripe. Please try again in a moment.',
   [NETWORK_ERROR]: 'No connection to the server. Check your network.',
 };
 
