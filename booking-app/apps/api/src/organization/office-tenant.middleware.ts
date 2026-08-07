@@ -2,6 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 
 import { readCookie } from '../auth/office-session.guard.js';
 import { SessionStore } from '../auth/session.store.js';
+import { AppError } from '../common/errors/app-error.js';
 import { ENV } from '../config/env.schema.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
@@ -14,6 +15,13 @@ import type { NextFunction, Request, Response } from 'express';
  * Resolves the tenant for office traffic from the session, never from the
  * query string: a query parameter must never be able to redirect an
  * authenticated request into a different organization's data.
+ *
+ * Absent a session cookie, or a cookie that does not resolve to a live session,
+ * this falls through to the bootstrap default — that is the intentional
+ * not-logged-in case. But a session that DOES resolve and names an organization
+ * that no longer resolves is different: an identity was offered and it is
+ * invalid, so this rejects rather than silently serving a different
+ * organization's data under someone else's session.
  */
 @Injectable()
 export class OfficeTenantMiddleware {
@@ -42,8 +50,9 @@ export class OfficeTenantMiddleware {
     });
 
     if (!organization?.settings) {
-      next();
-      return;
+      // A session exists but its organization no longer resolves — never silently serve
+      // a different organization's data for an authenticated request.
+      throw new AppError('ORGANIZATION_NOT_FOUND', { message: 'The organization for this session no longer exists.' });
     }
 
     runWithTenant({ ...organization, settings: organization.settings }, () => {
