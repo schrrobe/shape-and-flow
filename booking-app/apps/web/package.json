@@ -20,6 +20,7 @@
     "@shape-and-flow/booking-contracts": "workspace:*",
     "@shape-and-flow/booking-ui": "workspace:*",
     "pinia": "4.0.2",
+    "unleash-proxy-client": "3.8.2",
     "vue": "3.5.40",
     "vue-i18n": "11.4.8",
     "vue-router": "5.2.0",
