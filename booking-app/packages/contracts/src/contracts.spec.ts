@@ -59,6 +59,12 @@ describe('error codes', () => {
     expect(ERROR_STATUS.IDEMPOTENCY_KEY_REUSED).toBe(422);
     expect(ERROR_STATUS.NOT_FOUND).toBe(404);
   });
+
+  it('has a status for INVALID_RETURN_URL, ORGANIZATION_CREATE_ERROR, and ONBOARDING_LINK_ERROR', () => {
+    expect(ERROR_STATUS.INVALID_RETURN_URL).toBe(400);
+    expect(ERROR_STATUS.ORGANIZATION_CREATE_ERROR).toBe(422);
+    expect(ERROR_STATUS.ONBOARDING_LINK_ERROR).toBe(500);
+  });
 });
 
 describe('primitives', () => {

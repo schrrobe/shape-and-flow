@@ -16,6 +16,7 @@ import { z } from 'zod';
 export const errorCodeSchema = z.enum([
   // 400
   'VALIDATION_FAILED',
+  'INVALID_RETURN_URL',
   // 401
   'UNAUTHENTICATED',
   // 403
@@ -40,10 +41,12 @@ export const errorCodeSchema = z.enum([
   'IDEMPOTENCY_KEY_REUSED',
   'OUTSIDE_BOOKING_WINDOW',
   'INVALID_STATUS_TRANSITION',
+  'ORGANIZATION_CREATE_ERROR',
   // 429
   'RATE_LIMITED',
   // 500
   'INTERNAL_ERROR',
+  'ONBOARDING_LINK_ERROR',
 ]);
 
 export type ErrorCode = z.infer<typeof errorCodeSchema>;
@@ -56,6 +59,7 @@ export type ErrorCode = z.infer<typeof errorCodeSchema>;
  */
 export const ERROR_STATUS: Record<ErrorCode, number> = {
   VALIDATION_FAILED: 400,
+  INVALID_RETURN_URL: 400,
 
   UNAUTHENTICATED: 401,
 
@@ -83,10 +87,12 @@ export const ERROR_STATUS: Record<ErrorCode, number> = {
   IDEMPOTENCY_KEY_REUSED: 422,
   OUTSIDE_BOOKING_WINDOW: 422,
   INVALID_STATUS_TRANSITION: 422,
+  ORGANIZATION_CREATE_ERROR: 422,
 
   RATE_LIMITED: 429,
 
   INTERNAL_ERROR: 500,
+  ONBOARDING_LINK_ERROR: 500,
 };
 
 /** True when a code is safe to return to a client. */
