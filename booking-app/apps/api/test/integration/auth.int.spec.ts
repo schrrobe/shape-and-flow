@@ -307,6 +307,40 @@ describe('POST /api/auth/login', () => {
   it('matches the address case-insensitively', async () => {
     await login({ email: OWNER_EMAIL.toUpperCase(), password: OWNER_PASSWORD }).expect(200);
   });
+
+  it('logs in an owner belonging to a different organization than the bootstrap default', async () => {
+    const other = await prisma.organization.create({
+      data: {
+        slug: 'second-org',
+        name: 'Second Org',
+        legalName: 'Second Org GmbH',
+        contactEmail: 'owner@second-org.example',
+        contactPhone: '+49301234567',
+        addressLine1: 'Beispielstraße 1',
+        postalCode: '10115',
+        city: 'Berlin',
+      },
+    });
+    await prisma.organizationSettings.create({
+      data: { organizationId: other.id, officeNotificationEmail: 'owner@second-org.example' },
+    });
+    await prisma.officeUser.create({
+      data: {
+        organizationId: other.id,
+        email: 'owner@second-org.example',
+        passwordHash: await new PasswordService().hash('Correct-Horse-Battery-9'),
+        firstName: 'Jane',
+        lastName: 'Doe',
+        role: 'OWNER',
+        canIssueRefunds: true,
+      },
+    });
+
+    const res = await login({ email: 'owner@second-org.example', password: 'Correct-Horse-Battery-9' });
+
+    expect(res.status).toBe(200);
+    expect((res.body as { user: { email: string } }).user.email).toBe('owner@second-org.example');
+  });
 });
 
 describe('session and csrf', () => {
@@ -570,5 +604,42 @@ describe('password reset', () => {
     expect(message?.to).toBe(OWNER_EMAIL);
     // The fragment is what keeps the token out of server logs and Referer headers.
     expect(message?.text).toContain('/office/reset-password#');
+  });
+
+  it("queues the reset notification under the requesting user's own organization, not the bootstrap default", async () => {
+    const other = await prisma.organization.create({
+      data: {
+        slug: 'third-org',
+        name: 'Third Org',
+        legalName: 'Third Org GmbH',
+        contactEmail: 'owner@third-org.example',
+        contactPhone: '+49301234567',
+        addressLine1: 'Beispielstraße 1',
+        postalCode: '10115',
+        city: 'Berlin',
+        defaultLocale: 'en',
+      },
+    });
+    await prisma.organizationSettings.create({
+      data: { organizationId: other.id, officeNotificationEmail: 'owner@third-org.example' },
+    });
+    const user = await prisma.officeUser.create({
+      data: {
+        organizationId: other.id,
+        email: 'owner@third-org.example',
+        passwordHash: await new PasswordService().hash('Correct-Horse-Battery-9'),
+        firstName: 'Jane',
+        lastName: 'Doe',
+        role: 'OWNER',
+        canIssueRefunds: true,
+      },
+    });
+
+    await requestResetFor('owner@third-org.example');
+
+    const token = await prisma.passwordResetToken.findFirstOrThrow({
+      where: { officeUserId: user.id },
+    });
+    expect(token.organizationId).toBe(other.id);
   });
 });

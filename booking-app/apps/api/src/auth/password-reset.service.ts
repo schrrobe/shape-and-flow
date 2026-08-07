@@ -7,7 +7,6 @@ import { ENV } from '../config/env.schema.js';
 import { CLOCK } from '../domain/time/clock.js';
 import { BookingNotificationData } from '../notification/booking-notification-data.service.js';
 import { NotificationService } from '../notification/notification.service.js';
-import { OrganizationContextService } from '../organization/organization-context.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
 import { PasswordService } from './password.service.js';
@@ -55,7 +54,6 @@ export class PasswordResetService {
     private readonly sessions: SessionStore,
     private readonly notifications: NotificationService,
     private readonly notificationData: BookingNotificationData,
-    private readonly organizations: OrganizationContextService,
     @Inject(ENV) private readonly config: AppConfig,
     @Inject(CLOCK) private readonly clock: Clock,
   ) {}
@@ -67,15 +65,12 @@ export class PasswordResetService {
    * branch of this method can become a way to ask "does this address have an account".
    */
   async request(email: string): Promise<void> {
-    const organization = this.organizations.get();
-
+    // Global, not scoped to this deployment's bootstrap organization: an office user's
+    // email is unique across every organization, so the organization is derived below
+    // from the row this finds, rather than assumed from request context.
     const user = await this.prisma.officeUser.findFirst({
-      where: {
-        organizationId: organization.id,
-        email: { equals: email, mode: 'insensitive' },
-        archivedAt: null,
-      },
-      select: { id: true, email: true, firstName: true, lastName: true },
+      where: { email: email.toLowerCase(), archivedAt: null },
+      select: { id: true, email: true, firstName: true, lastName: true, organizationId: true },
     });
 
     // Paid on both branches. The remaining database and in-memory-provider work is small
@@ -88,6 +83,11 @@ export class PasswordResetService {
       this.logger.debug('password reset requested for an address with no active user');
       return;
     }
+
+    const organization = await this.prisma.organization.findUniqueOrThrow({
+      where: { id: user.organizationId },
+      select: { id: true, defaultLocale: true },
+    });
 
     const token = randomBytes(TOKEN_BYTES).toString('base64url');
     const expiresAt = new Date(this.clock.now().getTime() + RESET_TOKEN_TTL_MINUTES * 60_000);

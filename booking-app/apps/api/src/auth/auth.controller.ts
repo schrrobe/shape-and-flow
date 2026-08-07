@@ -11,7 +11,6 @@ import { AppError } from '../common/errors/app-error.js';
 import { Public } from '../common/guards/public.decorator.js';
 import { ENV } from '../config/env.schema.js';
 import { CLOCK } from '../domain/time/clock.js';
-import { OrganizationContextService } from '../organization/organization-context.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
 import { CsrfHeaderGuard } from './csrf-header.guard.js';
@@ -78,7 +77,6 @@ export class AuthController {
     private readonly passwords: PasswordService,
     private readonly sessions: SessionStore,
     private readonly resets: PasswordResetService,
-    private readonly organizations: OrganizationContextService,
     @Inject(ENV) private readonly config: AppConfig,
     @Inject(CLOCK) private readonly clock: Clock,
   ) {}
@@ -96,13 +94,11 @@ export class AuthController {
     const { email, password } = loginRequestSchema.parse(rawBody);
     const now = this.clock.now();
 
-    const user = await this.prisma.officeUser.findFirst({
-      // Never from the request: an office user belongs to the organization this
-      // deployment serves, and the credential is only meaningful within it.
-      where: {
-        organizationId: this.organizations.getOrganizationId(),
-        email: { equals: email, mode: 'insensitive' },
-      },
+    // Global, not scoped to this deployment's bootstrap organization: an office user's
+    // email is unique across every organization, and the organization they belong to is
+    // derived from the row this finds, not assumed from request context.
+    const user = await this.prisma.officeUser.findUnique({
+      where: { email: email.toLowerCase() },
       select: USER_FOR_LOGIN,
     });
 

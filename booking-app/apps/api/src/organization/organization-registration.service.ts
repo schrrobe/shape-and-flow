@@ -117,7 +117,7 @@ export class OrganizationRegistrationService {
           const owner = await tx.officeUser.create({
             data: {
               organizationId: organization.id,
-              email: request.email,
+              email: request.email.toLowerCase(),
               passwordHash,
               firstName: request.entityType === 'ORGANIZATION' ? request.companyName : request.firstName,
               lastName: request.entityType === 'ORGANIZATION' ? '' : request.lastName,
