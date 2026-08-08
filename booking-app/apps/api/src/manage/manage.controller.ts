@@ -79,13 +79,16 @@ export class ManageController {
   @Get('booking')
   async booking(@ManagedBooking() managed: ResolvedToken): Promise<ManageBookingResponse> {
     const booking = await this.load(managed);
-    const settings = await this.organizations.getSettingsFor(managed.organizationId);
+    // The ordinary, ambient-scoped path: `ManagementTenantInterceptor` has already
+    // opened the tenant scope for this booking's own organization, so this resolves the
+    // same settings a by-id lookup would, with no call-site of its own to keep in sync.
+    const settings = this.organizations.getSettings();
     const now = this.clock.now();
 
     // Through the chain's root. A rescheduled booking keeps its payment on the row that
     // was paid, and reading this booking's own relation showed the customer a paid
     // appointment as owing the full price.
-    const financials = await this.financials.loadFor(managed.bookingId, managed.organizationId);
+    const financials = await this.financials.load(managed.bookingId);
     const paid = receivedFrom(financials, booking.currency);
     const refunded = this.refundedTotal(financials.payments, booking.currency);
 
@@ -107,7 +110,7 @@ export class ManageController {
       displayStatus: this.displayStatus(booking),
       startsAt: booking.startsAt.toISOString(),
       endsAt: booking.endsAt.toISOString(),
-      timezone: await this.organizations.getTimezoneFor(managed.organizationId),
+      timezone: this.organizations.getTimezone(),
       serviceName: booking.serviceNameSnapshot,
       durationMinutes: booking.durationMinutesSnapshot,
       employeeDisplayName: booking.employee.displayName,
