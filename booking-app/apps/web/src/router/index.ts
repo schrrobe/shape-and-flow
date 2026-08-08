@@ -1,5 +1,12 @@
 import { createRouter, createWebHistory } from 'vue-router';
 
+import {
+  ORGANIZER_PARAM,
+  readOrganizerParam,
+  rememberTenantSlug,
+  tenantSlug,
+} from '../api/tenant.js';
+
 import { installOfficeSessionHandling } from './office-guard.js';
 
 import type { RouteRecordRaw } from 'vue-router';
@@ -224,6 +231,33 @@ export const router = createRouter({
 
     return { top: 0 };
   },
+});
+
+/**
+ * Keep `?organizer=` on every public URL.
+ *
+ * The customer arrives on `/?organizer=acme` and the first `router.push` — to a wizard
+ * step, or back to the slot list after a taken slot — would drop the parameter. The page
+ * would still work, because the API client remembers the slug, but the address bar would
+ * stop naming the organizer: a reloaded, bookmarked or shared link would land on the
+ * default tenant instead. Putting it back makes the URL mean what the session means.
+ *
+ * Office routes are left alone. They resolve their tenant from the session cookie, and a
+ * slug on an authenticated URL would be a second way to name a tenant that nothing reads.
+ */
+router.beforeEach((to) => {
+  const explicit = readOrganizerParam(to.query[ORGANIZER_PARAM]);
+  if (explicit !== null) rememberTenantSlug(explicit);
+
+  if (explicit !== null || to.meta.area === 'office') return true;
+
+  const slug = tenantSlug();
+  if (slug === null) return true;
+
+  // Covers the absent case and the malformed ones — `?organizer=` and repeated values,
+  // both of which the API rejects — by replacing whatever was there with the slug this
+  // visit is actually for.
+  return { ...to, query: { ...to.query, [ORGANIZER_PARAM]: slug } };
 });
 
 installOfficeSessionHandling(router);
