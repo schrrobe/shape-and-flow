@@ -145,6 +145,7 @@
     "CANNOT_MODIFY_SELF": "Your own account cannot be changed here.",
     "PAYMENT_NOT_REFUNDABLE": "This payment cannot be refunded.",
     "NO_EMPLOYEE_AVAILABLE": "Nobody is available at that time.",
+    "EMAIL_ALREADY_REGISTERED": "An account with this email address already exists. Please sign in, or reset your password if you have forgotten it.",
     "IDEMPOTENCY_KEY_REUSED": "This request was already sent with different details. Please start the booking again.",
     "OUTSIDE_BOOKING_WINDOW": "That time is outside the booking window.",
     "INVALID_STATUS_TRANSITION": "That is not possible in the current status.",

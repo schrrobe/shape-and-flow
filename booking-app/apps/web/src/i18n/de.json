@@ -145,6 +145,7 @@
     "CANNOT_MODIFY_SELF": "Das eigene Konto kann hier nicht geändert werden.",
     "PAYMENT_NOT_REFUNDABLE": "Diese Zahlung kann nicht erstattet werden.",
     "NO_EMPLOYEE_AVAILABLE": "Zu dieser Zeit ist niemand verfügbar.",
+    "EMAIL_ALREADY_REGISTERED": "Für diese E-Mail-Adresse besteht bereits ein Konto. Bitte melden Sie sich an, oder setzen Sie Ihr Passwort zurück, falls Sie es vergessen haben.",
     "IDEMPOTENCY_KEY_REUSED": "Diese Anfrage wurde schon mit anderen Daten gesendet. Bitte starten Sie die Buchung neu.",
     "OUTSIDE_BOOKING_WINDOW": "Dieser Termin liegt außerhalb des Buchungszeitraums.",
     "INVALID_STATUS_TRANSITION": "Das ist im aktuellen Status nicht möglich.",

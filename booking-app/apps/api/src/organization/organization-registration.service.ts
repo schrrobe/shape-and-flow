@@ -162,6 +162,19 @@ export class OrganizationRegistrationService {
             cause: error,
           });
         }
+        // The global unique index on office_users.email is what raises this — the same
+        // constraint office-users.service.ts's own create path handles. An existing row
+        // there is ordinary here, not exceptional: an employee of another organizer, an
+        // owner of a second studio, or someone re-submitting this form all land on it. Left
+        // to fall through to the generic branch below, this became ORGANIZATION_CREATE_ERROR
+        // (422) with no way for the caller to tell "retry with different details" apart from
+        // "you already have an account" — the correction that would actually work.
+        if (isUniqueViolation(error, 'email')) {
+          throw new AppError('EMAIL_ALREADY_REGISTERED', {
+            message: 'An account with this email address already exists.',
+            cause: error,
+          });
+        }
         throw new AppError('ORGANIZATION_CREATE_ERROR', {
           message: 'Could not create organization.',
           cause: error,

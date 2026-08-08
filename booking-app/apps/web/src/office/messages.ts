@@ -33,6 +33,7 @@ const MESSAGES: Record<MessageKey, string> = {
   CANNOT_MODIFY_SELF: 'You cannot change your own account here.',
   PAYMENT_NOT_REFUNDABLE: 'This payment cannot be refunded.',
   NO_EMPLOYEE_AVAILABLE: 'Nobody is available at that time.',
+  EMAIL_ALREADY_REGISTERED: 'An account with this email already exists. Sign in, or reset the password instead.',
   IDEMPOTENCY_KEY_REUSED: 'This was already sent with different details. Start again.',
   OUTSIDE_BOOKING_WINDOW: 'That time is outside the booking window.',
   INVALID_STATUS_TRANSITION: 'That is not possible in the current status.',

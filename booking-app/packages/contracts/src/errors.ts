@@ -38,6 +38,7 @@ export const errorCodeSchema = z.enum([
   'CANNOT_MODIFY_SELF',
   'PAYMENT_NOT_REFUNDABLE',
   'NO_EMPLOYEE_AVAILABLE',
+  'EMAIL_ALREADY_REGISTERED',
   // 422
   'IDEMPOTENCY_KEY_REUSED',
   'OUTSIDE_BOOKING_WINDOW',
@@ -86,6 +87,10 @@ export const ERROR_STATUS: Record<ErrorCode, number> = {
   CANNOT_MODIFY_SELF: 409,
   PAYMENT_NOT_REFUNDABLE: 409,
   NO_EMPLOYEE_AVAILABLE: 409,
+  // A second registration with an email that already has an office_users row. 409, not
+  // 422: the request is well-formed and nothing about it can be corrected by resubmitting
+  // — the right next step is signing in or resetting the existing account's password.
+  EMAIL_ALREADY_REGISTERED: 409,
 
   IDEMPOTENCY_KEY_REUSED: 422,
   OUTSIDE_BOOKING_WINDOW: 422,

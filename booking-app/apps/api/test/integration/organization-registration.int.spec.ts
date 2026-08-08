@@ -259,6 +259,51 @@ describe('POST /api/public/organizations', () => {
     expect(registered(res).slug).toMatch(/^acme-studio-/);
   });
 
+  it('rejects a second registration with an already-registered email as 409 EMAIL_ALREADY_REGISTERED', async () => {
+    const first = await request(server())
+      .post('/api/public/organizations')
+      .set('X-Requested-With', 'XMLHttpRequest')
+      .send({
+        entityType: 'INDIVIDUAL',
+        displayName: 'Acme Studio',
+        email: 'owner@example.com',
+        password: 'Correct-Horse-Battery-9',
+        firstName: 'Jane',
+        lastName: 'Doe',
+        contactPhone: '+49 30 1234567',
+        addressLine1: 'Musterstraße 1',
+        postalCode: '10115',
+        city: 'Berlin',
+        country: 'DE',
+      });
+    expect(first.status).toBe(201);
+
+    // A different studio, a different slug, but the same email -- the global unique
+    // index on office_users.email is what this is proving against, not a slug collision.
+    const res = await request(server())
+      .post('/api/public/organizations')
+      .set('X-Requested-With', 'XMLHttpRequest')
+      .send({
+        entityType: 'INDIVIDUAL',
+        displayName: 'Different Studio',
+        email: 'owner@example.com',
+        password: 'Another-Correct-1',
+        firstName: 'John',
+        lastName: 'Smith',
+        contactPhone: '+49 30 7654321',
+        addressLine1: 'Beispielweg 5',
+        postalCode: '10117',
+        city: 'Berlin',
+        country: 'DE',
+      });
+
+    expect(res.status).toBe(409);
+    expect((res.body as { code: string }).code).toBe('EMAIL_ALREADY_REGISTERED');
+
+    // Rejected, not merely errored: no second organization was created for the attempt.
+    expect(await prisma.organization.count({ where: { slug: 'different-studio' } })).toBe(0);
+  });
+
   it('resolves the public catalog to the newly registered organization via ?organizer=<slug>', async () => {
     const created = await request(server())
       .post('/api/public/organizations')
