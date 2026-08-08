@@ -28,7 +28,7 @@ interface FakeOrgRow {
 
 interface WhereClause {
   stripeAccountId: string;
-  OR?: Array<{ stripeAccountUpdatedAt: null | { lte: Date } }>;
+  OR?: { stripeAccountUpdatedAt: null | { lte: Date } }[];
 }
 
 /**
@@ -41,18 +41,18 @@ interface WhereClause {
 function buildFakeOrganizationTable(row: FakeOrgRow) {
   let state = row;
 
-  const findUnique = vi.fn(async ({ where }: { where: { stripeAccountId: string } }) =>
+  const findUnique = vi.fn(({ where }: { where: { stripeAccountId: string } }) =>
     state.stripeAccountId === where.stripeAccountId ? { id: state.id } : null,
   );
 
   const updateMany = vi.fn(
-    async ({
+    ({
       where,
       data,
     }: {
       where: WhereClause;
       data: Partial<FakeOrgRow>;
-    }): Promise<{ count: number }> => {
+    }): { count: number } => {
       if (state.stripeAccountId !== where.stripeAccountId) return { count: 0 };
 
       if (where.OR !== undefined) {
