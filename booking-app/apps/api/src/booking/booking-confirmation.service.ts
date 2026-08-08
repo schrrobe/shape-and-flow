@@ -23,6 +23,14 @@ interface ConfirmationCause {
 export interface ConfirmPaidInput {
   bookingId: string;
   sessionId: string;
+  /**
+   * The Stripe account the session lives on, or undefined for the platform account.
+   *
+   * Only used when this confirmation has to create the payment row from scratch —
+   * the checkout path normally created it already, and that row's account is the
+   * one that was actually used. See `upsertPayment`.
+   */
+  stripeAccountId?: string | undefined;
   paymentIntentId?: string | undefined;
   chargeId?: string | undefined;
   amountTotalCents: number;
@@ -228,6 +236,10 @@ export class BookingConfirmationService {
         organizationId: booking.organizationId,
         bookingId: booking.id,
         stripeCheckoutSessionId: input.sessionId,
+        // Only on create. An existing row was written when the session was opened and
+        // already names the account it was opened on; overwriting that from an event
+        // would reintroduce exactly the drift the column exists to prevent.
+        stripeAccountId: input.stripeAccountId ?? null,
         currency: booking.currency,
         ...paid,
       },

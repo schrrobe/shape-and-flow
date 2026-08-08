@@ -2,7 +2,7 @@ import { hash } from '@node-rs/argon2';
 import { cuidSchema } from '@shape-and-flow/booking-contracts';
 
 import { ARGON2_OPTIONS } from '../auth/password.options.js';
-import { Locale, OfficeUserRole, Weekday } from '../prisma/client.js';
+import { Locale, OfficeUserRole, PaymentsMode, Weekday } from '../prisma/client.js';
 
 import type { PrismaClient } from '../prisma/client.js';
 
@@ -91,6 +91,10 @@ export async function seedDemoOrganization(
       timezone: 'Europe/Berlin',
       currency: 'EUR',
       defaultLocale: Locale.de,
+      // The demo tenant is not a Connect organizer and has no Express account to
+      // onboard, so its checkout runs on the platform account. Left at the CONNECT
+      // default it could never take a booking.
+      paymentsMode: PaymentsMode.PLATFORM,
     },
   });
   const organizationId = organization.id;

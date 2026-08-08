@@ -11,7 +11,7 @@ import { JOB } from '../messaging/queues/job-contracts.js';
 import { OrganizationContextService } from '../organization/organization-context.service.js';
 import { PaymentStatus, Prisma, RefundStatus } from '../prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
-import { connectAccountId, PAYMENT_PROVIDER } from '../providers/payment/payment-provider.js';
+import { accountOfRecordedPayment, PAYMENT_PROVIDER } from '../providers/payment/payment-provider.js';
 import { isRetryableStripeError } from '../providers/payment/stripe.errors.js';
 
 import { BookingFinancialsService } from './booking-financials.service.js';
@@ -281,7 +281,7 @@ export class RefundService {
         currency: true,
         idempotencyKey: true,
         stripeRefundId: true,
-        payment: { select: { stripeChargeId: true } },
+        payment: { select: { stripeChargeId: true, stripeAccountId: true } },
       },
     });
 
@@ -316,7 +316,13 @@ export class RefundService {
 
     try {
       const result = await this.payments.createRefund(
-        { organizationId: organization.id, stripeAccountId: connectAccountId(organization) },
+        {
+          organizationId: organization.id,
+          // The account the charge is on, taken from the payment row. The organization
+          // may have completed Connect onboarding since it was paid, and refunding a
+          // platform charge against the connected account refunds nothing.
+          stripeAccountId: accountOfRecordedPayment(refund.payment),
+        },
         {
           chargeId,
           amount: Money.fromCents(refund.amountCents, refund.currency),

@@ -33,6 +33,13 @@ const HANDLED = {
 interface StripeEventShape {
   /** Unix seconds. When Stripe generated the event, which is close to when money moved. */
   created?: unknown;
+  /**
+   * The connected account this event was forwarded from, absent on a platform event.
+   *
+   * Read from the stored payload rather than threaded down from the HTTP layer, because
+   * a job re-enqueued by the inbox reconciler has only the row to go on.
+   */
+  account?: unknown;
   data?: {
     object?: {
       id?: unknown;
@@ -132,14 +139,21 @@ export class StripeEventProcessor {
     // Same split as refunds: Connect account verification is a concern of the organization,
     // not the booking, so it is handed off rather than grown into this switch.
     if (this.organizations.handles(type)) {
-      await this.organizations.handle(type, object);
+      // The event time goes with it: `account.updated` snapshots are not delivered in
+      // order, and the handler needs it to tell an older snapshot from a newer one.
+      await this.organizations.handle(type, object, eventTime(event.created));
       return;
     }
 
     switch (type) {
       case HANDLED.COMPLETED:
       case HANDLED.ASYNC_SUCCEEDED:
-        await this.confirmIfPaid(object, eventId, eventTime(event.created));
+        await this.confirmIfPaid(
+          object,
+          eventId,
+          eventTime(event.created),
+          readString(event.account),
+        );
         return;
 
       case HANDLED.EXPIRED:
@@ -170,6 +184,7 @@ export class StripeEventProcessor {
     object: NonNullable<NonNullable<StripeEventShape['data']>['object']>,
     eventId: string,
     eventCreatedAt: Date | undefined,
+    stripeAccountId: string | undefined,
   ): Promise<void> {
     const sessionId = readString(object.id);
     if (sessionId === undefined) {
@@ -199,6 +214,9 @@ export class StripeEventProcessor {
     const outcome = await this.confirmations.confirmPaid({
       bookingId: booking.id,
       sessionId,
+      // Only consulted if the payment row still has to be created — the checkout path
+      // normally wrote it, account and all, when it opened the session.
+      ...(stripeAccountId === undefined ? {} : { stripeAccountId }),
       ...(readString(object.payment_intent) === undefined
         ? {}
         : { paymentIntentId: readString(object.payment_intent) }),

@@ -22,6 +22,7 @@ import type {
   ProviderEvent,
   RefundResult,
   RetrievedSession,
+  WebhookDestination,
 } from './payment-provider.js';
 
 /**
@@ -43,8 +44,31 @@ import type {
  * genuinely local: the one-shot failure a test arms, and the call log it reads back.
  */
 
-/** Fixed secret: the point is a realistic shape, not secrecy. */
-const FAKE_WEBHOOK_SECRET = 'whsec_fake_test_secret';
+/**
+ * Fixed secrets: the point is a realistic shape, not secrecy.
+ *
+ * Two of them, because Stripe has two destinations and gives each its own signing key.
+ * A single shared secret here would make the two routes indistinguishable in tests and
+ * hide the failure the split exists to prevent.
+ */
+const FAKE_WEBHOOK_SECRETS: Record<WebhookDestination, string> = {
+  platform: 'whsec_fake_test_secret',
+  connect: 'whsec_fake_connect_test_secret',
+};
+
+function secretFor(destination: WebhookDestination): string {
+  return FAKE_WEBHOOK_SECRETS[destination];
+}
+
+/** One provider call and the Stripe account it addressed. `undefined` is the platform. */
+export interface AccountCall {
+  method:
+    | 'createCheckoutSession'
+    | 'expireCheckoutSession'
+    | 'retrieveCheckoutSession'
+    | 'createRefund';
+  stripeAccountId: string | undefined;
+}
 
 /** Binds the shared store. Absent in the test harnesses, which want one process. */
 export const FAKE_PAYMENT_STORE = 'FAKE_PAYMENT_STORE';
@@ -53,6 +77,13 @@ export const FAKE_PAYMENT_STORE = 'FAKE_PAYMENT_STORE';
 export class FakePaymentProvider implements PaymentProvider {
   private readonly store: FakePaymentStore;
   private readonly calls: string[] = [];
+  /**
+   * Which account each call addressed, in call order.
+   *
+   * Kept because it is the one thing about a Stripe call that cannot be checked from its
+   * result: a refund aimed at the wrong connected account fails at Stripe, not here.
+   */
+  private readonly accountCalls: AccountCall[] = [];
   private nextFailure: Error | null = null;
   private nextCheckoutFailureAfterCreate: Error | null = null;
   private counter = 0;
@@ -137,14 +168,31 @@ export class FakePaymentProvider implements PaymentProvider {
     return [...this.calls];
   }
 
-  /** A valid signature for a raw body, so a webhook test can be signed. */
-  signatureFor(rawBody: Buffer): string {
-    return createHmac('sha256', FAKE_WEBHOOK_SECRET).update(rawBody).digest('hex');
+  /** Which Stripe account each call was routed to, in call order. */
+  accountCallOrder(): AccountCall[] {
+    return [...this.accountCalls];
+  }
+
+  /** The account the last call of this kind addressed, or undefined for the platform. */
+  lastAccountFor(method: AccountCall['method']): string | undefined {
+    return this.accountCalls.findLast((call) => call.method === method)?.stripeAccountId;
+  }
+
+  /**
+   * A valid signature for a raw body, so a webhook test can be signed.
+   *
+   * Per destination, like Stripe: the platform endpoint and the Connect endpoint have
+   * separate secrets, and a body signed for one does not verify on the other. Modelled
+   * here rather than shared, so a test can prove the routes are actually separate.
+   */
+  signatureFor(rawBody: Buffer, destination: WebhookDestination = 'platform'): string {
+    return createHmac('sha256', secretFor(destination)).update(rawBody).digest('hex');
   }
 
   async reset(): Promise<void> {
     await this.store.clear();
     this.calls.length = 0;
+    this.accountCalls.length = 0;
     this.nextFailure = null;
     this.nextCheckoutFailureAfterCreate = null;
     this.counter = 0;
@@ -153,10 +201,10 @@ export class FakePaymentProvider implements PaymentProvider {
   // ── PaymentProvider ───────────────────────────────────────────────────────
 
   async createCheckoutSession(
-    _context: PaymentAccountContext,
+    context: PaymentAccountContext,
     input: CreateCheckoutSessionInput,
   ): Promise<CheckoutSessionResult> {
-    this.record('createCheckoutSession');
+    this.record('createCheckoutSession', context);
 
     // Replay a session for a repeated idempotency key, as Stripe does.
     if (input.idempotencyKey !== undefined) {
@@ -208,10 +256,10 @@ export class FakePaymentProvider implements PaymentProvider {
   }
 
   async expireCheckoutSession(
-    _context: PaymentAccountContext,
+    context: PaymentAccountContext,
     sessionId: string,
   ): Promise<ExpireResult> {
-    this.record('expireCheckoutSession');
+    this.record('expireCheckoutSession', context);
 
     const session = await this.requireSession(sessionId);
 
@@ -227,10 +275,10 @@ export class FakePaymentProvider implements PaymentProvider {
   }
 
   async retrieveCheckoutSession(
-    _context: PaymentAccountContext,
+    context: PaymentAccountContext,
     sessionId: string,
   ): Promise<RetrievedSession> {
-    this.record('retrieveCheckoutSession');
+    this.record('retrieveCheckoutSession', context);
 
     const session = await this.requireSession(sessionId);
 
@@ -248,10 +296,10 @@ export class FakePaymentProvider implements PaymentProvider {
   }
 
   async createRefund(
-    _context: PaymentAccountContext,
+    context: PaymentAccountContext,
     input: CreateRefundInput,
   ): Promise<RefundResult> {
-    this.record('createRefund');
+    this.record('createRefund', context);
 
     const refunds = await this.store.allRefunds();
 
@@ -328,8 +376,12 @@ export class FakePaymentProvider implements PaymentProvider {
     return { refundId: refund.refundId, status: 'succeeded', amountCents: refund.amountCents };
   }
 
-  verifyWebhook(rawBody: Buffer, signature: string): ProviderEvent {
-    const expected = Buffer.from(this.signatureFor(rawBody), 'utf8');
+  verifyWebhook(
+    rawBody: Buffer,
+    signature: string,
+    destination: WebhookDestination = 'platform',
+  ): ProviderEvent {
+    const expected = Buffer.from(this.signatureFor(rawBody, destination), 'utf8');
     const provided = Buffer.from(signature, 'utf8');
 
     // Length must match before timingSafeEqual, which throws on a mismatch.
@@ -344,6 +396,7 @@ export class FakePaymentProvider implements PaymentProvider {
       id?: unknown;
       type?: unknown;
       api_version?: unknown;
+      account?: unknown;
     };
 
     if (typeof parsed.id !== 'string' || typeof parsed.type !== 'string') {
@@ -357,14 +410,17 @@ export class FakePaymentProvider implements PaymentProvider {
       id: parsed.id,
       type: parsed.type,
       apiVersion: typeof parsed.api_version === 'string' ? parsed.api_version : undefined,
+      // Stripe sets this on everything forwarded from a connected account.
+      account: typeof parsed.account === 'string' ? parsed.account : undefined,
       payload: parsed,
     };
   }
 
   // ── internals ─────────────────────────────────────────────────────────────
 
-  private record(method: string): void {
+  private record(method: AccountCall['method'], context: PaymentAccountContext): void {
     this.calls.push(method);
+    this.accountCalls.push({ method, stripeAccountId: context.stripeAccountId });
 
     if (this.nextFailure) {
       const failure = this.nextFailure;

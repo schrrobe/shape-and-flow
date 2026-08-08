@@ -6,7 +6,7 @@ import { Money } from '../domain/money/money.js';
 import { OrganizationContextService } from '../organization/organization-context.service.js';
 import { PaymentStatus } from '../prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
-import { connectAccountId, PAYMENT_PROVIDER } from '../providers/payment/payment-provider.js';
+import { accountForNewCharge, PAYMENT_PROVIDER } from '../providers/payment/payment-provider.js';
 
 import type { Booking } from '../prisma/client.js';
 import type { PaymentProvider } from '../providers/payment/payment-provider.js';
@@ -68,10 +68,15 @@ export class BookingCheckoutService {
       });
     }
 
+    // Resolved once, here, and then carried to the payment row rather than derived
+    // again later: whichever account this session is opened on owns it for the rest of
+    // its life, including its expiry and any refund against it.
+    const stripeAccountId = accountForNewCharge(organization);
+
     const session = await this.payments.createCheckoutSession(
       {
         organizationId: organization.id,
-        stripeAccountId: connectAccountId(organization),
+        stripeAccountId,
       },
       {
         bookingId: booking.id,
@@ -89,7 +94,7 @@ export class BookingCheckoutService {
       },
     );
 
-    await this.attach(booking, session.sessionId);
+    await this.attach(booking, session.sessionId, stripeAccountId);
 
     return { checkoutUrl: session.url, sessionId: session.sessionId };
   }
@@ -112,7 +117,11 @@ export class BookingCheckoutService {
    * Arming the expiry is no longer part of this. It commits with the reservation,
    * where it belongs: the hold exists from that moment, so its release has to as well.
    */
-  private async attach(booking: Booking, sessionId: string): Promise<void> {
+  private async attach(
+    booking: Booking,
+    sessionId: string,
+    stripeAccountId: string | undefined,
+  ): Promise<void> {
     // From the booking, not from the request context. The two must agree, and nothing here
     // checks that they do — so if the ambient context ever resolved a different
     // organization, the payment and outbox rows would land under the wrong tenant while
@@ -156,6 +165,10 @@ export class BookingCheckoutService {
                 organizationId,
                 bookingId: booking.id,
                 stripeCheckoutSessionId: sessionId,
+                // Null for the platform account. Recorded here because this is the
+                // only moment the answer is knowable from the organization; every
+                // later call against this session reads it back from this row.
+                stripeAccountId: stripeAccountId ?? null,
                 amountCents: booking.priceCentsSnapshot,
                 currency: booking.currency,
                 status: PaymentStatus.PENDING,
