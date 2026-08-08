@@ -78,8 +78,20 @@ export class OrganizationWebhookHandler {
     // worse — one that Stripe has just disabled is switched back on and takes money onto
     // an account that cannot settle it.
     //
-    // `lt` rather than `lte`, so two events sharing a second (Stripe's `created` has
-    // one-second resolution) settle on the one that arrives first instead of flapping.
+    // `lte` rather than `lt`. Stripe's `created` has one-second resolution, and two
+    // `account.updated` events for the same account in the same second are routine — for
+    // example `card_payments` and `transfers` activating together at the end of Express
+    // onboarding. With `lt`, the second event of such a pair matches neither branch of the
+    // OR (its `created` equals, not exceeds, the row's `stripeAccountUpdatedAt`), so the
+    // write is skipped, the organization is stuck wherever the first event left it, and a
+    // dashboard resend of the same event replays the same `created` and is dropped again —
+    // there is no recovery short of a manual UPDATE. `lte` accepts same-second events in
+    // delivery order, which reintroduces the flapping the old comment was guarding against
+    // when two same-second events genuinely disagree and arrive out of order — but that
+    // flap self-heals the moment either event is redelivered, where the `lt` failure mode
+    // does not heal at all. Ordering on (created, event id) would remove the flap too, but
+    // needs the event id threaded through this call; not done here since `lte` alone fixes
+    // the failure this guard exists to prevent.
     const { count } = await this.prisma.organization.updateMany({
       where: {
         stripeAccountId,
@@ -88,7 +100,7 @@ export class OrganizationWebhookHandler {
           : {
               OR: [
                 { stripeAccountUpdatedAt: null },
-                { stripeAccountUpdatedAt: { lt: eventCreatedAt } },
+                { stripeAccountUpdatedAt: { lte: eventCreatedAt } },
               ],
             }),
       },
@@ -102,8 +114,11 @@ export class OrganizationWebhookHandler {
     if (count === 0) {
       // Not an error, and deliberately not rethrown: a superseded snapshot is a normal
       // consequence of concurrent delivery, and failing the job would retry it forever
-      // against a row that is already more current than the event.
-      this.logger.debug(
+      // against a row that is already more current than the event. Logged at `warn`, not
+      // `debug`: this is a payment-capability event (stripeChargesEnabled, potentially) that
+      // was discarded rather than applied, and that is worth seeing in production logs by
+      // default rather than only when someone happens to be looking with debug on.
+      this.logger.warn(
         `${type} for ${stripeAccountId} is older than the stored state; ignoring`,
       );
     }

@@ -92,13 +92,29 @@ const postConnectWebhook = (raw: Buffer, signature?: string) => {
   );
 };
 
-/** Store an event directly, for tests that drive the processor rather than the route. */
-async function seedEvent(type: string, object: Record<string, unknown>, id: string): Promise<void> {
+/**
+ * Store an event directly, for tests that drive the processor rather than the route.
+ *
+ * `createdAt`, when given, becomes the event's `created` (Stripe's own unix-seconds
+ * timestamp) — the field `OrganizationWebhookHandler`'s staleness guard orders on. Omitted
+ * by default because most events seeded this way don't care about ordering.
+ */
+async function seedEvent(
+  type: string,
+  object: Record<string, unknown>,
+  id: string,
+  createdAt?: Date,
+): Promise<void> {
   await prisma.stripeWebhookEvent.create({
     data: {
       stripeEventId: id,
       type,
-      payload: { id, type, data: { object } } as Prisma.InputJsonValue,
+      payload: {
+        id,
+        type,
+        ...(createdAt === undefined ? {} : { created: Math.floor(createdAt.getTime() / 1000) }),
+        data: { object },
+      } as Prisma.InputJsonValue,
     },
   });
 }
@@ -232,6 +248,81 @@ describe('POST /webhooks/stripe/connect', () => {
     const { raw } = connectEvent();
 
     await postConnectWebhook(raw).expect(400);
+  });
+});
+
+/**
+ * The Connect route above only proves the event is verified and stored — nothing exercised
+ * the path from there to `OrganizationWebhookHandler` actually updating the organization row.
+ * These drive that path for real: a signed HTTP delivery through to `processor.handle`
+ * through to the database, and the same-second staleness case that used to drop a
+ * legitimate event permanently (see `OrganizationWebhookHandler`'s `lte` comment).
+ */
+describe('account.updated reaching OrganizationWebhookHandler', () => {
+  beforeEach(async () => {
+    // A known starting state, independent of seedOrganization's own defaults: no Stripe
+    // account linked yet, onboarding not yet reported.
+    await prisma.organization.update({
+      where: { id: ctx.organization.id },
+      data: {
+        stripeAccountId: 'acct_123',
+        stripeChargesEnabled: false,
+        stripeDetailsSubmitted: false,
+        stripeAccountUpdatedAt: null,
+      },
+    });
+  });
+
+  it('updates the organization row from a real signed delivery, end to end', async () => {
+    const { raw, id } = rawEvent(
+      'account.updated',
+      { id: 'acct_123', details_submitted: true, charges_enabled: true },
+      'evt_connect_e2e',
+    );
+
+    await postConnectWebhook(raw, payments.signatureFor(raw, 'connect')).expect(200);
+    await processor.handle({ stripeEventId: id });
+
+    const organization = await prisma.organization.findUniqueOrThrow({
+      where: { id: ctx.organization.id },
+    });
+    expect(organization.stripeChargesEnabled).toBe(true);
+    expect(organization.stripeDetailsSubmitted).toBe(true);
+  });
+
+  it('applies a second account.updated sharing the same created second, rather than dropping it', async () => {
+    const sameSecond = new Date('2026-08-10T06:00:00.000Z');
+
+    // Event A: details submitted, capabilities not all active yet.
+    await seedEvent(
+      'account.updated',
+      { id: 'acct_123', details_submitted: true, charges_enabled: false },
+      'evt_connect_a',
+      sameSecond,
+    );
+    await processor.handle({ stripeEventId: 'evt_connect_a' });
+
+    let organization = await prisma.organization.findUniqueOrThrow({
+      where: { id: ctx.organization.id },
+    });
+    expect(organization.stripeChargesEnabled).toBe(false);
+
+    // Event B: same `created` second (Stripe's created has one-second resolution — this is
+    // what card_payments and transfers activating together at the end of Express onboarding
+    // looks like). Must be applied, not dropped as "not newer".
+    await seedEvent(
+      'account.updated',
+      { id: 'acct_123', details_submitted: true, charges_enabled: true },
+      'evt_connect_b',
+      sameSecond,
+    );
+    await processor.handle({ stripeEventId: 'evt_connect_b' });
+
+    organization = await prisma.organization.findUniqueOrThrow({
+      where: { id: ctx.organization.id },
+    });
+    expect(organization.stripeChargesEnabled).toBe(true);
+    expect(organization.stripeAccountUpdatedAt).toEqual(sameSecond);
   });
 });
 
