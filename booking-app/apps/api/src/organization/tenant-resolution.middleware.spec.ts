@@ -47,4 +47,23 @@ describe('TenantResolutionMiddleware', () => {
 
     expect(next).not.toHaveBeenCalled();
   });
+
+  // A present-but-malformed parameter is an explicit identity that cannot be resolved,
+  // not an absent one. Reading it as absent is what lets a tampered link operate on the
+  // bootstrap tenant's data.
+  it.each([
+    ['an empty value', { organizer: '' }],
+    ['repeated values', { organizer: ['a', 'b'] }],
+  ])('rejects %s rather than serving the default organization', async (_label, query) => {
+    const findUnique = vi.fn();
+    const middleware = new TenantResolutionMiddleware({ organization: { findUnique } } as unknown as PrismaService);
+    const next = vi.fn();
+
+    await expect(
+      middleware.middleware(fakeRequest(query), {} as Response, next as NextFunction),
+    ).rejects.toThrow(expect.objectContaining({ code: 'VALIDATION_FAILED' }));
+
+    expect(findUnique).not.toHaveBeenCalled();
+    expect(next).not.toHaveBeenCalled();
+  });
 });
