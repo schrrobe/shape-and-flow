@@ -232,10 +232,13 @@ its connected accounts' events as separate destinations with separate signing se
 | Connect            | `https://<hostname>/api/webhooks/stripe/connect` | `account.updated`, connected-account charges | `STRIPE_CONNECT_WEBHOOK_SECRET` |
 
 A secret is per endpoint, not per account, and one cannot verify the other's deliveries — that
-is why there are two URLs rather than one endpoint with two secrets. The Connect endpoint is
-only needed once organizers are onboarded through Stripe Connect; without it, leave
-`STRIPE_CONNECT_WEBHOOK_SECRET` unset and the route refuses deliveries rather than mis-verifying
-them.
+is why there are two URLs rather than one endpoint with two secrets. Both must be configured
+before this goes live: self-service organizer registration onboards every new organizer through
+Stripe Connect, so `account.updated` for a connected account arrives from the first registration
+onward, not once some later milestone is reached. `apps/api/src/config/env.schema.ts` refuses to
+start with `PAYMENT_PROVIDER=stripe` and either secret unset, so a deployment missing the
+Connect one fails at boot rather than silently 422ing every booking for the first organizer who
+finishes onboarding.
 
 **9. Take a backup before anyone uses it**, so the restore path has been walked once while
 nothing is at stake:

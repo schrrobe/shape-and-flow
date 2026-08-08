@@ -112,10 +112,13 @@ function buildStripeProvider(config: AppConfig, clock: Clock): StripePaymentProv
   // failure rather than a confusing Stripe authentication error later.
   const secretKey = required(config.STRIPE_SECRET_KEY, 'STRIPE_SECRET_KEY');
   const platformWebhookSecret = required(config.STRIPE_WEBHOOK_SECRET, 'STRIPE_WEBHOOK_SECRET');
-  // Not `required`: a platform-only deployment has no Connect destination to sign for.
-  // Its absence is enforced where it matters — a delivery on the Connect route is
-  // refused rather than checked against the platform secret.
-  const connectWebhookSecret = config.STRIPE_CONNECT_WEBHOOK_SECRET?.trim();
+  // `required`, same as the two above: self-service organizer registration always routes
+  // a new organizer through Stripe Connect, so there is no longer a "platform-only"
+  // deployment shape for which this destination can be left unconfigured.
+  const connectWebhookSecret = required(
+    config.STRIPE_CONNECT_WEBHOOK_SECRET,
+    'STRIPE_CONNECT_WEBHOOK_SECRET',
+  );
 
   const stripe = new Stripe(secretKey, {
     // Only the SDK's own pinned version typechecks, so this cannot drift by
@@ -130,9 +133,7 @@ function buildStripeProvider(config: AppConfig, clock: Clock): StripePaymentProv
   return new StripePaymentProvider(stripe, clock, {
     webhookSecrets: {
       platform: platformWebhookSecret,
-      ...(connectWebhookSecret === undefined || connectWebhookSecret === ''
-        ? {}
-        : { connect: connectWebhookSecret }),
+      connect: connectWebhookSecret,
     },
   });
 }

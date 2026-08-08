@@ -25,6 +25,7 @@ const baseEnv = {
   PAYMENT_PROVIDER: 'stripe',
   STRIPE_SECRET_KEY: 'sk_live_x',
   STRIPE_WEBHOOK_SECRET: 'whsec_x',
+  STRIPE_CONNECT_WEBHOOK_SECRET: 'whsec_connect_x',
   EMAIL_PROVIDER: 'resend',
   EMAIL_FROM_ADDRESS: 'hallo@shape-and-flow.example',
   EMAIL_FROM_NAME: 'Shape and Flow',
