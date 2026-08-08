@@ -6,10 +6,10 @@ import { AuthModule } from '../../src/auth/auth.module.js';
 import { PasswordService } from '../../src/auth/password.service.js';
 import { AuditModule } from '../../src/common/audit/audit.module.js';
 import { FixedClock } from '../../src/domain/time/clock.js';
-import { OfficeUserRole } from '../../src/prisma/client.js';
 import { OrganizationContextService } from '../../src/organization/organization-context.service.js';
 import { OrganizationOnboardingController } from '../../src/organization/organization-onboarding.controller.js';
 import { StripeConnectService } from '../../src/organization/stripe-connect.service.js';
+import { OfficeUserRole } from '../../src/prisma/client.js';
 import { STRIPE_CLIENT } from '../../src/providers/providers.module.js';
 import { createBookingTestApp } from '../booking-app.harness.js';
 import { prisma, resetDatabase } from '../database.harness.js';
@@ -62,6 +62,8 @@ const fakeStripe = {
   controllers: [OrganizationOnboardingController],
   providers: [StripeConnectService, { provide: STRIPE_CLIENT, useValue: fakeStripe }],
 })
+// Nest module declaration: an empty body by design.
+// eslint-disable-next-line @typescript-eslint/no-extraneous-class
 class OnboardingProbeModule {}
 
 let ctx: SeedContext;
