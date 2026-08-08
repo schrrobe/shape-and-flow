@@ -6,7 +6,9 @@ import { cuidSchema } from '../primitives.js';
 const baseFields = {
   email: z.email().max(320),
   password: newPasswordSchema,
-  displayName: z.string().min(1).max(70),
+  // Trimmed before the length check, so `"   "` is the empty name it actually is
+  // rather than a three-character one. It is also what the public slug is derived from.
+  displayName: z.string().trim().min(1).max(70),
   contactPhone: z.string().min(1),
   whatsappNumber: z.string().min(1).optional(),
   addressLine1: z.string().min(1),

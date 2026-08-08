@@ -9,6 +9,15 @@ export interface ExpressAccountInput {
   email: string;
   country: string;
   businessType: 'individual' | 'company';
+  /**
+   * Derived from the organization, not generated per call.
+   *
+   * Creating an account is not naturally idempotent — two requests make two accounts,
+   * and the one nobody finishes onboarding is an orphan whose completion events are
+   * ignored forever. A key tied to the organization makes Stripe answer both requests
+   * with the same account.
+   */
+  idempotencyKey?: string | undefined;
 }
 
 /**
@@ -25,13 +34,16 @@ export class StripeConnectService {
 
   async createExpressAccount(input: ExpressAccountInput): Promise<{ stripeAccountId: string }> {
     const stripe = this.require();
-    const account = await stripe.accounts.create({
-      type: 'express',
-      country: input.country,
-      email: input.email,
-      business_type: input.businessType,
-      capabilities: { card_payments: { requested: true }, transfers: { requested: true } },
-    });
+    const account = await stripe.accounts.create(
+      {
+        type: 'express',
+        country: input.country,
+        email: input.email,
+        business_type: input.businessType,
+        capabilities: { card_payments: { requested: true }, transfers: { requested: true } },
+      },
+      input.idempotencyKey === undefined ? undefined : { idempotencyKey: input.idempotencyKey },
+    );
 
     return { stripeAccountId: account.id };
   }

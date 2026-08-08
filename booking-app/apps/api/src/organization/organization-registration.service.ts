@@ -5,9 +5,10 @@ import { SessionStore } from '../auth/session.store.js';
 import { AppError } from '../common/errors/app-error.js';
 import { isUniqueViolation } from '../common/prisma-errors/prisma-errors.js';
 import { ENV } from '../config/env.schema.js';
+import { PaymentsMode } from '../prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
-import { slugify, slugSuffix } from './slug.js';
+import { slugifyOrFallback, slugSuffix } from './slug.js';
 import { StripeConnectService } from './stripe-connect.service.js';
 
 import type { AppConfig } from '../config/env.schema.js';
@@ -83,7 +84,7 @@ export class OrganizationRegistrationService {
       employeeId: string | null;
     };
   }> {
-    const base = slugify(request.displayName);
+    const base = slugifyOrFallback(request.displayName);
     const legalName = legalNameFor(request);
 
     for (let attempt = 0; attempt < MAX_SLUG_ATTEMPTS; attempt += 1) {
@@ -106,6 +107,15 @@ export class OrganizationRegistrationService {
               country: request.country,
               entityType: request.entityType,
               isSmallBusiness: request.isSmallBusiness,
+              // A self-registered organizer is paid on its own Connect account and may
+              // not take money until Stripe says the account can. Only a deployment
+              // without Stripe registers PLATFORM organizations, because there is no
+              // account to connect and no onboarding for the owner to complete —
+              // otherwise the first booking would be refused forever.
+              paymentsMode:
+                this.config.PAYMENT_PROVIDER === 'stripe'
+                  ? PaymentsMode.CONNECT
+                  : PaymentsMode.PLATFORM,
               ...(request.entityType === 'INDIVIDUAL' || request.entityType === 'SOLE_PROPRIETORSHIP'
                 ? { ownerFirstName: request.firstName, ownerLastName: request.lastName }
                 : {}),
@@ -222,6 +232,10 @@ export class OrganizationRegistrationService {
         email: request.email,
         country: request.country,
         businessType: businessTypeFor(request.entityType),
+        // The same key the onboarding-link retry uses. A registration that reaches
+        // Stripe and then fails before the id is stored leaves the owner to retry from
+        // the office, and that retry must find this account rather than open a second.
+        idempotencyKey: `org-${organizationId}-express-account`,
       });
 
       await this.prisma.organization.update({

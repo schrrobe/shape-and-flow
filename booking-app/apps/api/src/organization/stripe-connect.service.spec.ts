@@ -35,7 +35,31 @@ describe('StripeConnectService', () => {
     expect(result).toEqual({ stripeAccountId: 'acct_123' });
     expect(create).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'express', country: 'DE', email: 'a@b.com' }),
+      undefined,
     );
+  });
+
+  // Account creation is not naturally idempotent. Without a key, a double-click makes
+  // two Express accounts and the one the row does not name is an orphan whose completion
+  // events are ignored forever.
+  it('passes the idempotency key through to Stripe', async () => {
+    const create = vi.fn().mockResolvedValue({ id: 'acct_123' });
+    const stripe = { accounts: { create } };
+
+    const moduleRef = await Test.createTestingModule({
+      providers: [StripeConnectService, { provide: STRIPE_CLIENT, useValue: stripe }],
+    }).compile();
+
+    await moduleRef.get(StripeConnectService).createExpressAccount({
+      email: 'a@b.com',
+      country: 'DE',
+      businessType: 'individual',
+      idempotencyKey: 'org-org_1-express-account',
+    });
+
+    expect(create).toHaveBeenCalledWith(expect.any(Object), {
+      idempotencyKey: 'org-org_1-express-account',
+    });
   });
 
   it('creates an account link with the given return url', async () => {

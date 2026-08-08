@@ -135,12 +135,85 @@ describe('POST /api/office/organization/onboarding-link', () => {
     expect(fakeStripe.accounts.create).toHaveBeenCalledTimes(1);
     expect(fakeStripe.accounts.create).toHaveBeenCalledWith(
       expect.objectContaining({ email: 'hallo@shape-and-flow.example', country: 'DE' }),
+      // Derived from the organization, so a double-click reaches Stripe twice with the
+      // same key and gets one account back rather than opening a second, orphaned one.
+      { idempotencyKey: `org-${ctx.organization.id}-express-account` },
     );
 
     const updated = await prisma.organization.findUniqueOrThrow({
       where: { id: ctx.organization.id },
     });
     expect(updated.stripeAccountId).toBe('acct_new123');
+  });
+
+  // The default `after` is the response body, and that body is a live Account Link:
+  // anyone who can read the audit table or a backup of it could walk into the organizer's
+  // Stripe onboarding.
+  it('records the request without the onboarding link itself', async () => {
+    fakeStripe.accounts.create.mockResolvedValue({ id: 'acct_audit' });
+    fakeStripe.accountLinks.create.mockResolvedValue({
+      url: 'https://connect.stripe.com/setup/acct_audit',
+    });
+
+    const loginResponse = await login({
+      email: `owner@${ctx.organization.slug}.example`,
+      password: OWNER_PASSWORD,
+    }).expect(200);
+
+    await request(server())
+      .post('/api/office/organization/onboarding-link')
+      .set('Cookie', cookieFrom(loginResponse))
+      .set(...CSRF)
+      .send({})
+      .expect(201);
+
+    const audit = await prisma.auditLog.findFirstOrThrow({
+      where: { action: 'ORGANIZATION_ONBOARDING_LINK_REQUESTED' },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    expect(JSON.stringify(audit.after)).not.toContain('connect.stripe.com');
+    expect(audit.after).toMatchObject({
+      stripeAccountId: 'acct_audit',
+      onboardingLinkIssued: true,
+    });
+  });
+
+  it('creates one Stripe account when two retries race', async () => {
+    fakeStripe.accounts.create.mockResolvedValue({ id: 'acct_race' });
+    fakeStripe.accountLinks.create.mockResolvedValue({
+      url: 'https://connect.stripe.com/setup/acct_race',
+    });
+
+    const loginResponse = await login({
+      email: `owner@${ctx.organization.slug}.example`,
+      password: OWNER_PASSWORD,
+    }).expect(200);
+    const cookie = cookieFrom(loginResponse);
+
+    const attempt = () =>
+      request(server())
+        .post('/api/office/organization/onboarding-link')
+        .set('Cookie', cookie)
+        .set(...CSRF)
+        .send({});
+
+    const [first, second] = await Promise.all([attempt(), attempt()]);
+
+    expect(first.status).toBe(201);
+    expect(second.status).toBe(201);
+
+    // Both may reach Stripe — that is what the idempotency key is for — but only one id
+    // may end up stored, and both links must point at it.
+    const stored = await prisma.organization.findUniqueOrThrow({
+      where: { id: ctx.organization.id },
+      select: { stripeAccountId: true },
+    });
+    expect(stored.stripeAccountId).toBe('acct_race');
+
+    for (const call of fakeStripe.accounts.create.mock.calls) {
+      expect(call[1]).toEqual({ idempotencyKey: `org-${ctx.organization.id}-express-account` });
+    }
   });
 
   it('reuses an existing Stripe account and only creates a new link', async () => {

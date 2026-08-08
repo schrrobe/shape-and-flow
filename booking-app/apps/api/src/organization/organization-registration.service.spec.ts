@@ -127,6 +127,9 @@ describe('OrganizationRegistrationService', () => {
       email: REQUEST.email,
       country: 'DE',
       businessType: 'individual',
+      // Derived from the organization, so the office-side retry endpoint reaches the
+      // same account rather than opening a second one.
+      idempotencyKey: 'org-org_1-express-account',
     });
   });
 
