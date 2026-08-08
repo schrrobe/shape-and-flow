@@ -235,40 +235,72 @@ describe('OrganizationRegistrationService', () => {
     expect(prisma.organization.update).not.toHaveBeenCalled();
   });
 
-  it('rejects a returnUrl that does not match PUBLIC_WEB_ORIGIN', async () => {
-    const prisma = {
-      $transaction: vi.fn((fn: (tx: unknown) => unknown) => fn(transactionTx())),
-      organization: { update: vi.fn().mockResolvedValue({}) },
-    };
+  describe('returnUrl validation', () => {
+    /**
+     * Builds a fresh service instance per case: origin-rejection must be provably
+     * cheap (nothing else gets called), so each fixture is disposable rather than
+     * shared across assertions.
+     */
+    async function buildService(): Promise<{
+      service: OrganizationRegistrationService;
+      stripeConnect: {
+        createExpressAccount: ReturnType<typeof vi.fn>;
+        createAccountLink: ReturnType<typeof vi.fn>;
+      };
+    }> {
+      const prisma = {
+        $transaction: vi.fn((fn: (tx: unknown) => unknown) => fn(transactionTx())),
+        organization: { update: vi.fn().mockResolvedValue({}) },
+      };
 
-    const passwords = { hash: vi.fn().mockResolvedValue('hashed') };
-    const sessions = { create: vi.fn().mockResolvedValue('sid_1') };
-    const stripeConnect = {
-      createExpressAccount: vi.fn().mockResolvedValue({ stripeAccountId: 'acct_1' }),
-      createAccountLink: vi.fn().mockResolvedValue({ url: 'https://connect.stripe.com/x' }),
-    };
+      const passwords = { hash: vi.fn().mockResolvedValue('hashed') };
+      const sessions = { create: vi.fn().mockResolvedValue('sid_1') };
+      const stripeConnect = {
+        createExpressAccount: vi.fn().mockResolvedValue({ stripeAccountId: 'acct_1' }),
+        createAccountLink: vi.fn().mockResolvedValue({ url: 'https://connect.stripe.com/x' }),
+      };
 
-    const moduleRef = await Test.createTestingModule({
-      providers: [
-        OrganizationRegistrationService,
-        { provide: PrismaService, useValue: prisma },
-        { provide: PasswordService, useValue: passwords },
-        { provide: SessionStore, useValue: sessions },
-        { provide: StripeConnectService, useValue: stripeConnect },
-        { provide: ENV, useValue: { PUBLIC_WEB_ORIGIN: 'https://app.example.com' } },
-      ],
-    }).compile();
+      const moduleRef = await Test.createTestingModule({
+        providers: [
+          OrganizationRegistrationService,
+          { provide: PrismaService, useValue: prisma },
+          { provide: PasswordService, useValue: passwords },
+          { provide: SessionStore, useValue: sessions },
+          { provide: StripeConnectService, useValue: stripeConnect },
+          { provide: ENV, useValue: { PUBLIC_WEB_ORIGIN: 'https://app.example.com' } },
+        ],
+      }).compile();
 
-    const service = moduleRef.get(OrganizationRegistrationService);
+      return { service: moduleRef.get(OrganizationRegistrationService), stripeConnect };
+    }
 
-    await expect(
-      service.register({
-        ...REQUEST,
-        returnUrl: 'https://evil.example.com/steal',
-      }),
-    ).rejects.toMatchObject({ code: 'INVALID_RETURN_URL' });
+    it.each([
+      ['a different origin entirely', 'https://evil.example.com/steal'],
+      // A prefix check (`startsWith`) alone would accept both of these: the
+      // configured origin appears as a leading substring, but the real host —
+      // the part a browser actually navigates to — is evil.com in each case.
+      ['a subdomain-suffix bypass of a naive prefix check', 'https://app.example.com.evil.com/steal'],
+      ['a userinfo (@) bypass of a naive prefix check', 'https://app.example.com@evil.com/'],
+      ['a non-URL string', 'not-a-url'],
+    ])('rejects %s', async (_label, returnUrl) => {
+      const { service, stripeConnect } = await buildService();
 
-    expect(stripeConnect.createExpressAccount).not.toHaveBeenCalled();
-    expect(stripeConnect.createAccountLink).not.toHaveBeenCalled();
+      await expect(service.register({ ...REQUEST, returnUrl })).rejects.toMatchObject({
+        code: 'INVALID_RETURN_URL',
+      });
+
+      expect(stripeConnect.createExpressAccount).not.toHaveBeenCalled();
+      expect(stripeConnect.createAccountLink).not.toHaveBeenCalled();
+    });
+
+    it('accepts a returnUrl whose origin exactly matches PUBLIC_WEB_ORIGIN', async () => {
+      const { service, stripeConnect } = await buildService();
+      const returnUrl = 'https://app.example.com/onboarding/return';
+
+      const result = await service.register({ ...REQUEST, returnUrl });
+
+      expect(result.response.onboardingLink).toBe('https://connect.stripe.com/x');
+      expect(stripeConnect.createAccountLink).toHaveBeenCalledWith('acct_1', returnUrl);
+    });
   });
 });

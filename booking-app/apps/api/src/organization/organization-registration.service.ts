@@ -44,6 +44,13 @@ export class OrganizationRegistrationService {
   async register(
     request: RegisterOrganizationRequest,
   ): Promise<{ response: RegisterOrganizationResponse; sid: string }> {
+    // Validated before anything is written: createOrganizationAndOwner below commits
+    // organization + settings + owner in one transaction with no way back out, and
+    // OfficeUser.email is globally unique, so a caller who is bounced here and retries
+    // registration cannot cleanly recover. Rejecting a bad returnUrl up front means the
+    // failure mode is "nothing happened", not "an orphaned tenant with no session".
+    this.assertReturnUrlAllowed(request);
+
     const passwordHash = await this.passwords.hash(request.password);
     const { organization, owner } = await this.createOrganizationAndOwner(request, passwordHash);
 
@@ -159,29 +166,57 @@ export class OrganizationRegistrationService {
   }
 
   /**
+   * Reject a caller-supplied returnUrl whose origin does not match the deployed web
+   * app, before anything about this registration has been written.
+   *
+   * `returnUrl` feeds Stripe's accountLinks.create as the redirect target once
+   * onboarding completes. Left unchecked, that's an open redirect — a caller can hand
+   * back any origin and ride the trusted Stripe onboarding flow to it. A prefix check
+   * (`startsWith`) is not enough: `https://${PUBLIC_WEB_ORIGIN}.evil.com` and
+   * `https://${PUBLIC_WEB_ORIGIN}@evil.com` both pass a prefix test while their real
+   * host is evil.com, so this compares parsed origins instead. `PUBLIC_WEB_ORIGIN` is
+   * itself validated by `httpOrigin` in env.schema.ts down to a bare origin (no path,
+   * no trailing slash), so a direct `===` against `new URL(...).origin` is safe without
+   * re-normalizing both sides.
+   *
+   * Called from `register()`, ahead of `createOrganizationAndOwner`'s transaction —
+   * not from `startStripeOnboarding` — precisely so that a rejection here commits
+   * nothing. `OfficeUser.email` is globally unique, so a caller bounced by this check
+   * after the organization/owner were already committed would have no clean way to
+   * retry; validating first avoids that failure mode entirely.
+   */
+  private assertReturnUrlAllowed(request: RegisterOrganizationRequest): void {
+    if (request.returnUrl === undefined) return;
+
+    const origin = (() => {
+      try {
+        return new URL(request.returnUrl).origin;
+      } catch {
+        return null;
+      }
+    })();
+
+    if (origin !== this.config.PUBLIC_WEB_ORIGIN) {
+      throw new AppError('INVALID_RETURN_URL', {
+        message: `returnUrl must start with ${this.config.PUBLIC_WEB_ORIGIN}.`,
+      });
+    }
+  }
+
+  /**
    * Best-effort: start Stripe onboarding for the organization just created.
    *
    * Returns null rather than throwing when Stripe is unreachable or unconfigured — the
    * organization and its owner are already committed by this point, and onboarding can
    * be retried from the office via POST /office/organization/onboarding-link (Task 7),
-   * so there is nothing to roll back here.
+   * so there is nothing to roll back here. (returnUrl itself is validated earlier, by
+   * `assertReturnUrlAllowed` in `register()`, before that transaction ever runs — so
+   * every failure that can reach this method's catch is a genuine Stripe-side failure.)
    */
   private async startStripeOnboarding(
     request: RegisterOrganizationRequest,
     organizationId: string,
   ): Promise<string | null> {
-    // Caller-supplied returnUrl feeds Stripe's accountLinks.create as the redirect
-    // target once onboarding completes. Left unchecked, that's an open redirect —
-    // a caller can hand back any origin and ride the trusted Stripe onboarding flow
-    // to it. Checked outside the try/catch below on purpose: this is a caller error,
-    // not a Stripe outage, so it must not be swallowed into the existing
-    // "onboarding failed, return null" behavior — registration should fail outright.
-    if (request.returnUrl !== undefined && !request.returnUrl.startsWith(this.config.PUBLIC_WEB_ORIGIN)) {
-      throw new AppError('INVALID_RETURN_URL', {
-        message: `returnUrl must start with ${this.config.PUBLIC_WEB_ORIGIN}.`,
-      });
-    }
-
     try {
       const { stripeAccountId } = await this.stripeConnect.createExpressAccount({
         email: request.email,
@@ -197,11 +232,7 @@ export class OrganizationRegistrationService {
       const returnUrl = request.returnUrl ?? this.defaultReturnUrl();
       const { url } = await this.stripeConnect.createAccountLink(stripeAccountId, returnUrl);
       return url;
-    } catch (error) {
-      // Re-throw INVALID_RETURN_URL rather than swallow it: it can only reach this
-      // catch if a future refactor moves code around, but the guard stays cheap
-      // insurance against that regression re-introducing the open redirect.
-      if (error instanceof AppError && error.code === 'INVALID_RETURN_URL') throw error;
+    } catch {
       // Organization and owner are already committed. Onboarding can be
       // retried from the office via POST /office/organization/onboarding-link
       // (Task 7) — nothing to roll back here.
