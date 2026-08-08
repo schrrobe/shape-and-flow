@@ -111,7 +111,11 @@ function buildStripeProvider(config: AppConfig, clock: Clock): StripePaymentProv
   // Re-checking here is cheap and turns a schema regression into a named start-up
   // failure rather than a confusing Stripe authentication error later.
   const secretKey = required(config.STRIPE_SECRET_KEY, 'STRIPE_SECRET_KEY');
-  const webhookSecret = required(config.STRIPE_WEBHOOK_SECRET, 'STRIPE_WEBHOOK_SECRET');
+  const platformWebhookSecret = required(config.STRIPE_WEBHOOK_SECRET, 'STRIPE_WEBHOOK_SECRET');
+  // Not `required`: a platform-only deployment has no Connect destination to sign for.
+  // Its absence is enforced where it matters — a delivery on the Connect route is
+  // refused rather than checked against the platform secret.
+  const connectWebhookSecret = config.STRIPE_CONNECT_WEBHOOK_SECRET?.trim();
 
   const stripe = new Stripe(secretKey, {
     // Only the SDK's own pinned version typechecks, so this cannot drift by
@@ -123,7 +127,14 @@ function buildStripeProvider(config: AppConfig, clock: Clock): StripePaymentProv
     timeout: 15_000,
   });
 
-  return new StripePaymentProvider(stripe, clock, { webhookSecret });
+  return new StripePaymentProvider(stripe, clock, {
+    webhookSecrets: {
+      platform: platformWebhookSecret,
+      ...(connectWebhookSecret === undefined || connectWebhookSecret === ''
+        ? {}
+        : { connect: connectWebhookSecret }),
+    },
+  });
 }
 
 export function required(value: string | undefined, name: string): string {

@@ -129,7 +129,7 @@ function build(
   } as unknown as Stripe;
 
   const provider = new StripePaymentProvider(stripe, new FixedClock(NOW), {
-    webhookSecret: 'whsec_test',
+    webhookSecrets: { platform: 'whsec_test', connect: 'whsec_connect_test' },
   });
 
   return { provider, create, expire, retrieve, refundCreate, constructEvent };
@@ -444,10 +444,55 @@ describe('verifyWebhook', () => {
     });
 
     const raw = Buffer.from('{"id":"evt_1"}');
-    const event = provider.verifyWebhook(raw, 'sig');
+    const event = provider.verifyWebhook(raw, 'sig', 'platform');
 
     expect(constructEvent).toHaveBeenCalledWith(raw, 'sig', 'whsec_test', 300);
     expect(event).toMatchObject({ id: 'evt_1', type: 'checkout.session.completed' });
+  });
+
+  // The two destinations are signed with different keys. Verifying a Connect delivery
+  // with the platform key rejects a legitimate event, which is how a whole event stream
+  // goes unprocessed without anything looking broken.
+  it('verifies a Connect delivery with the Connect secret', () => {
+    const { provider, constructEvent } = build({
+      constructEvent: vi.fn<ConstructEventFn>().mockReturnValue({
+        id: 'evt_2',
+        type: 'account.updated',
+        account: 'acct_123',
+      } as Stripe.Event),
+    });
+
+    const raw = Buffer.from('{"id":"evt_2"}');
+    const event = provider.verifyWebhook(raw, 'sig', 'connect');
+
+    expect(constructEvent).toHaveBeenCalledWith(raw, 'sig', 'whsec_connect_test', 300);
+    expect(event).toMatchObject({ id: 'evt_2', account: 'acct_123' });
+  });
+
+  it('leaves account undefined for a platform event', () => {
+    const { provider } = build({
+      constructEvent: vi.fn<ConstructEventFn>().mockReturnValue({
+        id: 'evt_3',
+        type: 'checkout.session.completed',
+      } as Stripe.Event),
+    });
+
+    expect(provider.verifyWebhook(Buffer.from('{}'), 'sig', 'platform').account).toBeUndefined();
+  });
+
+  it('refuses a Connect delivery when no Connect secret is configured', () => {
+    const stripe = {
+      webhooks: { constructEvent: vi.fn<ConstructEventFn>() },
+    } as unknown as Stripe;
+    const provider = new StripePaymentProvider(stripe, new FixedClock(NOW), {
+      webhookSecrets: { platform: 'whsec_test' },
+    });
+
+    // Not verified against the platform secret as a fallback: that secret cannot have
+    // signed this delivery, so accepting it would mean accepting an unverified body.
+    expect(() => provider.verifyWebhook(Buffer.from('{}'), 'sig', 'connect')).toThrow(
+      expect.objectContaining({ status: 400 }),
+    );
   });
 
   it('turns a bad signature into a 400, not a 500', () => {
@@ -460,7 +505,7 @@ describe('verifyWebhook', () => {
     });
 
     // A 500 would make Stripe retry a request that can never succeed.
-    expect(() => provider.verifyWebhook(Buffer.from('{}'), 'bad')).toThrow(
+    expect(() => provider.verifyWebhook(Buffer.from('{}'), 'bad', 'platform')).toThrow(
       expect.objectContaining({ code: 'UNAUTHENTICATED', status: 400 }),
     );
   });

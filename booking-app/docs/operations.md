@@ -223,9 +223,19 @@ TLS is not decoration here: the office session cookie is issued `Secure` wheneve
 `NODE_ENV=production`, so over plain HTTP the browser discards it and every login appears to
 succeed and then fails.
 
-**8. Point Stripe at it.** In the Stripe dashboard, add an endpoint at
-`https://<hostname>/api/webhooks/stripe`, subscribe it to the checkout and refund events, and
-copy the signing secret into `STRIPE_WEBHOOK_SECRET`. It is per endpoint, not per account.
+**8. Point Stripe at it.** Two endpoints, because Stripe treats the platform's own events and
+its connected accounts' events as separate destinations with separate signing secrets:
+
+| Stripe destination | URL                                        | Events                                     | Secret goes into                |
+| ------------------ | ------------------------------------------ | ------------------------------------------ | ------------------------------- |
+| Account (platform) | `https://<hostname>/api/webhooks/stripe`         | checkout and refund events                 | `STRIPE_WEBHOOK_SECRET`         |
+| Connect            | `https://<hostname>/api/webhooks/stripe/connect` | `account.updated`, connected-account charges | `STRIPE_CONNECT_WEBHOOK_SECRET` |
+
+A secret is per endpoint, not per account, and one cannot verify the other's deliveries — that
+is why there are two URLs rather than one endpoint with two secrets. The Connect endpoint is
+only needed once organizers are onboarded through Stripe Connect; without it, leave
+`STRIPE_CONNECT_WEBHOOK_SECRET` unset and the route refuses deliveries rather than mis-verifying
+them.
 
 **9. Take a backup before anyone uses it**, so the restore path has been walked once while
 nothing is at stake:
@@ -431,14 +441,18 @@ rejected `checkout.session.completed` is a customer who paid and has no booking.
 4. Confirm a booking end to end.
 5. Revoke the old key in Stripe, and not before step 4.
 
-### `STRIPE_WEBHOOK_SECRET`
+### `STRIPE_WEBHOOK_SECRET` and `STRIPE_CONNECT_WEBHOOK_SECRET`
 
 Stripe allows several endpoints, each with its own secret. That is the whole trick — rotate by
 moving to a new endpoint, not by re-keying the old one.
 
+The two secrets rotate independently and by the same procedure. Substitute the Connect
+destination and `/api/webhooks/stripe/connect` throughout when rotating that one; nothing else
+differs.
+
 **There is a gap, and the swap is planned around it rather than pretended away.** The API
-verifies against exactly one `STRIPE_WEBHOOK_SECRET`, so whichever endpoint is not the one
-that secret belongs to has its deliveries rejected with a 4xx. Gapless rotation would need
+verifies each route against exactly one secret, so whichever endpoint is not the one that
+secret belongs to has its deliveries rejected with a 4xx. Gapless rotation would need
 the verifier to accept either secret for the length of the window, and it does not. So do
 this at a quiet minute, keep the two steps close together, and replay what fell in between.
 
@@ -545,8 +559,11 @@ webhook has not landed yet — which is normal for a few seconds and abnormal af
 `checkout.session.completed` event, and look at the delivery attempts.
 
 - **Delivered, 2xx** — we received it. Go to step 3.
-- **Failed, 4xx** — the signature was rejected. Almost always `STRIPE_WEBHOOK_SECRET` is
-  wrong or was rotated without the swap above. Fix the secret, then **Resend** the event.
+- **Failed, 4xx** — the signature was rejected. Almost always the endpoint's secret is wrong
+  or was rotated without the swap above; check that the Connect destination points at
+  `/api/webhooks/stripe/connect` with `STRIPE_CONNECT_WEBHOOK_SECRET` and the platform one at
+  `/api/webhooks/stripe` with `STRIPE_WEBHOOK_SECRET`, since a destination aimed at the other
+  route fails every delivery. Fix the secret, then **Resend** the event.
 - **Failed, 5xx or timeout** — we were down. Stripe retries for days; the event will land on
   its own. **Resend** to make it now.
 

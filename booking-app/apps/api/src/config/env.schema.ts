@@ -93,6 +93,15 @@ export const envSchema = z
     PAYMENT_PROVIDER: z.enum(['fake', 'stripe']).default('fake'),
     STRIPE_SECRET_KEY: z.string().optional(),
     STRIPE_WEBHOOK_SECRET: z.string().optional(),
+    /**
+     * Signing secret of the Stripe *Connect* webhook destination.
+     *
+     * A separate destination with a separate secret, delivered to
+     * `/webhooks/stripe/connect`. Optional even with Stripe configured: a deployment
+     * whose organizers are all on the platform account has no such destination, and
+     * requiring a secret it cannot obtain would keep it from starting.
+     */
+    STRIPE_CONNECT_WEBHOOK_SECRET: z.string().optional(),
 
     // ── email ────────────────────────────────────────────────────────────────
     EMAIL_PROVIDER: z.enum(['fake', 'resend']).default('fake'),

@@ -81,6 +81,17 @@ const postWebhook = (raw: Buffer, signature?: string) => {
   );
 };
 
+/** The Connect destination, which Stripe signs with a different key. */
+const postConnectWebhook = (raw: Buffer, signature?: string) => {
+  const req = request(server())
+    .post('/webhooks/stripe/connect')
+    .set('content-type', 'application/json');
+
+  return (signature === undefined ? req : req.set('stripe-signature', signature)).send(
+    raw.toString('utf8'),
+  );
+};
+
 /** Store an event directly, for tests that drive the processor rather than the route. */
 async function seedEvent(type: string, object: Record<string, unknown>, id: string): Promise<void> {
   await prisma.stripeWebhookEvent.create({
@@ -178,6 +189,49 @@ describe('POST /webhooks/stripe', () => {
     }
 
     expect(await prisma.stripeWebhookEvent.count()).toBe(5);
+  });
+});
+
+/**
+ * Two destinations, two secrets.
+ *
+ * Stripe delivers a connected account's events through a Connect destination with its own
+ * signing key. Pointed at one endpoint verifying one secret, whichever stream is not the
+ * one that secret belongs to is rejected in full — either every `account.updated` is lost
+ * and organizers never become ready, or every payment event is.
+ */
+describe('POST /webhooks/stripe/connect', () => {
+  const connectEvent = () =>
+    rawEvent('account.updated', { id: 'acct_123', charges_enabled: true }, 'evt_connect_1');
+
+  it('accepts a delivery signed with the Connect secret', async () => {
+    const { raw } = connectEvent();
+
+    await postConnectWebhook(raw, payments.signatureFor(raw, 'connect')).expect(200);
+
+    expect(await prisma.stripeWebhookEvent.count()).toBe(1);
+  });
+
+  it('refuses a Connect delivery signed with the platform secret', async () => {
+    const { raw } = connectEvent();
+
+    await postConnectWebhook(raw, payments.signatureFor(raw, 'platform')).expect(400);
+
+    expect(await prisma.stripeWebhookEvent.count()).toBe(0);
+  });
+
+  it('refuses a platform delivery signed with the Connect secret', async () => {
+    const { raw } = rawEvent('checkout.session.completed', { id: 'cs_x' });
+
+    await postWebhook(raw, payments.signatureFor(raw, 'connect')).expect(400);
+
+    expect(await prisma.stripeWebhookEvent.count()).toBe(0);
+  });
+
+  it('requires a signature like the platform route does', async () => {
+    const { raw } = connectEvent();
+
+    await postConnectWebhook(raw).expect(400);
   });
 });
 
