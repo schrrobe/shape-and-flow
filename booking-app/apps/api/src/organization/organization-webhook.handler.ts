@@ -43,7 +43,11 @@ export class OrganizationWebhookHandler {
     return (Object.values(ACCOUNT_EVENT_TYPES) as string[]).includes(type);
   }
 
-  async handle(type: string, object: unknown): Promise<void> {
+  /**
+   * @param eventCreatedAt Stripe's own timestamp for the event. Undefined only for a
+   *   payload without one, which is treated as "no ordering information" and applied.
+   */
+  async handle(type: string, object: unknown, eventCreatedAt?: Date): Promise<void> {
     const account = (object ?? {}) as AccountObjectShape;
     const stripeAccountId = readString(account.id);
 
@@ -67,12 +71,41 @@ export class OrganizationWebhookHandler {
       return;
     }
 
-    await this.prisma.organization.update({
-      where: { stripeAccountId },
+    // `updateMany` with a time predicate, not `update`. Stripe does not order webhook
+    // deliveries and the webhook queue runs several jobs at once, so an older snapshot of
+    // this account can reach this line after a newer one. Applied unconditionally, that
+    // older snapshot wins: an organizer that just became ready is switched back off, or —
+    // worse — one that Stripe has just disabled is switched back on and takes money onto
+    // an account that cannot settle it.
+    //
+    // `lt` rather than `lte`, so two events sharing a second (Stripe's `created` has
+    // one-second resolution) settle on the one that arrives first instead of flapping.
+    const { count } = await this.prisma.organization.updateMany({
+      where: {
+        stripeAccountId,
+        ...(eventCreatedAt === undefined
+          ? {}
+          : {
+              OR: [
+                { stripeAccountUpdatedAt: null },
+                { stripeAccountUpdatedAt: { lt: eventCreatedAt } },
+              ],
+            }),
+      },
       data: {
         stripeDetailsSubmitted: account.details_submitted === true,
         stripeChargesEnabled: account.charges_enabled === true,
+        ...(eventCreatedAt === undefined ? {} : { stripeAccountUpdatedAt: eventCreatedAt }),
       },
     });
+
+    if (count === 0) {
+      // Not an error, and deliberately not rethrown: a superseded snapshot is a normal
+      // consequence of concurrent delivery, and failing the job would retry it forever
+      // against a row that is already more current than the event.
+      this.logger.debug(
+        `${type} for ${stripeAccountId} is older than the stored state; ignoring`,
+      );
+    }
   }
 }
