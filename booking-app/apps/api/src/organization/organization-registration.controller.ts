@@ -1,6 +1,8 @@
-import { Body, Controller, HttpCode, Inject, Post, Res } from '@nestjs/common';
+import { Body, Controller, HttpCode, Inject, Post, Res, UseGuards } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { registerOrganizationRequestSchema } from '@shape-and-flow/booking-contracts';
 
+import { CsrfHeaderGuard } from '../auth/csrf-header.guard.js';
 import { Public } from '../common/guards/public.decorator.js';
 import { ENV } from '../config/env.schema.js';
 
@@ -9,6 +11,9 @@ import { OrganizationRegistrationService } from './organization-registration.ser
 import type { AppConfig } from '../config/env.schema.js';
 import type { RegisterOrganizationResponse } from '@shape-and-flow/booking-contracts';
 import type { CookieOptions, Response } from 'express';
+
+/** Five per hour per IP, matching every other public mutation. */
+const REGISTER_LIMIT = { default: { limit: 5, ttl: 3_600_000 } };
 
 /** `POST /public/organizations`. */
 @Controller('public/organizations')
@@ -19,6 +24,8 @@ export class OrganizationRegistrationController {
   ) {}
 
   @Public()
+  @UseGuards(CsrfHeaderGuard)
+  @Throttle(REGISTER_LIMIT)
   @Post()
   @HttpCode(201)
   async register(

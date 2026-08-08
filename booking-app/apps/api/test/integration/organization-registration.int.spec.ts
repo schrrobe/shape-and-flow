@@ -1,4 +1,7 @@
+import { ThrottlerStorageRedisService } from '@nest-lab/throttler-storage-redis';
 import { Module } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import request from 'supertest';
 import { beforeEach, describe, expect, it } from 'vitest';
 
@@ -56,12 +59,26 @@ import type { Server } from 'node:http';
 const NOW = new Date('2026-08-14T09:00:00.000Z');
 
 @Module({
-  imports: [AuthModule],
+  imports: [
+    AuthModule,
+    // Real, Redis-backed throttler storage -- wired the same way ThrottlingModule wires
+    // it in production (same default bucket, same storage class), just handed the
+    // `redis` connection this file already imports rather than resolving it through DI.
+    // `createBookingTestApp`'s own harness module deliberately does not register a
+    // ThrottlerGuard (see public-app.harness.ts's note that `@Throttle` is inert there
+    // as a result), so the new rate-limit test below needs its own, registered as an
+    // additional `APP_GUARD` alongside the harness's `AuthGuard`.
+    ThrottlerModule.forRoot({
+      throttlers: [{ ttl: 60_000, limit: 300 }],
+      storage: new ThrottlerStorageRedisService(redis),
+    }),
+  ],
   controllers: [OrganizationRegistrationController],
   providers: [
     OrganizationRegistrationService,
     StripeConnectService,
     { provide: STRIPE_CLIENT, useValue: null },
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
   ],
 })
 // Nest module declaration: an empty body by design.
@@ -88,9 +105,26 @@ async function clearSessions(): Promise<void> {
   if (keys.length > 0) await redis.del(...keys);
 }
 
+/**
+ * The throttler's Redis keys, not the session's.
+ *
+ * `ThrottlerStorageRedisService` keys are content-addressed from the controller class
+ * name, the handler name, the throttler name, and the tracker (the caller's IP) --
+ * deterministic across tests, since every request in this file comes from the same
+ * local supertest connection to the same handler. Left uncleared, hits from earlier
+ * tests in this file would count against the rate-limit test's own budget before it
+ * sends a single request of its own.
+ */
+async function clearThrottleState(): Promise<void> {
+  await connectRedis();
+  const keys = [...(await redis.keys('{*}:hits')), ...(await redis.keys('{*}:blocked'))];
+  if (keys.length > 0) await redis.del(...keys);
+}
+
 beforeEach(async () => {
   await resetDatabase();
   await clearSessions();
+  await clearThrottleState();
 
   ctx = await seedOrganization(prisma);
 
@@ -120,6 +154,7 @@ describe('POST /api/public/organizations', () => {
   it('registers an INDIVIDUAL organizer, creates the owner, and logs them in', async () => {
     const res = await request(server())
       .post('/api/public/organizations')
+      .set('X-Requested-With', 'XMLHttpRequest')
       .send({
         entityType: 'INDIVIDUAL',
         displayName: 'Acme Studio',
@@ -157,6 +192,7 @@ describe('POST /api/public/organizations', () => {
   it('registers a SOLE_PROPRIETORSHIP organizer with a company name and owner name', async () => {
     const res = await request(server())
       .post('/api/public/organizations')
+      .set('X-Requested-With', 'XMLHttpRequest')
       .send({
         entityType: 'SOLE_PROPRIETORSHIP',
         displayName: 'Solo Studio',
@@ -184,33 +220,39 @@ describe('POST /api/public/organizations', () => {
   });
 
   it('retries the slug on collision', async () => {
-    const first = await request(server()).post('/api/public/organizations').send({
-      entityType: 'INDIVIDUAL',
-      displayName: 'Acme Studio',
-      email: 'first@example.com',
-      password: 'Correct-Horse-Battery-9',
-      firstName: 'Jane',
-      lastName: 'Doe',
-      contactPhone: '+49 30 1234567',
-      addressLine1: 'Musterstraße 1',
-      postalCode: '10115',
-      city: 'Berlin',
-      country: 'DE',
-    });
+    const first = await request(server())
+      .post('/api/public/organizations')
+      .set('X-Requested-With', 'XMLHttpRequest')
+      .send({
+        entityType: 'INDIVIDUAL',
+        displayName: 'Acme Studio',
+        email: 'first@example.com',
+        password: 'Correct-Horse-Battery-9',
+        firstName: 'Jane',
+        lastName: 'Doe',
+        contactPhone: '+49 30 1234567',
+        addressLine1: 'Musterstraße 1',
+        postalCode: '10115',
+        city: 'Berlin',
+        country: 'DE',
+      });
 
-    const res = await request(server()).post('/api/public/organizations').send({
-      entityType: 'INDIVIDUAL',
-      displayName: 'Acme Studio',
-      email: 'second@example.com',
-      password: 'Correct-Horse-Battery-9',
-      firstName: 'John',
-      lastName: 'Smith',
-      contactPhone: '+49 30 1234567',
-      addressLine1: 'Musterstraße 2',
-      postalCode: '10115',
-      city: 'Berlin',
-      country: 'DE',
-    });
+    const res = await request(server())
+      .post('/api/public/organizations')
+      .set('X-Requested-With', 'XMLHttpRequest')
+      .send({
+        entityType: 'INDIVIDUAL',
+        displayName: 'Acme Studio',
+        email: 'second@example.com',
+        password: 'Correct-Horse-Battery-9',
+        firstName: 'John',
+        lastName: 'Smith',
+        contactPhone: '+49 30 1234567',
+        addressLine1: 'Musterstraße 2',
+        postalCode: '10115',
+        city: 'Berlin',
+        country: 'DE',
+      });
 
     expect(first.status).toBe(201);
     expect(res.status).toBe(201);
@@ -221,6 +263,7 @@ describe('POST /api/public/organizations', () => {
   it('resolves the public catalog to the newly registered organization via ?organizer=<slug>', async () => {
     const created = await request(server())
       .post('/api/public/organizations')
+      .set('X-Requested-With', 'XMLHttpRequest')
       .send({
         entityType: 'ORGANIZATION',
         displayName: 'Second Org',
@@ -246,5 +289,54 @@ describe('POST /api/public/organizations', () => {
 
     expect(res.status).toBe(200);
     expect(services(res).items).toEqual([]);
+  });
+
+  it('rejects registration without the CSRF header', async () => {
+    const res = await request(server()).post('/api/public/organizations').send({
+      entityType: 'INDIVIDUAL',
+      displayName: 'No CSRF Studio',
+      email: 'nocsrf@example.com',
+      password: 'Correct-Horse-Battery-9',
+      firstName: 'Jane',
+      lastName: 'Doe',
+      contactPhone: '+49 30 1234567',
+      addressLine1: 'Musterstraße 1',
+      postalCode: '10115',
+      city: 'Berlin',
+      country: 'DE',
+    });
+
+    expect(res.status).toBe(403);
+  });
+
+  it('rate-limits registration to 5 per hour per IP', async () => {
+    const body = (n: number) => ({
+      entityType: 'INDIVIDUAL',
+      displayName: `Rate Studio ${String(n)}`,
+      email: `rate${String(n)}@example.com`,
+      password: 'Correct-Horse-Battery-9',
+      firstName: 'Jane',
+      lastName: 'Doe',
+      contactPhone: '+49 30 1234567',
+      addressLine1: 'Musterstraße 1',
+      postalCode: '10115',
+      city: 'Berlin',
+      country: 'DE',
+    });
+
+    for (let i = 0; i < 5; i += 1) {
+      const res = await request(server())
+        .post('/api/public/organizations')
+        .set('X-Requested-With', 'XMLHttpRequest')
+        .send(body(i));
+      expect(res.status).toBe(201);
+    }
+
+    const sixth = await request(server())
+      .post('/api/public/organizations')
+      .set('X-Requested-With', 'XMLHttpRequest')
+      .send(body(5));
+
+    expect(sixth.status).toBe(429);
   });
 });
