@@ -170,6 +170,18 @@ export class OrganizationRegistrationService {
     request: RegisterOrganizationRequest,
     organizationId: string,
   ): Promise<string | null> {
+    // Caller-supplied returnUrl feeds Stripe's accountLinks.create as the redirect
+    // target once onboarding completes. Left unchecked, that's an open redirect —
+    // a caller can hand back any origin and ride the trusted Stripe onboarding flow
+    // to it. Checked outside the try/catch below on purpose: this is a caller error,
+    // not a Stripe outage, so it must not be swallowed into the existing
+    // "onboarding failed, return null" behavior — registration should fail outright.
+    if (request.returnUrl !== undefined && !request.returnUrl.startsWith(this.config.PUBLIC_WEB_ORIGIN)) {
+      throw new AppError('INVALID_RETURN_URL', {
+        message: `returnUrl must start with ${this.config.PUBLIC_WEB_ORIGIN}.`,
+      });
+    }
+
     try {
       const { stripeAccountId } = await this.stripeConnect.createExpressAccount({
         email: request.email,
@@ -185,7 +197,11 @@ export class OrganizationRegistrationService {
       const returnUrl = request.returnUrl ?? this.defaultReturnUrl();
       const { url } = await this.stripeConnect.createAccountLink(stripeAccountId, returnUrl);
       return url;
-    } catch {
+    } catch (error) {
+      // Re-throw INVALID_RETURN_URL rather than swallow it: it can only reach this
+      // catch if a future refactor moves code around, but the guard stays cheap
+      // insurance against that regression re-introducing the open redirect.
+      if (error instanceof AppError && error.code === 'INVALID_RETURN_URL') throw error;
       // Organization and owner are already committed. Onboarding can be
       // retried from the office via POST /office/organization/onboarding-link
       // (Task 7) — nothing to roll back here.

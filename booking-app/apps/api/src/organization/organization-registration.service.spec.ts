@@ -234,4 +234,41 @@ describe('OrganizationRegistrationService', () => {
     expect(stripeConnect.createAccountLink).not.toHaveBeenCalled();
     expect(prisma.organization.update).not.toHaveBeenCalled();
   });
+
+  it('rejects a returnUrl that does not match PUBLIC_WEB_ORIGIN', async () => {
+    const prisma = {
+      $transaction: vi.fn((fn: (tx: unknown) => unknown) => fn(transactionTx())),
+      organization: { update: vi.fn().mockResolvedValue({}) },
+    };
+
+    const passwords = { hash: vi.fn().mockResolvedValue('hashed') };
+    const sessions = { create: vi.fn().mockResolvedValue('sid_1') };
+    const stripeConnect = {
+      createExpressAccount: vi.fn().mockResolvedValue({ stripeAccountId: 'acct_1' }),
+      createAccountLink: vi.fn().mockResolvedValue({ url: 'https://connect.stripe.com/x' }),
+    };
+
+    const moduleRef = await Test.createTestingModule({
+      providers: [
+        OrganizationRegistrationService,
+        { provide: PrismaService, useValue: prisma },
+        { provide: PasswordService, useValue: passwords },
+        { provide: SessionStore, useValue: sessions },
+        { provide: StripeConnectService, useValue: stripeConnect },
+        { provide: ENV, useValue: { PUBLIC_WEB_ORIGIN: 'https://app.example.com' } },
+      ],
+    }).compile();
+
+    const service = moduleRef.get(OrganizationRegistrationService);
+
+    await expect(
+      service.register({
+        ...REQUEST,
+        returnUrl: 'https://evil.example.com/steal',
+      }),
+    ).rejects.toMatchObject({ code: 'INVALID_RETURN_URL' });
+
+    expect(stripeConnect.createExpressAccount).not.toHaveBeenCalled();
+    expect(stripeConnect.createAccountLink).not.toHaveBeenCalled();
+  });
 });
