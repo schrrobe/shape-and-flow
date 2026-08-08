@@ -15,7 +15,7 @@ import { EnqueueService, QUEUE_REGISTRY } from '../src/messaging/queues/enqueue.
 import { QUEUES } from '../src/messaging/queues/job-contracts.js';
 import { REDIS } from '../src/messaging/queues/redis.provider.js';
 import { OrganizationContextService } from '../src/organization/organization-context.service.js';
-import { currentTenant } from '../src/organization/tenant-context.store.js';
+import { currentTenant, setCurrentTenant } from '../src/organization/tenant-context.store.js';
 import { PrismaService } from '../src/prisma/prisma.service.js';
 import { EMAIL_PROVIDER } from '../src/providers/email/email-provider.js';
 import { FakeEmailProvider } from '../src/providers/email/fake-email.provider.js';
@@ -100,6 +100,23 @@ function organizationStub(): Partial<OrganizationContextService> {
     refresh: async () => {
       currentOrganization = await loadOrganization(read().id);
     },
+    /**
+     * Implemented for real too, and for a sharper reason.
+     *
+     * `refresh()` alone cannot fix a scoped request: the ALS snapshot the middleware took
+     * before the handler ran is what `get()` returns, so a settings PATCH would keep
+     * answering from before its own write. A stub that only updated the fallback would let
+     * that bug pass here.
+     */
+    refreshCurrent: async (organizationId: string) => {
+      const reloaded = await loadOrganization(organizationId);
+
+      if (!setCurrentTenant(reloaded) || currentOrganization?.id === reloaded.id) {
+        currentOrganization = reloaded;
+      }
+
+      return reloaded;
+    },
     // Worker paths pass the organization the job names and expect a mismatch to be rejected,
     // so the stub enforces that rather than waving it through: a test that queued a job for
     // the wrong tenant should fail here, not somewhere downstream.
@@ -113,28 +130,6 @@ function organizationStub(): Partial<OrganizationContextService> {
       }
 
       return organization;
-    },
-    // These two bypass ALS and the bootstrap snapshot in production, going straight to
-    // Prisma for an explicit organization id. The stub mirrors that by querying the same
-    // real test database rather than reading `currentOrganization` — a suite proving
-    // `/manage/*` returns a *different* organization's own settings needs this to actually
-    // hit that organization's row, not whichever one this harness instance bootstrapped.
-    getSettingsFor: async (organizationId: string) => {
-      const organization = await prisma.organization.findUniqueOrThrow({
-        where: { id: organizationId },
-        include: { settings: true },
-      });
-      if (!organization.settings) {
-        throw new Error(`Organization "${organizationId}" has no settings row.`);
-      }
-      return organization.settings;
-    },
-    getTimezoneFor: async (organizationId: string) => {
-      const organization = await prisma.organization.findUniqueOrThrow({
-        where: { id: organizationId },
-        select: { timezone: true },
-      });
-      return organization.timezone;
     },
   };
 }

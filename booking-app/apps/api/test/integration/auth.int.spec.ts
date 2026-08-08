@@ -669,5 +669,18 @@ describe('password reset', () => {
       where: { officeUserId: user.id },
     });
     expect(token.organizationId).toBe(other.id);
+
+    // The row was already scoped correctly before; the mail's *content* was not. The
+    // reset request carries no tenant middleware, so the branding fields fell back to the
+    // bootstrap organization — a member of Third Org read Shape and Flow's name, address
+    // and phone number on a mail about their own account.
+    const notification = await prisma.notification.findFirstOrThrow({
+      where: { officeUserId: user.id, kind: 'OFFICE_PASSWORD_RESET' },
+    });
+
+    expect(notification.payload).toMatchObject({
+      businessName: 'Third Org',
+      businessEmail: 'owner@third-org.example',
+    });
   });
 });

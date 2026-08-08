@@ -497,6 +497,44 @@ describe('the reconciler', () => {
     expect(offsetOf((await delayed())[0])).toBe(120);
     expect(booking.startsAt.getTime()).toBeGreaterThan(NOW.getTime());
   });
+
+  // Offsets are a per-tenant setting. Read once outside any tenant scope, the sweep
+  // applies the bootstrap organization's list to everybody: one business loses the
+  // reminders it configured, another gets reminders it never asked for.
+  it('rebuilds each organization with its own offsets', async () => {
+    const other = await seedOrganization(prisma, { slug: 'other-tenant' });
+
+    await prisma.organizationSettings.update({
+      where: { organizationId: ctx.organization.id },
+      data: { reminderOffsetsMinutes: [1440] },
+    });
+    await prisma.organizationSettings.update({
+      where: { organizationId: other.organization.id },
+      data: { reminderOffsetsMinutes: [1440, 120] },
+    });
+    await testApp.close();
+    await build();
+
+    const startsAt = hoursFromNow(30);
+    await confirmedBooking({ startsAt });
+    await prisma.booking.create({
+      data: { ...makeBooking(other, { status: 'CONFIRMED', startsAt }), confirmedAt: NOW },
+    });
+
+    expect(await reconciler.runOnce()).toBe(3);
+
+    const byOrganization = new Map<string, number[]>();
+    for (const job of await delayed()) {
+      const { organizationId } = job.data as { organizationId: string };
+      byOrganization.set(organizationId, [
+        ...(byOrganization.get(organizationId) ?? []),
+        offsetOf(job) ?? -1,
+      ]);
+    }
+
+    expect(byOrganization.get(ctx.organization.id)?.sort()).toEqual([1440]);
+    expect(byOrganization.get(other.organization.id)?.sort()).toEqual([120, 1440]);
+  });
 });
 
 describe('the job id', () => {

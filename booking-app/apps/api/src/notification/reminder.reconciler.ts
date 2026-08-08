@@ -4,6 +4,7 @@ import { Inject } from '@nestjs/common';
 import { CLOCK } from '../domain/time/clock.js';
 import { EnqueueService } from '../messaging/queues/enqueue.service.js';
 import { JOB, QUEUE } from '../messaging/queues/job-contracts.js';
+import { runWithOrganization } from '../organization/tenant-context.store.js';
 import { BookingStatus } from '../prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
@@ -11,6 +12,27 @@ import { dedupeKey } from './dedupe-key.js';
 import { ReminderService, reminderJobId, startsAtEpochSeconds } from './reminder.service.js';
 
 import type { Clock } from '../domain/time/clock.js';
+
+interface ReconcilableBooking {
+  id: string;
+  organizationId: string;
+  startsAt: Date;
+}
+
+/** One entry per organization, in the order the organizations first appear. */
+function groupByOrganization(
+  bookings: readonly ReconcilableBooking[],
+): Map<string, ReconcilableBooking[]> {
+  const groups = new Map<string, ReconcilableBooking[]>();
+
+  for (const booking of bookings) {
+    const group = groups.get(booking.organizationId);
+    if (group === undefined) groups.set(booking.organizationId, [booking]);
+    else group.push(booking);
+  }
+
+  return groups;
+}
 
 /**
  * How far ahead the sweep rebuilds.
@@ -54,7 +76,6 @@ export class ReminderReconciler {
     const horizon = new Date(now.getTime() + REMINDER_HORIZON_MS);
 
     const queue = this.enqueue.queue(QUEUE.NOTIFICATION);
-    const offsets = this.reminders.offsets();
     let requeued = 0;
     let cursor: string | undefined;
 
@@ -87,38 +108,49 @@ export class ReminderReconciler {
         ).map((row) => row.dedupeKey),
       );
 
-      for (const booking of bookings) {
-        for (const offsetMinutes of offsets) {
-          if (requeued >= BATCH) break;
+      // Grouped by organization, and each group rebuilt inside its own tenant scope.
+      // Reminder offsets are a per-tenant setting, so one list read outside any scope is
+      // the bootstrap organization's list applied to everybody: tenants that configured
+      // more offsets silently lose the extra reminders, and tenants that configured fewer
+      // get reminders they never asked for.
+      for (const [organizationId, group] of groupByOrganization(bookings)) {
+        await runWithOrganization(organizationId, this.prisma, async () => {
+          const offsets = this.reminders.offsets();
 
-          const delay = booking.startsAt.getTime() - offsetMinutes * 60_000 - now.getTime();
-          if (delay <= 0) continue;
+          for (const booking of group) {
+            for (const offsetMinutes of offsets) {
+              if (requeued >= BATCH) break;
 
-          const sentKey = dedupeKey(
-            'REMINDER_24H',
-            'EMAIL',
-            booking.id,
-            this.reminders.reminderDedupeDiscriminator(offsetMinutes, booking.startsAt),
-          );
+              const delay = booking.startsAt.getTime() - offsetMinutes * 60_000 - now.getTime();
+              if (delay <= 0) continue;
 
-          if (alreadyHandled.has(sentKey)) continue;
+              const sentKey = dedupeKey(
+                'REMINDER_24H',
+                'EMAIL',
+                booking.id,
+                this.reminders.reminderDedupeDiscriminator(offsetMinutes, booking.startsAt),
+              );
 
-          const jobId = reminderJobId(offsetMinutes, booking.id, booking.startsAt);
-          if ((await queue.getJob(jobId)) !== undefined) continue;
+              if (alreadyHandled.has(sentKey)) continue;
 
-          await this.enqueue.enqueue(
-            JOB.REMINDER_SEND,
-            {
-              organizationId: booking.organizationId,
-              bookingId: booking.id,
-              offsetMinutes,
-              expectedStartsAtEpochSeconds: startsAtEpochSeconds(booking.startsAt),
-            },
-            { jobId, delay },
-          );
+              const jobId = reminderJobId(offsetMinutes, booking.id, booking.startsAt);
+              if ((await queue.getJob(jobId)) !== undefined) continue;
 
-          requeued += 1;
-        }
+              await this.enqueue.enqueue(
+                JOB.REMINDER_SEND,
+                {
+                  organizationId: booking.organizationId,
+                  bookingId: booking.id,
+                  offsetMinutes,
+                  expectedStartsAtEpochSeconds: startsAtEpochSeconds(booking.startsAt),
+                },
+                { jobId, delay },
+              );
+
+              requeued += 1;
+            }
+          }
+        });
       }
 
       cursor = bookings.at(-1)?.id;

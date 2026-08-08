@@ -4,7 +4,7 @@ import { AppError } from '../common/errors/app-error.js';
 import { ENV } from '../config/env.schema.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
-import { currentTenant } from './tenant-context.store.js';
+import { currentTenant, setCurrentTenant } from './tenant-context.store.js';
 
 import type { AppConfig } from '../config/env.schema.js';
 import type { Organization, OrganizationSettings } from '../prisma/client.js';
@@ -67,6 +67,45 @@ export class OrganizationContextService implements OnApplicationBootstrap {
   }
 
   /**
+   * Reload the organization this request is actually serving, after writing to it.
+   *
+   * `refresh()` only replaces the bootstrap fallback, and a scoped request never reads
+   * that: `get()` returns the ALS snapshot the middleware took before the handler ran. So
+   * after a settings write the request would keep answering from the pre-write snapshot —
+   * the PATCH response echoes the old values back into the form the user just edited, and
+   * the audit row's before/after pair is two copies of the same object.
+   *
+   * Falls back to `refresh()` outside any scope, where the bootstrap snapshot *is* what
+   * gets read.
+   */
+  async refreshCurrent(organizationId: string): Promise<OrganizationWithSettings> {
+    const organization = await this.prisma.organization.findUnique({
+      where: { id: organizationId },
+      include: { settings: true },
+    });
+
+    if (!organization?.settings) {
+      throw new Error(`Organization "${organizationId}" has no settings row.`);
+    }
+
+    const reloaded: OrganizationWithSettings = { ...organization, settings: organization.settings };
+
+    if (!setCurrentTenant(reloaded)) {
+      await this.refresh();
+      return this.get();
+    }
+
+    // The bootstrap snapshot is a second copy of the same row when the scoped tenant is
+    // the default one, and leaving it stale would surface the old values on any path that
+    // reads outside a scope.
+    if (this.organization?.id === reloaded.id) {
+      this.organization = reloaded;
+    }
+
+    return reloaded;
+  }
+
+  /**
    * Called on every request path and inside the tenant guard, so it must never
    * be reached before bootstrap completed.
    */
@@ -118,26 +157,5 @@ export class OrganizationContextService implements OnApplicationBootstrap {
 
   getTimezone(): string {
     return this.get().timezone;
-  }
-
-  /** Settings for an explicit organization id, bypassing ALS and the bootstrap snapshot. */
-  async getSettingsFor(organizationId: string): Promise<OrganizationSettings> {
-    const organization = await this.prisma.organization.findUniqueOrThrow({
-      where: { id: organizationId },
-      include: { settings: true },
-    });
-    if (!organization.settings) {
-      throw new Error(`Organization "${organizationId}" has no settings row.`);
-    }
-    return organization.settings;
-  }
-
-  /** Timezone for an explicit organization id, bypassing ALS and the bootstrap snapshot. */
-  async getTimezoneFor(organizationId: string): Promise<string> {
-    const organization = await this.prisma.organization.findUniqueOrThrow({
-      where: { id: organizationId },
-      select: { timezone: true },
-    });
-    return organization.timezone;
   }
 }

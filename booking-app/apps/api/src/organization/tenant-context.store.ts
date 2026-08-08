@@ -30,6 +30,26 @@ export function currentTenant(): OrganizationWithSettings | undefined {
   return storage.getStore()?.organization;
 }
 
+/**
+ * Replace the organization the active scope is serving.
+ *
+ * The snapshot is taken by the middleware before the handler runs, so a request that
+ * *writes* to its own organization goes on reading the pre-write state — a settings PATCH
+ * would answer with the old values and audit a before/after pair that is identical.
+ * Reloading the row and calling this makes the rest of the request see what it just
+ * stored.
+ *
+ * Returns false outside any scope, where there is nothing to replace and the caller
+ * should refresh the bootstrap snapshot instead.
+ */
+export function setCurrentTenant(organization: OrganizationWithSettings): boolean {
+  const store = storage.getStore();
+  if (store === undefined) return false;
+
+  store.organization = organization;
+  return true;
+}
+
 /** True when a tenant scope is active, for assertions and diagnostics. */
 export function hasTenant(): boolean {
   return storage.getStore() !== undefined;
