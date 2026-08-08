@@ -308,6 +308,34 @@ describe('POST /api/auth/login', () => {
     await login({ email: OWNER_EMAIL.toUpperCase(), password: OWNER_PASSWORD }).expect(200);
   });
 
+  /**
+   * Login is an exact match now (`findUnique` on a lowercased input), not the
+   * case-insensitive `findFirst` this replaced. The test above seeds its row already
+   * lowercase and so cannot tell the two implementations apart — it passes under both.
+   * This one seeds the row the way it would actually sit in production before the
+   * `office_user_email_global_unique` migration ran: written with whatever casing the
+   * owner originally typed. The migration's own `UPDATE ... SET email = lower(email)` is
+   * applied by hand here, because this suite's migrations run once against an empty
+   * database, before any factory has written a row for them to normalize.
+   */
+  it('finds a legacy mixed-case address once the email migration has normalized it', async () => {
+    await prisma.officeUser.update({
+      where: { id: ctx.owner.id },
+      data: { email: 'Owner@Shape-And-Flow.example' },
+    });
+
+    // Before normalization: the exact-match lookup on a lowercased login input misses the
+    // mixed-case row entirely. That silent miss is the lockout this migration exists to fix.
+    await login({ email: 'OWNER@SHAPE-AND-FLOW.EXAMPLE', password: OWNER_PASSWORD }).expect(401);
+
+    await prisma.$executeRawUnsafe(
+      'UPDATE "office_users" SET email = lower(email) WHERE id = $1',
+      ctx.owner.id,
+    );
+
+    await login({ email: 'OWNER@SHAPE-AND-FLOW.EXAMPLE', password: OWNER_PASSWORD }).expect(200);
+  });
+
   it('logs in an owner belonging to a different organization than the bootstrap default', async () => {
     const other = await prisma.organization.create({
       data: {
