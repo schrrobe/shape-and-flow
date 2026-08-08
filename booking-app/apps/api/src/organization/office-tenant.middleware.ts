@@ -52,7 +52,9 @@ export class OfficeTenantMiddleware {
     if (!organization?.settings) {
       // A session exists but its organization no longer resolves — never silently serve
       // a different organization's data for an authenticated request.
-      throw new AppError('ORGANIZATION_NOT_FOUND', { message: 'The organization for this session no longer exists.' });
+      throw new AppError('ORGANIZATION_NOT_FOUND', {
+        message: 'The organization for this session no longer exists.',
+      });
     }
 
     runWithTenant({ ...organization, settings: organization.settings }, () => {

@@ -20,7 +20,10 @@ import { connectRedis, redis } from '../redis.harness.js';
 
 import type { BookingTestApp } from '../booking-app.harness.js';
 import type { SeedContext } from '../factories/index.js';
-import type { RegisterOrganizationResponse, ServiceListResponse } from '@shape-and-flow/booking-contracts';
+import type {
+  RegisterOrganizationResponse,
+  ServiceListResponse,
+} from '@shape-and-flow/booking-contracts';
 import type { Server } from 'node:http';
 
 /**

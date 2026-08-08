@@ -20,7 +20,9 @@ import type {
 const MAX_SLUG_ATTEMPTS = 5;
 
 /** Business type Stripe expects, from the same discriminant the request already carries. */
-function businessTypeFor(entityType: RegisterOrganizationRequest['entityType']): 'individual' | 'company' {
+function businessTypeFor(
+  entityType: RegisterOrganizationRequest['entityType'],
+): 'individual' | 'company' {
   return entityType === 'ORGANIZATION' ? 'company' : 'individual';
 }
 
@@ -99,7 +101,9 @@ export class OrganizationRegistrationService {
               legalName,
               contactEmail: request.email,
               contactPhone: request.contactPhone,
-              ...(request.whatsappNumber === undefined ? {} : { whatsappNumber: request.whatsappNumber }),
+              ...(request.whatsappNumber === undefined
+                ? {}
+                : { whatsappNumber: request.whatsappNumber }),
               addressLine1: request.addressLine1,
               ...(request.addressLine2 === undefined ? {} : { addressLine2: request.addressLine2 }),
               postalCode: request.postalCode,
@@ -116,7 +120,8 @@ export class OrganizationRegistrationService {
                 this.config.PAYMENT_PROVIDER === 'stripe'
                   ? PaymentsMode.CONNECT
                   : PaymentsMode.PLATFORM,
-              ...(request.entityType === 'INDIVIDUAL' || request.entityType === 'SOLE_PROPRIETORSHIP'
+              ...(request.entityType === 'INDIVIDUAL' ||
+              request.entityType === 'SOLE_PROPRIETORSHIP'
                 ? { ownerFirstName: request.firstName, ownerLastName: request.lastName }
                 : {}),
               ...(request.taxId === undefined ? {} : { taxId: request.taxId }),
@@ -136,7 +141,8 @@ export class OrganizationRegistrationService {
               organizationId: organization.id,
               email: request.email.toLowerCase(),
               passwordHash,
-              firstName: request.entityType === 'ORGANIZATION' ? request.companyName : request.firstName,
+              firstName:
+                request.entityType === 'ORGANIZATION' ? request.companyName : request.firstName,
               lastName: request.entityType === 'ORGANIZATION' ? '' : request.lastName,
               role: 'OWNER',
               canIssueRefunds: true,

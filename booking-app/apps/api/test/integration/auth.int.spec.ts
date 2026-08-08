@@ -364,7 +364,10 @@ describe('POST /api/auth/login', () => {
       },
     });
 
-    const res = await login({ email: 'owner@second-org.example', password: 'Correct-Horse-Battery-9' });
+    const res = await login({
+      email: 'owner@second-org.example',
+      password: 'Correct-Horse-Battery-9',
+    });
 
     expect(res.status).toBe(200);
     expect((res.body as { user: { email: string } }).user.email).toBe('owner@second-org.example');

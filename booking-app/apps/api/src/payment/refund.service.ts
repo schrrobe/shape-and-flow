@@ -11,7 +11,10 @@ import { JOB } from '../messaging/queues/job-contracts.js';
 import { OrganizationContextService } from '../organization/organization-context.service.js';
 import { PaymentStatus, Prisma, RefundStatus } from '../prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
-import { accountOfRecordedPayment, PAYMENT_PROVIDER } from '../providers/payment/payment-provider.js';
+import {
+  accountOfRecordedPayment,
+  PAYMENT_PROVIDER,
+} from '../providers/payment/payment-provider.js';
 import { isRetryableStripeError } from '../providers/payment/stripe.errors.js';
 
 import { BookingFinancialsService } from './booking-financials.service.js';

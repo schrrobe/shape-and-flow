@@ -46,13 +46,7 @@ function buildFakeOrganizationTable(row: FakeOrgRow) {
   );
 
   const updateMany = vi.fn(
-    ({
-      where,
-      data,
-    }: {
-      where: WhereClause;
-      data: Partial<FakeOrgRow>;
-    }): { count: number } => {
+    ({ where, data }: { where: WhereClause; data: Partial<FakeOrgRow> }): { count: number } => {
       if (state.stripeAccountId !== where.stripeAccountId) return { count: 0 };
 
       if (where.OR !== undefined) {
@@ -60,8 +54,7 @@ function buildFakeOrganizationTable(row: FakeOrgRow) {
           clause.stripeAccountUpdatedAt === null
             ? state.stripeAccountUpdatedAt === null
             : state.stripeAccountUpdatedAt !== null &&
-              state.stripeAccountUpdatedAt.getTime() <=
-                clause.stripeAccountUpdatedAt.lte.getTime(),
+              state.stripeAccountUpdatedAt.getTime() <= clause.stripeAccountUpdatedAt.lte.getTime(),
         );
         if (!matches) return { count: 0 };
       }

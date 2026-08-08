@@ -69,10 +69,7 @@ export class PublicBookingsController {
     // means "not provisioned yet" — reading it as "legacy platform tenant" is what would
     // let a brand-new organizer charge onto our own account.
     const organization = this.organizations.get();
-    if (
-      organization.paymentsMode === PaymentsMode.CONNECT &&
-      !organization.stripeChargesEnabled
-    ) {
+    if (organization.paymentsMode === PaymentsMode.CONNECT && !organization.stripeChargesEnabled) {
       throw new AppError('ORGANIZATION_ONBOARDING_INCOMPLETE', {
         message: 'This organizer has not finished setting up payments yet.',
       });

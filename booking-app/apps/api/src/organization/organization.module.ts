@@ -49,6 +49,11 @@ import type { TenantPrismaClient } from '../prisma/tenant.extension.js';
         createTenantGuardedClient(prisma, () => organizations.getOrganizationId()),
     },
   ],
-  exports: [OrganizationContextService, TENANT_PRISMA, TenantResolutionMiddleware, OfficeTenantMiddleware],
+  exports: [
+    OrganizationContextService,
+    TENANT_PRISMA,
+    TenantResolutionMiddleware,
+    OfficeTenantMiddleware,
+  ],
 })
 export class OrganizationModule {}

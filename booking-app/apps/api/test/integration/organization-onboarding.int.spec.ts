@@ -77,7 +77,10 @@ async function clearSessions(): Promise<void> {
 }
 
 const login = (body: { email: string; password: string }) =>
-  request(server()).post('/api/auth/login').set(...CSRF).send(body);
+  request(server())
+    .post('/api/auth/login')
+    .set(...CSRF)
+    .send(body);
 
 /** The `name=value` pair off a login response's `Set-Cookie`, ready for the next request. */
 function cookieFrom(response: { headers: Record<string, unknown> }): string {
@@ -266,9 +269,7 @@ describe('POST /api/office/organization/onboarding-link', () => {
       select: { id: true, email: true },
     });
 
-    const loginResponse = await login({ email: admin.email, password: ADMIN_PASSWORD }).expect(
-      200,
-    );
+    const loginResponse = await login({ email: admin.email, password: ADMIN_PASSWORD }).expect(200);
     const cookie = cookieFrom(loginResponse);
 
     const response = await request(server())
@@ -308,9 +309,7 @@ describe('GET /api/office/organization', () => {
       select: { id: true, email: true },
     });
 
-    const loginResponse = await login({ email: admin.email, password: ADMIN_PASSWORD }).expect(
-      200,
-    );
+    const loginResponse = await login({ email: admin.email, password: ADMIN_PASSWORD }).expect(200);
     const cookie = cookieFrom(loginResponse);
 
     const response = await request(server())

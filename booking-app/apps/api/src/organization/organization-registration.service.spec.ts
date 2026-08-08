@@ -28,7 +28,8 @@ function slugUniqueViolation(): Prisma.PrismaClientKnownRequestError {
         name: 'DriverAdapterError',
         cause: {
           originalCode: '23505',
-          originalMessage: 'duplicate key value violates unique constraint "organizations_slug_key"',
+          originalMessage:
+            'duplicate key value violates unique constraint "organizations_slug_key"',
           kind: 'UniqueConstraintViolation',
           constraint: { fields: ['slug'] },
         },
@@ -40,9 +41,11 @@ function slugUniqueViolation(): Prisma.PrismaClientKnownRequestError {
 function transactionTx() {
   return {
     organization: {
-      create: vi.fn().mockImplementation(({ data }: { data: { slug: string } }) =>
-        Promise.resolve({ id: 'org_1', slug: data.slug }),
-      ),
+      create: vi
+        .fn()
+        .mockImplementation(({ data }: { data: { slug: string } }) =>
+          Promise.resolve({ id: 'org_1', slug: data.slug }),
+        ),
     },
     organizationSettings: { create: vi.fn().mockResolvedValue({ id: 'settings_1' }) },
     officeUser: {
@@ -246,7 +249,10 @@ describe('OrganizationRegistrationService', () => {
      */
     async function buildService(): Promise<{
       service: OrganizationRegistrationService;
-      prisma: { $transaction: ReturnType<typeof vi.fn>; organization: { update: ReturnType<typeof vi.fn> } };
+      prisma: {
+        $transaction: ReturnType<typeof vi.fn>;
+        organization: { update: ReturnType<typeof vi.fn> };
+      };
       stripeConnect: {
         createExpressAccount: ReturnType<typeof vi.fn>;
         createAccountLink: ReturnType<typeof vi.fn>;
@@ -283,7 +289,10 @@ describe('OrganizationRegistrationService', () => {
       // A prefix check (`startsWith`) alone would accept both of these: the
       // configured origin appears as a leading substring, but the real host —
       // the part a browser actually navigates to — is evil.com in each case.
-      ['a subdomain-suffix bypass of a naive prefix check', 'https://app.example.com.evil.com/steal'],
+      [
+        'a subdomain-suffix bypass of a naive prefix check',
+        'https://app.example.com.evil.com/steal',
+      ],
       ['a userinfo (@) bypass of a naive prefix check', 'https://app.example.com@evil.com/'],
       ['a non-URL string', 'not-a-url'],
     ])('rejects %s', async (_label, returnUrl) => {

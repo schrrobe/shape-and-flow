@@ -11,10 +11,7 @@ import { PAYMENT_PROVIDER } from '../providers/payment/payment-provider.js';
 
 import { rawBodyOf } from './raw-body.js';
 
-import type {
-  PaymentProvider,
-  WebhookDestination,
-} from '../providers/payment/payment-provider.js';
+import type { PaymentProvider, WebhookDestination } from '../providers/payment/payment-provider.js';
 import type { RawBodyRequest } from '@nestjs/common';
 import type { Request } from 'express';
 

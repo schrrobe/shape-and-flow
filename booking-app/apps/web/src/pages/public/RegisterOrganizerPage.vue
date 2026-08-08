@@ -99,7 +99,13 @@ async function onSubmit(): Promise<void> {
       :label="t('register.companyName')"
       required
     />
-    <SfInput v-model="form.email" data-test="email" type="email" :label="t('register.email')" required />
+    <SfInput
+      v-model="form.email"
+      data-test="email"
+      type="email"
+      :label="t('register.email')"
+      required
+    />
     <SfInput
       v-model="form.password"
       data-test="password"
@@ -142,7 +148,11 @@ async function onSubmit(): Promise<void> {
     />
     <SfInput v-model="form.city" data-test="city" :label="t('register.city')" required />
     <p v-if="error.key" class="text-sm font-medium text-text-primary">{{ t(error.key) }}</p>
-    <button type="submit" :disabled="submitting.value" class="rounded-sf bg-primary px-4 py-2.5 text-white">
+    <button
+      type="submit"
+      :disabled="submitting.value"
+      class="rounded-sf bg-primary px-4 py-2.5 text-white"
+    >
       {{ t('register.submit') }}
     </button>
   </form>

@@ -63,10 +63,7 @@ function secretFor(destination: WebhookDestination): string {
 /** One provider call and the Stripe account it addressed. `undefined` is the platform. */
 export interface AccountCall {
   method:
-    | 'createCheckoutSession'
-    | 'expireCheckoutSession'
-    | 'retrieveCheckoutSession'
-    | 'createRefund';
+    'createCheckoutSession' | 'expireCheckoutSession' | 'retrieveCheckoutSession' | 'createRefund';
   stripeAccountId: string | undefined;
 }
 

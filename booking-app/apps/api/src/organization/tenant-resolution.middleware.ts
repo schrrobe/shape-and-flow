@@ -53,7 +53,9 @@ export class TenantResolutionMiddleware {
     if (!organization?.settings) {
       // An identity WAS offered and it does not resolve — never silently serve a
       // different organization's data for an explicit, wrong slug.
-      throw new AppError('ORGANIZATION_NOT_FOUND', { message: 'No organizer matches that address.' });
+      throw new AppError('ORGANIZATION_NOT_FOUND', {
+        message: 'No organizer matches that address.',
+      });
     }
 
     runWithTenant({ ...organization, settings: organization.settings }, () => {

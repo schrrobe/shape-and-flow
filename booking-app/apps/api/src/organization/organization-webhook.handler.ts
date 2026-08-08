@@ -118,9 +118,7 @@ export class OrganizationWebhookHandler {
       // `debug`: this is a payment-capability event (stripeChargesEnabled, potentially) that
       // was discarded rather than applied, and that is worth seeing in production logs by
       // default rather than only when someone happens to be looking with debug on.
-      this.logger.warn(
-        `${type} for ${stripeAccountId} is older than the stored state; ignoring`,
-      );
+      this.logger.warn(`${type} for ${stripeAccountId} is older than the stored state; ignoring`);
     }
   }
 }

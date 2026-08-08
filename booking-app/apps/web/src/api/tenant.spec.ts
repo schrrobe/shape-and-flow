@@ -67,9 +67,9 @@ describe('withOrganizer', () => {
   it("joins an existing query and leaves Stripe's placeholder intact", () => {
     rememberTenantSlug('acme');
 
-    expect(withOrganizer('https://example.com/booking/success?session_id={CHECKOUT_SESSION_ID}')).toBe(
-      'https://example.com/booking/success?session_id={CHECKOUT_SESSION_ID}&organizer=acme',
-    );
+    expect(
+      withOrganizer('https://example.com/booking/success?session_id={CHECKOUT_SESSION_ID}'),
+    ).toBe('https://example.com/booking/success?session_id={CHECKOUT_SESSION_ID}&organizer=acme');
   });
 
   it('changes nothing on the root address', () => {

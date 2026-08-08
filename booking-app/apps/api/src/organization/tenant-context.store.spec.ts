@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { currentTenant, hasTenant, runWithOrganization, runWithTenant } from './tenant-context.store.js';
+import {
+  currentTenant,
+  hasTenant,
+  runWithOrganization,
+  runWithTenant,
+} from './tenant-context.store.js';
 
 import type { OrganizationWithSettings } from './organization-context.service.js';
 import type { PrismaService } from '../prisma/prisma.service.js';
