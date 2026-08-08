@@ -7,12 +7,14 @@ import { FixedClock } from '../../src/domain/time/clock.js';
 import { ManageModule } from '../../src/manage/manage.module.js';
 import { ManagementTokenService } from '../../src/manage/management-token.service.js';
 import { JOB } from '../../src/messaging/queues/job-contracts.js';
+import { BookingFinancialsService } from '../../src/payment/booking-financials.service.js';
 import { createBookingTestApp } from '../booking-app.harness.js';
 import { prisma, resetDatabase } from '../database.harness.js';
 import { SLOT_FRIDAY_0900, makeBooking, seedOrganization } from '../factories/index.js';
 import { loadOrganization } from '../public-app.harness.js';
 
 import type { ReserveInput } from '../../src/booking/reservation.service.js';
+import type { OrganizationContextService } from '../../src/organization/organization-context.service.js';
 import type { BookingTestApp } from '../booking-app.harness.js';
 import type { SeedContext } from '../factories/index.js';
 import type { Server } from 'node:http';
@@ -105,10 +107,8 @@ beforeEach(async () => {
 });
 
 describe('the financial root', () => {
-  it('stays the original booking across two reschedules', async () => {
-    // The money never moves off the booking that was paid. Without a stable root, the
-    // second replacement is two hops from it and every financial read has to walk the
-    // chain — or, as they all did, give up and report nothing.
+  /** Two approved moves, so the chain is original → first → second. */
+  async function moveTwice(): Promise<{ firstId: string; secondId: string }> {
     const first = await service.decide({
       requestId: await openRequest(),
       officeUserId: ctx.owner.id,
@@ -127,13 +127,46 @@ describe('the financial root', () => {
     });
     if (second.newBookingId === null) throw new Error('expected a second replacement');
 
+    return { firstId: first.newBookingId, secondId: second.newBookingId };
+  }
+
+  /** The read every financial consumer goes through, pointed at the seeded organization. */
+  function financials(): BookingFinancialsService {
+    return new BookingFinancialsService(prisma, {
+      getOrganizationId: () => ctx.organization.id,
+    } as OrganizationContextService);
+  }
+
+  it('stays the original booking across two reschedules', async () => {
+    // The money never moves off the booking that was paid. Without a stable root, the
+    // second replacement is two hops from it and every financial read has to walk the
+    // chain — or, as they all did, give up and report nothing.
+    const { firstId, secondId } = await moveTwice();
+
     const [firstReplacement, secondReplacement] = await Promise.all([
-      prisma.booking.findUniqueOrThrow({ where: { id: first.newBookingId } }),
-      prisma.booking.findUniqueOrThrow({ where: { id: second.newBookingId } }),
+      prisma.booking.findUniqueOrThrow({ where: { id: firstId } }),
+      prisma.booking.findUniqueOrThrow({ where: { id: secondId } }),
     ]);
 
     expect(firstReplacement.financialRootBookingId).toBe(bookingId);
     expect(secondReplacement.financialRootBookingId).toBe(bookingId);
+  });
+
+  it('still holds the payment, so every link in the chain reads as paid', async () => {
+    // A stable root is only half the promise: the payment has to still be *at* the root
+    // when the read arrives. Moving the row onto each replacement leaves the root empty
+    // and every link — the /manage page, the office detail, the exports — reporting a
+    // paid appointment as owing the full price.
+    const { firstId, secondId } = await moveTwice();
+
+    expect(await prisma.payment.count({ where: { bookingId } })).toBe(1);
+
+    for (const id of [bookingId, firstId, secondId]) {
+      const loaded = await financials().load(id);
+
+      expect(loaded.rootBookingId).toBe(bookingId);
+      expect(loaded.payments).toHaveLength(1);
+    }
   });
 });
 
@@ -373,7 +406,7 @@ describe('approving', () => {
     });
   });
 
-  it('moves the payment to the replacement, and records where it came from', async () => {
+  it('leaves the payment where it was made, and records where the replacement came from', async () => {
     const requestId = await openRequest();
     const { newBookingId } = await service.decide({
       requestId,
@@ -381,12 +414,11 @@ describe('approving', () => {
       decision: 'APPROVED',
     });
 
-    // The money follows the appointment. Nothing reads payments through
-    // `rescheduledFromBookingId`, so leaving the row on the cancelled original would make the
-    // replacement look unpaid — and cancelling it later would compute a fee against zero and
-    // refund nothing.
-    expect(await prisma.payment.count({ where: { bookingId } })).toBe(0);
-    expect(await prisma.payment.count({ where: { bookingId: newBookingId ?? '' } })).toBe(1);
+    // The payment row stays on the booking the money actually arrived on, which is the
+    // financial root every consumer resolves to. Moving it onto the replacement would
+    // empty that root and make the whole chain read as unpaid.
+    expect(await prisma.payment.count({ where: { bookingId } })).toBe(1);
+    expect(await prisma.payment.count({ where: { bookingId: newBookingId ?? '' } })).toBe(0);
 
     // The lineage link stays, as the audit trail it is.
     const created = await prisma.booking.findUniqueOrThrow({

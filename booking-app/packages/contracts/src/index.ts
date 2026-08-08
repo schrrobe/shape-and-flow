@@ -1,6 +1,7 @@
 export * from './auth/index.js';
 export * from './enums.js';
 export * from './errors.js';
+export * from './feature-flags.js';
 export * from './pagination.js';
 export * from './primitives.js';
 export * from './manage/index.js';

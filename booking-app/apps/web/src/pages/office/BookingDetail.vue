@@ -9,16 +9,21 @@ import {
   SfSkeleton,
 } from '@shape-and-flow/booking-ui';
 import { computed, onMounted, ref, watch } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { useRoute } from 'vue-router';
 
 import { api } from '../../api/client.js';
+import { STATUS_PRESENTATION } from '../../components/office/status-presentation.js';
 import StatusBadge from '../../components/office/StatusBadge.vue';
 import { useAsyncData } from '../../composables/useAsyncData.js';
 import { useFocusStep } from '../../composables/useFocusStep.js';
 import { dateTime, difference, hasPassed, money, time } from '../../office/format.js';
+import { registerOfficeMessages } from '../../office/i18n/index.js';
 import { officeMessage } from '../../office/messages.js';
 import { useOfficeAction } from '../../office/useOfficeAction.js';
 import { useSession } from '../../stores/session.js';
+
+import type { PaymentStatus, RefundReason, RefundStatus } from '@shape-and-flow/booking-contracts';
 
 /**
  * One booking, and every action that can be taken on it.
@@ -34,8 +39,11 @@ import { useSession } from '../../stores/session.js';
  * ordinary — somebody else decided the request first — and a rolled-back optimistic
  * update is more confusing than a spinner.
  */
+registerOfficeMessages();
+
 const route = useRoute();
 const session = useSession();
+const { t } = useI18n();
 
 useFocusStep('Booking');
 
@@ -50,12 +58,12 @@ const action = useOfficeAction(run);
 /** Which confirmation is open. `null` means none. */
 const dialog = ref<'complete' | 'no-show' | 'cancel' | 'payment' | 'refund' | null>(null);
 
-const PAYMENT_METHODS = [
-  { value: 'CASH', label: 'Cash' },
-  { value: 'CARD', label: 'Card terminal' },
-  { value: 'BANK_TRANSFER', label: 'Bank transfer' },
-  { value: 'OTHER', label: 'Other' },
-];
+const PAYMENT_METHODS = computed(() => [
+  { value: 'CASH', label: t('office.bookingDetail.paymentMethodCash') },
+  { value: 'CARD', label: t('office.bookingDetail.paymentMethodCard') },
+  { value: 'BANK_TRANSFER', label: t('office.bookingDetail.paymentMethodBankTransfer') },
+  { value: 'OTHER', label: t('office.bookingDetail.paymentMethodOther') },
+]);
 
 /**
  * The three an office actually picks from.
@@ -64,11 +72,39 @@ const PAYMENT_METHODS = [
  * cancellation flow, which records it automatically, and offering it here would let
  * somebody file a goodwill refund under a decision the customer never made.
  */
-const REFUND_REASONS = [
-  { value: 'GOODWILL', label: 'Goodwill' },
-  { value: 'BUSINESS_CANCELLATION', label: 'We cancelled' },
-  { value: 'DUPLICATE_PAYMENT', label: 'Paid twice' },
-];
+const REFUND_REASONS = computed(() => [
+  { value: 'GOODWILL', label: t('office.bookingDetail.refundReasonGoodwill') },
+  {
+    value: 'BUSINESS_CANCELLATION',
+    label: t('office.bookingDetail.refundReasonBusinessCancellation'),
+  },
+  { value: 'DUPLICATE_PAYMENT', label: t('office.bookingDetail.refundReasonDuplicatePayment') },
+]);
+
+/** Every reason a refund can carry, including `CUSTOMER_CANCELLATION` — recorded
+ * automatically by the cancellation flow, so absent from `REFUND_REASONS` above but still
+ * something the history list must be able to display. */
+const REFUND_REASON_LABEL_KEYS: Record<RefundReason, string> = {
+  CUSTOMER_CANCELLATION: 'office.bookingDetail.refundReasonCustomerCancellation',
+  BUSINESS_CANCELLATION: 'office.bookingDetail.refundReasonBusinessCancellation',
+  GOODWILL: 'office.bookingDetail.refundReasonGoodwill',
+  DUPLICATE_PAYMENT: 'office.bookingDetail.refundReasonDuplicatePayment',
+};
+
+const PAYMENT_STATUS_LABEL_KEYS: Record<PaymentStatus, string> = {
+  PENDING: 'office.status.paymentStatusPending',
+  SUCCEEDED: 'office.status.paymentStatusSucceeded',
+  FAILED: 'office.status.paymentFailed',
+  PARTIALLY_REFUNDED: 'office.status.paymentStatusPartiallyRefunded',
+  REFUNDED: 'office.status.paymentStatusRefunded',
+};
+
+const REFUND_STATUS_LABEL_KEYS: Record<RefundStatus, string> = {
+  PENDING: 'office.status.refundStatusPending',
+  SUCCEEDED: 'office.status.refundStatusSucceeded',
+  FAILED: 'office.status.refundStatusFailed',
+  CANCELED: 'office.status.refundStatusCanceled',
+};
 
 const cancelReason = ref('');
 const cancelRefundEuros = ref('');
@@ -273,7 +309,7 @@ onMounted(run);
           data-test="action-complete"
           @click="dialog = 'complete'"
         >
-          Mark completed
+          {{ t('office.bookingDetail.markCompleted') }}
         </SfButton>
 
         <SfButton
@@ -282,7 +318,7 @@ onMounted(run);
           data-test="action-no-show"
           @click="dialog = 'no-show'"
         >
-          Mark no show
+          {{ t('office.bookingDetail.markNoShow') }}
         </SfButton>
 
         <SfButton
@@ -291,7 +327,7 @@ onMounted(run);
           data-test="action-payment"
           @click="dialog = 'payment'"
         >
-          Record payment
+          {{ t('office.bookingDetail.recordPayment') }}
         </SfButton>
 
         <SfButton
@@ -300,7 +336,7 @@ onMounted(run);
           data-test="action-refund"
           @click="dialog = 'refund'"
         >
-          Refund
+          {{ t('office.bookingDetail.refund') }}
         </SfButton>
 
         <SfButton
@@ -309,50 +345,60 @@ onMounted(run);
           data-test="action-cancel"
           @click="dialog = 'cancel'"
         >
-          Cancel booking
+          {{ t('office.bookingDetail.cancelBooking') }}
         </SfButton>
       </div>
 
       <div class="grid gap-4 lg:grid-cols-2">
         <SfCard as="section" aria-labelledby="summary-heading">
-          <h2 id="summary-heading" class="text-lg font-medium">Appointment</h2>
+          <h2 id="summary-heading" class="text-lg font-medium">
+            {{ t('office.bookingDetail.appointmentHeading') }}
+          </h2>
           <dl class="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
-            <dt class="text-text-secondary">Treatment</dt>
+            <dt class="text-text-secondary">{{ t('office.bookingDetail.treatment') }}</dt>
             <dd>{{ data.serviceName }} ({{ data.durationMinutes }} min)</dd>
-            <dt class="text-text-secondary">Blocked</dt>
+            <dt class="text-text-secondary">{{ t('office.bookingDetail.blocked') }}</dt>
             <dd class="tabular-nums">
               {{ time(data.blockStartsAt) }}–{{ time(data.blockEndsAt) }}
             </dd>
-            <dt class="text-text-secondary">Price</dt>
+            <dt class="text-text-secondary">{{ t('office.bookingDetail.price') }}</dt>
             <dd class="tabular-nums">{{ money(data.price) }}</dd>
-            <dt class="text-text-secondary">Paid</dt>
+            <dt class="text-text-secondary">{{ t('office.bookingDetail.paid') }}</dt>
             <dd class="tabular-nums" data-test="paid">
               {{ money(data.paid) }}
               <span v-if="outstanding > 0" class="text-warning">
-                ({{ money(outstanding) }} outstanding)
+                {{ t('office.bookingDetail.outstandingAmount', { amount: money(outstanding) }) }}
               </span>
             </dd>
-            <dt class="text-text-secondary">Booked</dt>
-            <dd>{{ data.origin === 'OFFICE' ? 'By the office' : 'Online' }}</dd>
+            <dt class="text-text-secondary">{{ t('office.bookingDetail.booked') }}</dt>
+            <dd>
+              {{
+                data.origin === 'OFFICE'
+                  ? t('office.bookingDetail.bookedByOffice')
+                  : t('office.bookingDetail.bookedOnline')
+              }}
+            </dd>
             <template v-if="data.customerNote !== null">
-              <dt class="text-text-secondary">Note</dt>
+              <dt class="text-text-secondary">{{ t('office.bookingDetail.note') }}</dt>
               <dd>{{ data.customerNote }}</dd>
             </template>
             <template v-if="data.cancellationReason !== null">
-              <dt class="text-text-secondary">Cancelled because</dt>
+              <dt class="text-text-secondary">{{ t('office.bookingDetail.cancelledBecause') }}</dt>
               <dd>{{ data.cancellationReason }}</dd>
             </template>
           </dl>
         </SfCard>
 
         <SfCard as="section" aria-labelledby="customer-heading">
-          <h2 id="customer-heading" class="text-lg font-medium">Customer</h2>
+          <h2 id="customer-heading" class="text-lg font-medium">
+            {{ t('office.bookingDetail.customerHeading') }}
+          </h2>
           <dl class="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
-            <dt class="text-text-secondary">Name</dt>
+            <dt class="text-text-secondary">{{ t('office.bookingDetail.name') }}</dt>
             <dd>{{ data.customer.firstName }} {{ data.customer.lastName }}</dd>
-            <dt class="text-text-secondary">Email</dt>
+            <dt class="text-text-secondary">{{ t('office.bookingDetail.email') }}</dt>
             <dd class="break-all">{{ data.customer.email }}</dd>
-            <dt class="text-text-secondary">Phone</dt>
+            <dt class="text-text-secondary">{{ t('office.bookingDetail.phone') }}</dt>
             <dd>{{ data.customer.phone ?? '—' }}</dd>
           </dl>
         </SfCard>
@@ -363,27 +409,45 @@ onMounted(run);
           aria-labelledby="requests-heading"
           class="lg:col-span-2"
         >
-          <h2 id="requests-heading" class="text-lg font-medium">Waiting for a decision</h2>
+          <h2 id="requests-heading" class="text-lg font-medium">
+            {{ t('office.bookingDetail.waitingForDecisionHeading') }}
+          </h2>
 
           <p v-if="data.openCancellationRequest !== null" class="mt-2 text-sm">
-            Cancellation asked for {{ dateTime(data.openCancellationRequest.requestedAt) }}.
-            Suggested to keep
-            {{ money(data.openCancellationRequest.suggestedRetainedAmountCents) }}.
-            <RouterLink :to="{ name: 'office-requests' }" class="underline">Decide it</RouterLink>
+            {{
+              t('office.bookingDetail.cancellationRequestSummary', {
+                date: dateTime(data.openCancellationRequest.requestedAt),
+                amount: money(data.openCancellationRequest.suggestedRetainedAmountCents),
+              })
+            }}
+            <RouterLink :to="{ name: 'office-requests' }" class="underline">{{
+              t('office.bookingDetail.decideIt')
+            }}</RouterLink>
           </p>
 
           <p v-if="data.openRescheduleRequest !== null" class="mt-2 text-sm">
-            Move asked for to {{ dateTime(data.openRescheduleRequest.requestedStartsAt) }}.
-            <RouterLink :to="{ name: 'office-requests' }" class="underline">Decide it</RouterLink>
+            {{
+              t('office.bookingDetail.moveRequestSummary', {
+                date: dateTime(data.openRescheduleRequest.requestedStartsAt),
+              })
+            }}
+            <RouterLink :to="{ name: 'office-requests' }" class="underline">{{
+              t('office.bookingDetail.decideIt')
+            }}</RouterLink>
           </p>
         </SfCard>
 
         <SfCard as="section" aria-labelledby="money-heading">
-          <h2 id="money-heading" class="text-lg font-medium">Money</h2>
+          <h2 id="money-heading" class="text-lg font-medium">
+            {{ t('office.bookingDetail.moneyHeading') }}
+          </h2>
 
           <ul class="mt-3 space-y-1 text-sm" data-test="money">
             <li v-for="payment in data.payments" :key="payment.id" class="flex justify-between">
-              <span>Card · {{ payment.status }}</span>
+              <span>
+                {{ t('office.bookingDetail.cardPayment') }} ·
+                {{ t(PAYMENT_STATUS_LABEL_KEYS[payment.status]) }}
+              </span>
               <span class="tabular-nums">{{ money(payment.amount) }}</span>
             </li>
             <li
@@ -400,20 +464,26 @@ onMounted(run);
               <span class="tabular-nums">{{ money(payment.amount) }}</span>
             </li>
             <li v-for="refund in data.refunds" :key="refund.id" class="flex justify-between">
-              <span>Refund · {{ refund.reason }} · {{ refund.status }}</span>
+              <span>
+                {{ t('office.bookingDetail.refund') }} ·
+                {{ t(REFUND_REASON_LABEL_KEYS[refund.reason]) }} ·
+                {{ t(REFUND_STATUS_LABEL_KEYS[refund.status]) }}
+              </span>
               <span class="tabular-nums">−{{ money(refund.amount) }}</span>
             </li>
             <li
               v-if="data.payments.length + data.manualPayments.length + data.refunds.length === 0"
               class="text-text-secondary"
             >
-              Nothing recorded yet.
+              {{ t('office.bookingDetail.nothingRecordedYet') }}
             </li>
           </ul>
         </SfCard>
 
         <SfCard as="section" aria-labelledby="notifications-heading">
-          <h2 id="notifications-heading" class="text-lg font-medium">Messages sent</h2>
+          <h2 id="notifications-heading" class="text-lg font-medium">
+            {{ t('office.bookingDetail.messagesSentHeading') }}
+          </h2>
 
           <ul class="mt-3 space-y-1 text-sm" data-test="notifications">
             <li
@@ -430,18 +500,27 @@ onMounted(run);
               </span>
             </li>
             <li v-if="data.notifications.length === 0" class="text-text-secondary">
-              Nothing sent yet.
+              {{ t('office.bookingDetail.nothingSentYet') }}
             </li>
           </ul>
         </SfCard>
 
         <SfCard as="section" aria-labelledby="history-heading" class="lg:col-span-2">
-          <h2 id="history-heading" class="text-lg font-medium">History</h2>
+          <h2 id="history-heading" class="text-lg font-medium">
+            {{ t('office.bookingDetail.historyHeading') }}
+          </h2>
 
           <ol class="mt-3 space-y-1 text-sm" data-test="history">
             <li v-for="entry in data.statusHistory" :key="entry.id" class="flex flex-wrap gap-x-3">
               <span class="tabular-nums text-text-secondary">{{ dateTime(entry.createdAt) }}</span>
-              <span>{{ entry.fromStatus ?? 'created' }} → {{ entry.toStatus }}</span>
+              <span>
+                {{
+                  entry.fromStatus === null
+                    ? t('office.bookingDetail.created')
+                    : t(STATUS_PRESENTATION[entry.fromStatus].labelKey)
+                }}
+                → {{ t(STATUS_PRESENTATION[entry.toStatus].labelKey) }}
+              </span>
               <span class="text-text-secondary">{{ entry.actorType }}</span>
               <span v-if="entry.reason !== null" class="text-text-secondary">
                 {{ entry.reason }}
@@ -455,37 +534,44 @@ onMounted(run);
     <!-- Confirmations. Each restates what will happen, in numbers rather than in prose. -->
     <SfModal
       :open="dialog === 'complete'"
-      title="Mark this appointment completed?"
-      confirm-label="Mark completed"
+      :title="t('office.bookingDetail.completedTitle')"
+      :confirm-label="t('office.bookingDetail.markCompleted')"
       :busy="action.busy.value"
       @close="close"
       @confirm="confirmComplete"
     >
       <p>
-        {{ data?.customer.firstName }} {{ data?.customer.lastName }} came in on
-        {{ data === null ? '' : dateTime(data.startsAt) }}. This records the appointment as held.
+        {{
+          t('office.bookingDetail.completedBody', {
+            customer: `${data?.customer.firstName} ${data?.customer.lastName}`,
+            date: data === null ? '' : dateTime(data.startsAt),
+          })
+        }}
       </p>
     </SfModal>
 
     <SfModal
       :open="dialog === 'no-show'"
-      title="Mark this appointment as a no show?"
-      confirm-label="Mark no show"
+      :title="t('office.bookingDetail.noShowTitle')"
+      :confirm-label="t('office.bookingDetail.markNoShow')"
       confirm-variant="danger"
       :busy="action.busy.value"
       @close="close"
       @confirm="confirmNoShow"
     >
       <p>
-        This records that {{ data?.customer.firstName }} {{ data?.customer.lastName }} did not
-        arrive. It does not refund anything.
+        {{
+          t('office.bookingDetail.noShowBody', {
+            customer: `${data?.customer.firstName} ${data?.customer.lastName}`,
+          })
+        }}
       </p>
     </SfModal>
 
     <SfModal
       :open="dialog === 'cancel'"
-      title="Cancel this booking?"
-      confirm-label="Cancel booking"
+      :title="t('office.bookingDetail.cancelBookingTitle')"
+      :confirm-label="t('office.bookingDetail.cancelBooking')"
       confirm-variant="danger"
       :busy="action.busy.value"
       :confirm-disabled="!cancelValid"
@@ -494,13 +580,16 @@ onMounted(run);
     >
       <div class="space-y-3">
         <p>
-          The slot is freed and the customer is told. They have paid
-          {{ data === null ? '' : money(data.paid) }}.
+          {{
+            t('office.bookingDetail.cancelIntro', {
+              amount: data === null ? '' : money(data.paid),
+            })
+          }}
         </p>
 
         <SfInput
           v-model="cancelReason"
-          label="Reason (the customer sees this)"
+          :label="t('office.bookingDetail.cancelReasonLabel')"
           data-test="cancel-reason"
           required
         />
@@ -508,19 +597,19 @@ onMounted(run);
         <SfInput
           v-if="session.can('refund.issue') && (data?.paid.amountCents ?? 0) > 0"
           v-model="cancelRefundEuros"
-          label="Refund (euros, leave empty for none)"
+          :label="t('office.bookingDetail.cancelRefundLabel')"
           inputmode="decimal"
           data-test="cancel-refund"
         />
 
         <p v-if="cancelRefundCents !== null && cancelRefundCents > 0" data-test="cancel-preview">
-          {{ money(cancelRefundCents) }} will go back to the customer.
+          {{ t('office.bookingDetail.cancelRefundPreview', { amount: money(cancelRefundCents) }) }}
         </p>
 
         <!-- Said rather than only enforced: a confirm button that ignores the click leaves
              the operator looking for what they did wrong. -->
         <p v-if="cancelReason.trim() === ''" class="text-danger text-sm" data-test="cancel-invalid">
-          A reason is required. The customer reads it.
+          {{ t('office.bookingDetail.cancelReasonRequired') }}
         </p>
         <p
           v-else-if="
@@ -529,33 +618,35 @@ onMounted(run);
           class="text-danger text-sm"
           data-test="cancel-invalid"
         >
-          The refund has to be an amount in euros, like 12,50 — or empty for none.
+          {{ t('office.bookingDetail.cancelRefundInvalid') }}
         </p>
       </div>
     </SfModal>
 
     <SfModal
       :open="dialog === 'payment'"
-      title="Record a payment"
-      confirm-label="Record payment"
+      :title="t('office.bookingDetail.recordPaymentTitle')"
+      :confirm-label="t('office.bookingDetail.recordPayment')"
       :busy="action.busy.value"
       :confirm-disabled="!paymentValid"
       @close="close"
       @confirm="paymentValid ? confirmPayment() : undefined"
     >
       <div class="space-y-3">
-        <p v-if="outstanding > 0">{{ money(outstanding) }} is outstanding on this booking.</p>
+        <p v-if="outstanding > 0">
+          {{ t('office.bookingDetail.outstandingOnBooking', { amount: money(outstanding) }) }}
+        </p>
 
         <SfInput
           v-model="paymentEuros"
-          label="Amount (euros, negative to correct a mistake)"
+          :label="t('office.bookingDetail.paymentAmountLabel')"
           inputmode="decimal"
           data-test="payment-amount"
         />
 
         <SfSelect
           :model-value="paymentMethod"
-          label="Method"
+          :label="t('office.bookingDetail.methodLabel')"
           :options="PAYMENT_METHODS"
           data-test="payment-method"
           @update:model-value="(value) => (paymentMethod = value as typeof paymentMethod)"
@@ -563,7 +654,7 @@ onMounted(run);
 
         <SfInput
           v-model="paymentNote"
-          label="Note"
+          :label="t('office.bookingDetail.note')"
           data-test="payment-note"
           :required="(paymentCents ?? 0) < 0"
         />
@@ -574,25 +665,25 @@ onMounted(run);
           class="text-danger text-sm"
           data-test="payment-invalid"
         >
-          That is not an amount in euros. Try something like 12,50.
+          {{ t('office.bookingDetail.notEuroAmount') }}
         </p>
         <p v-else-if="paymentCents === 0" class="text-danger text-sm" data-test="payment-invalid">
-          Zero is not a payment.
+          {{ t('office.bookingDetail.zeroNotPayment') }}
         </p>
         <p
           v-else-if="(paymentCents ?? 0) < 0 && paymentNote.trim() === ''"
           class="text-danger text-sm"
           data-test="payment-invalid"
         >
-          A correction needs a note explaining it.
+          {{ t('office.bookingDetail.correctionNeedsNote') }}
         </p>
       </div>
     </SfModal>
 
     <SfModal
       :open="dialog === 'refund'"
-      title="Refund the customer"
-      confirm-label="Send refund"
+      :title="t('office.bookingDetail.refundTitle')"
+      :confirm-label="t('office.bookingDetail.sendRefund')"
       confirm-variant="danger"
       :busy="action.busy.value"
       :confirm-disabled="!refundValid"
@@ -600,47 +691,57 @@ onMounted(run);
       @confirm="refundValid ? confirmRefund() : undefined"
     >
       <div class="space-y-3">
-        <p>They have paid {{ data === null ? '' : money(data.paid) }}.</p>
+        <p>
+          {{
+            t('office.bookingDetail.theyHavePaid', {
+              amount: data === null ? '' : money(data.paid),
+            })
+          }}
+        </p>
 
         <SfInput
           v-model="refundEuros"
-          label="Amount (euros)"
+          :label="t('office.bookingDetail.amountEurosLabel')"
           inputmode="decimal"
           data-test="refund-amount"
         />
 
         <SfSelect
           :model-value="refundReason"
-          label="Reason"
+          :label="t('office.bookingDetail.reasonLabel')"
           :options="REFUND_REASONS"
           data-test="refund-reason"
           @update:model-value="(value) => (refundReason = value as typeof refundReason)"
         />
 
         <p v-if="refundCents !== null && refundValid" data-test="refund-preview">
-          {{ money(refundCents) }} will go back to {{ data?.customer.firstName }}
-          {{ data?.customer.lastName }}.
+          {{
+            t('office.bookingDetail.refundPreview', {
+              amount: money(refundCents),
+              customer: `${data?.customer.firstName} ${data?.customer.lastName}`,
+            })
+          }}
         </p>
         <p
           v-else-if="refundCents !== null && data !== null && refundCents > data.paid.amountCents"
           class="text-danger text-sm"
           data-test="refund-invalid"
         >
-          That is more than they paid.
+          {{ t('office.bookingDetail.moreThanPaid') }}
         </p>
         <p
           v-else-if="refundEuros.trim() !== '' && refundCents === null"
           class="text-danger text-sm"
           data-test="refund-invalid"
         >
-          That is not an amount in euros. Try something like 12,50.
+          {{ t('office.bookingDetail.notEuroAmount') }}
         </p>
         <p
           v-else-if="refundCents !== null && refundCents <= 0"
           class="text-danger text-sm"
           data-test="refund-invalid"
         >
-          A refund has to be more than nothing.
+          {{ t('office.bookingDetail.refundMoreThanNothing') }}
         </p>
       </div>
     </SfModal>

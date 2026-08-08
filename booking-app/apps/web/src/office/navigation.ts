@@ -10,26 +10,31 @@ import type { Capability } from '@shape-and-flow/booking-contracts';
 export interface NavigationEntry {
   /** Route name, so a path change moves the link with it. */
   name: string;
-  label: string;
+  /** i18n key, resolved against the office message namespace at render time. */
+  labelKey: string;
   /** Hidden when the signed-in user does not hold this. */
   capability: Capability;
 }
 
 export const NAVIGATION: readonly NavigationEntry[] = [
-  { name: 'office-dashboard', label: 'Overview', capability: 'booking.view' },
-  { name: 'office-calendar', label: 'Calendar', capability: 'booking.view' },
-  { name: 'office-bookings', label: 'Bookings', capability: 'booking.view' },
+  { name: 'office-dashboard', labelKey: 'office.nav.overview', capability: 'booking.view' },
+  { name: 'office-calendar', labelKey: 'office.nav.calendar', capability: 'booking.view' },
+  { name: 'office-bookings', labelKey: 'office.nav.bookings', capability: 'booking.view' },
   // `reschedule.decide` rather than `cancellation.decide`: §10.5 lets an employee decide
   // reschedule requests for their own bookings, so the queue is not owner-and-admin-only.
-  { name: 'office-requests', label: 'Requests', capability: 'reschedule.decide' },
-  { name: 'office-employees', label: 'Team', capability: 'catalog.manage' },
-  { name: 'office-services', label: 'Treatments', capability: 'catalog.manage' },
-  { name: 'office-availability', label: 'Availability', capability: 'availability.manage' },
+  { name: 'office-requests', labelKey: 'office.nav.requests', capability: 'reschedule.decide' },
+  { name: 'office-employees', labelKey: 'office.nav.team', capability: 'catalog.manage' },
+  { name: 'office-services', labelKey: 'office.nav.treatments', capability: 'catalog.manage' },
+  {
+    name: 'office-availability',
+    labelKey: 'office.nav.availability',
+    capability: 'availability.manage',
+  },
   // §10.5 has no row for the customer list. Of the two plausible readings this takes the
   // stricter one — an employee needs the customer on the appointment in front of them, not
   // the whole address book.
-  { name: 'office-customers', label: 'Customers', capability: 'catalog.manage' },
-  { name: 'office-exports', label: 'Exports', capability: 'export.csv' },
-  { name: 'office-users', label: 'Users', capability: 'users.manage' },
-  { name: 'office-settings', label: 'Settings', capability: 'settings.edit' },
+  { name: 'office-customers', labelKey: 'office.nav.customers', capability: 'catalog.manage' },
+  { name: 'office-exports', labelKey: 'office.nav.exports', capability: 'export.csv' },
+  { name: 'office-users', labelKey: 'office.nav.users', capability: 'users.manage' },
+  { name: 'office-settings', labelKey: 'office.nav.settings', capability: 'settings.edit' },
 ];

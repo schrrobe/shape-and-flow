@@ -1,5 +1,7 @@
 import { mount } from '@vue/test-utils';
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+
+import { i18n } from '../../i18n/index.js';
 
 import WorkingHoursEditor from './WorkingHoursEditor.vue';
 
@@ -49,8 +51,19 @@ function savedBody(wrapper: Wrapper): ReplaceWorkingHoursRequest {
 }
 
 describe('WorkingHoursEditor', () => {
+  beforeAll(() => {
+    i18n.global.locale.value = 'en';
+  });
+
+  afterAll(() => {
+    i18n.global.locale.value = 'de';
+  });
+
   it('edits in local time and submits minutes from midnight', async () => {
-    const wrapper = mount(WorkingHoursEditor, { props: { segments: [] } });
+    const wrapper = mount(WorkingHoursEditor, {
+      props: { segments: [] },
+      global: { plugins: [i18n] },
+    });
 
     await addSegment(wrapper, { weekday: 'MONDAY', start: '09:00', end: '18:00' });
     await wrapper.get('[data-test=save]').trigger('click');
@@ -64,7 +77,10 @@ describe('WorkingHoursEditor', () => {
     // `09:75` used to parse to a legal 615 minutes, so the shift saved silently as
     // 09:00–10:15 — an hour the employee never agreed to work and customers were never
     // offered, with nothing on screen to say so.
-    const wrapper = mount(WorkingHoursEditor, { props: { segments: [] } });
+    const wrapper = mount(WorkingHoursEditor, {
+      props: { segments: [] },
+      global: { plugins: [i18n] },
+    });
 
     await addSegment(wrapper, { weekday: 'MONDAY', start: '09:75', end: '18:00' });
 
@@ -75,6 +91,7 @@ describe('WorkingHoursEditor', () => {
   it('flags an overlap before submitting, so the round trip is not the first feedback', async () => {
     const wrapper = mount(WorkingHoursEditor, {
       props: { segments: [seg('MONDAY', 540, 720)] },
+      global: { plugins: [i18n] },
     });
 
     await addSegment(wrapper, { weekday: 'MONDAY', start: '11:00', end: '14:00' });
@@ -86,6 +103,7 @@ describe('WorkingHoursEditor', () => {
   it('allows two shifts on one day that do not overlap', async () => {
     const wrapper = mount(WorkingHoursEditor, {
       props: { segments: [seg('MONDAY', 540, 720)] },
+      global: { plugins: [i18n] },
     });
 
     // Split shifts are ordinary — a studio that closes over lunch and reopens.
@@ -97,6 +115,7 @@ describe('WorkingHoursEditor', () => {
   it('flags a break outside its segment', async () => {
     const wrapper = mount(WorkingHoursEditor, {
       props: { segments: [seg('MONDAY', 540, 720)] },
+      global: { plugins: [i18n] },
     });
 
     await addBreak(wrapper, 0, { start: '13:00', end: '13:30' });
@@ -106,7 +125,10 @@ describe('WorkingHoursEditor', () => {
   });
 
   it('flags an end before its start', async () => {
-    const wrapper = mount(WorkingHoursEditor, { props: { segments: [] } });
+    const wrapper = mount(WorkingHoursEditor, {
+      props: { segments: [] },
+      global: { plugins: [i18n] },
+    });
 
     await addSegment(wrapper, { weekday: 'TUESDAY', start: '18:00', end: '09:00' });
 
@@ -114,7 +136,10 @@ describe('WorkingHoursEditor', () => {
   });
 
   it('refuses a time that is not a time', async () => {
-    const wrapper = mount(WorkingHoursEditor, { props: { segments: [] } });
+    const wrapper = mount(WorkingHoursEditor, {
+      props: { segments: [] },
+      global: { plugins: [i18n] },
+    });
 
     await addSegment(wrapper, { weekday: 'MONDAY', start: 'nine', end: '18:00' });
 
@@ -122,7 +147,10 @@ describe('WorkingHoursEditor', () => {
   });
 
   it('supports 24:00 as the end of a segment', async () => {
-    const wrapper = mount(WorkingHoursEditor, { props: { segments: [] } });
+    const wrapper = mount(WorkingHoursEditor, {
+      props: { segments: [] },
+      global: { plugins: [i18n] },
+    });
 
     await addSegment(wrapper, { weekday: 'FRIDAY', start: '20:00', end: '24:00' });
     await wrapper.get('[data-test=save]').trigger('click');
@@ -146,6 +174,7 @@ describe('WorkingHoursEditor', () => {
           },
         ],
       },
+      global: { plugins: [i18n] },
     });
 
     expect(wrapper.get('[data-test=conflicts]').text()).toContain('SF-');
@@ -164,6 +193,7 @@ describe('WorkingHoursEditor', () => {
           },
         ],
       },
+      global: { plugins: [i18n] },
     });
 
     expect((wrapper.get('[data-test=start-0]').element as HTMLInputElement).value).toBe('09:00');
@@ -175,11 +205,44 @@ describe('WorkingHoursEditor', () => {
   it('submits an empty week, which is how a shift is removed', async () => {
     const wrapper = mount(WorkingHoursEditor, {
       props: { segments: [seg('MONDAY', 540, 1080)] },
+      global: { plugins: [i18n] },
     });
 
     await wrapper.get('[data-test=remove-segment-0]').trigger('click');
     await wrapper.get('[data-test=save]').trigger('click');
 
     expect(savedBody(wrapper).segments).toEqual([]);
+  });
+
+  it('flags an overlap in German, not the raw Zod message', async () => {
+    i18n.global.locale.value = 'de';
+
+    const wrapper = mount(WorkingHoursEditor, {
+      props: { segments: [seg('MONDAY', 540, 720)] },
+      global: { plugins: [i18n] },
+    });
+
+    await addSegment(wrapper, { weekday: 'MONDAY', start: '11:00', end: '14:00' });
+
+    expect(wrapper.text()).toMatch(/überschneiden/i);
+    expect(wrapper.text()).not.toMatch(/must not overlap/i);
+
+    i18n.global.locale.value = 'en';
+  });
+
+  it('flags a break outside its shift in German, not the raw Zod message', async () => {
+    i18n.global.locale.value = 'de';
+
+    const wrapper = mount(WorkingHoursEditor, {
+      props: { segments: [seg('MONDAY', 540, 720)] },
+      global: { plugins: [i18n] },
+    });
+
+    await addBreak(wrapper, 0, { start: '13:00', end: '13:30' });
+
+    expect(wrapper.text()).toMatch(/innerhalb/i);
+    expect(wrapper.text()).not.toMatch(/must lie inside/i);
+
+    i18n.global.locale.value = 'en';
   });
 });

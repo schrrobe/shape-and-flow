@@ -2,11 +2,17 @@
 import { MIN_PASSWORD_LENGTH, newPasswordSchema } from '@shape-and-flow/booking-contracts';
 import { SfAlert, SfButton, SfInput } from '@shape-and-flow/booking-ui';
 import { computed, ref } from 'vue';
+import { useI18n } from 'vue-i18n';
 
 import { api } from '../../api/client.js';
 import OfficeAuthCard from '../../components/office/OfficeAuthCard.vue';
 import { useFragmentCredential } from '../../composables/useFragmentCredential.js';
+import { registerOfficeMessages } from '../../office/i18n/index.js';
 import { officeMessage } from '../../office/messages.js';
+
+registerOfficeMessages();
+
+const { t } = useI18n();
 
 /**
  * The token arrives in the fragment, not the query string.
@@ -37,8 +43,8 @@ const passwordProblem = computed(() => {
   const result = newPasswordSchema.safeParse(password.value);
   if (!result.success) {
     return password.value.length < MIN_PASSWORD_LENGTH
-      ? `Use at least ${String(MIN_PASSWORD_LENGTH)} characters.`
-      : 'That password is too common. Choose another.';
+      ? t('office.resetPassword.tooShort', { min: MIN_PASSWORD_LENGTH })
+      : t('office.resetPassword.tooCommon');
   }
 
   return null;
@@ -77,29 +83,42 @@ async function submit(): Promise<void> {
 </script>
 
 <template>
-  <OfficeAuthCard heading="Set a new password">
-    <SfAlert v-if="missing" tone="warning" title="Link incomplete" data-test="missing">
-      This link is missing its token, or has already been opened. Request a new one.
+  <OfficeAuthCard :heading="t('office.resetPassword.heading')">
+    <SfAlert
+      v-if="missing"
+      tone="warning"
+      :title="t('office.resetPassword.missingTitle')"
+      data-test="missing"
+    >
+      {{ t('office.resetPassword.missingBody') }}
     </SfAlert>
 
-    <SfAlert v-else-if="done" tone="success" title="Password changed" data-test="done">
-      You can sign in with your new password. Any other sessions have been signed out.
+    <SfAlert
+      v-else-if="done"
+      tone="success"
+      :title="t('office.resetPassword.doneTitle')"
+      data-test="done"
+    >
+      {{ t('office.resetPassword.doneBody') }}
     </SfAlert>
 
     <template v-else>
-      <SfAlert v-if="problem !== null" tone="danger" title="Could not set the password">
+      <SfAlert
+        v-if="problem !== null"
+        tone="danger"
+        :title="t('office.resetPassword.problemTitle')"
+      >
         {{ problem }}
       </SfAlert>
 
       <p class="text-text-secondary">
-        Choose a password of at least {{ MIN_PASSWORD_LENGTH }} characters, then type it a second
-        time to confirm.
+        {{ t('office.resetPassword.instructions', { min: MIN_PASSWORD_LENGTH }) }}
       </p>
 
       <form class="flex flex-col gap-4" @submit.prevent="submit">
         <SfInput
           v-model="password"
-          label="New password"
+          :label="t('office.resetPassword.passwordLabel')"
           type="password"
           autocomplete="new-password"
           required
@@ -109,22 +128,22 @@ async function submit(): Promise<void> {
 
         <SfInput
           v-model="confirmation"
-          label="Repeat the new password"
+          :label="t('office.resetPassword.confirmationLabel')"
           type="password"
           autocomplete="new-password"
           required
           :maxlength="200"
-          :error="mismatch ? 'The two entries do not match.' : null"
+          :error="mismatch ? t('office.resetPassword.mismatch') : null"
         />
 
         <SfButton
           type="submit"
           :loading="submitting"
           :disabled="!ready"
-          loading-label="Saving"
+          :loading-label="t('office.resetPassword.savingLabel')"
           block
         >
-          Save the password
+          {{ t('office.resetPassword.submitLabel') }}
         </SfButton>
       </form>
     </template>
@@ -134,7 +153,7 @@ async function submit(): Promise<void> {
         :to="{ name: 'office-login' }"
         class="rounded-sf underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
       >
-        Back to sign in
+        {{ t('office.resetPassword.backToSignIn') }}
       </RouterLink>
     </template>
   </OfficeAuthCard>

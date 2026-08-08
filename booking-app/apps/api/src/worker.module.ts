@@ -5,6 +5,7 @@ import { AuditRetentionService } from './common/audit/audit-retention.service.js
 import { LoggingModule } from './common/logging/logger.module.js';
 import { ConfigModule } from './config/config.module.js';
 import { DomainModule } from './domain/domain.module.js';
+import { FeatureFlagsModule } from './feature-flags/feature-flags.module.js';
 import { IdempotencyModule } from './messaging/idempotency/idempotency.module.js';
 import { InboxModule } from './messaging/inbox/inbox.module.js';
 import { OutboxModule } from './messaging/outbox/outbox.module.js';
@@ -40,6 +41,7 @@ import { ProvidersModule } from './providers/providers.module.js';
     QueuesModule,
     OrganizationModule,
     DomainModule,
+    FeatureFlagsModule,
     ProvidersModule,
     OutboxModule,
     InboxModule,

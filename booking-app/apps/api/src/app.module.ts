@@ -14,6 +14,7 @@ import { ThrottlingModule } from './common/throttling/throttling.module.js';
 import { ConfigModule } from './config/config.module.js';
 import { loadConfig } from './config/env.schema.js';
 import { DomainModule } from './domain/domain.module.js';
+import { FeatureFlagsModule } from './feature-flags/feature-flags.module.js';
 import { HealthModule } from './health/health.module.js';
 import { ManageModule } from './manage/manage.module.js';
 import { IdempotencyModule } from './messaging/idempotency/idempotency.module.js';
@@ -50,6 +51,7 @@ import { WebhooksModule } from './webhooks/webhooks.module.js';
     InboxModule,
     IdempotencyModule,
     DomainModule,
+    FeatureFlagsModule,
     OrganizationModule,
     ProvidersModule,
     HealthModule,

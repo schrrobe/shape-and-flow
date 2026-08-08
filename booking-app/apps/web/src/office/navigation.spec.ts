@@ -9,34 +9,36 @@ import type { CapabilitySubject } from '@shape-and-flow/booking-contracts';
 
 /** What the sidebar would show this person. */
 function visibleTo(subject: CapabilitySubject): string[] {
-  return NAVIGATION.filter((entry) => can(subject, entry.capability)).map((entry) => entry.label);
+  return NAVIGATION.filter((entry) => can(subject, entry.capability)).map(
+    (entry) => entry.labelKey,
+  );
 }
 
 describe('office navigation', () => {
   it('shows an owner everything', () => {
     expect(visibleTo({ role: 'OWNER', canIssueRefunds: false })).toEqual(
-      NAVIGATION.map((entry) => entry.label),
+      NAVIGATION.map((entry) => entry.labelKey),
     );
   });
 
   it('withholds users and settings from an admin', () => {
     const visible = visibleTo({ role: 'ADMIN', canIssueRefunds: true });
 
-    expect(visible).not.toContain('Users');
-    expect(visible).not.toContain('Settings');
-    expect(visible).toContain('Exports');
-    expect(visible).toContain('Team');
+    expect(visible).not.toContain('office.nav.users');
+    expect(visible).not.toContain('office.nav.settings');
+    expect(visible).toContain('office.nav.exports');
+    expect(visible).toContain('office.nav.team');
   });
 
   it('shows an employee their own work and nothing administrative', () => {
     // Overview, calendar, bookings and requests scoped to their own appointments, plus their
     // own availability. No team, no treatments, no customer list, no exports.
     expect(visibleTo({ role: 'EMPLOYEE', canIssueRefunds: false })).toEqual([
-      'Overview',
-      'Calendar',
-      'Bookings',
-      'Requests',
-      'Availability',
+      'office.nav.overview',
+      'office.nav.calendar',
+      'office.nav.bookings',
+      'office.nav.requests',
+      'office.nav.availability',
     ]);
   });
 

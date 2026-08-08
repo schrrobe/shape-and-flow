@@ -37,6 +37,7 @@ import type {
   EmployeeListResponse,
   EmployeeServicesResponse,
   EraseCustomerResponse,
+  FeatureFlagClientConfig,
   CreateBookingRequest,
   CreateBookingResponse,
   ExportQuery,
@@ -321,6 +322,8 @@ function bearer(token: string): Record<string, string> {
 
 export const api = {
   public: {
+    featureFlagConfig: () => request<FeatureFlagClientConfig>('/public/feature-flags/config'),
+
     organization: (signal?: AbortSignal) =>
       request<OrganizationCurrentResponse>('/public/organizations/current', { signal }),
 

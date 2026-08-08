@@ -1,7 +1,8 @@
 import { flushPromises, mount } from '@vue/test-utils';
-import { describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { api } from '../../api/client.js';
+import { i18n } from '../../i18n/index.js';
 
 import OnboardingStatusPage from './OnboardingStatusPage.vue';
 
@@ -17,10 +18,18 @@ vi.mock('../../api/client.js', () => ({
 }));
 
 describe('OnboardingStatusPage', () => {
+  beforeAll(() => {
+    i18n.global.locale.value = 'en';
+  });
+
+  afterAll(() => {
+    i18n.global.locale.value = 'de';
+  });
+
   it('shows a retry button while onboarding is pending, not only when it has failed', async () => {
     vi.mocked(api.office.organization.current).mockResolvedValue({ stripeChargesEnabled: false });
 
-    const wrapper = mount(OnboardingStatusPage);
+    const wrapper = mount(OnboardingStatusPage, { global: { plugins: [i18n] } });
     await flushPromises();
 
     expect(wrapper.text()).toContain('Stripe is still processing');

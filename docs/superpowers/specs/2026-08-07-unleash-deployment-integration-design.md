@@ -125,7 +125,7 @@ The Docker Compose file explicitly passes the eight Unleash runtime variables. T
 
 The installation uses the OSS `default` project and its built-in `development` and `production` environments, then provisions six scoped tokens: separate dev and stage tokens both target `development`, while production tokens target `production`. A flag named `system.unleash-integration-smoke` exists in `default` and is disabled in both environments. Automated and manual checks evaluate it as `false`; it is not referenced by visible UI markup.
 
-Browser access uses `https://unleash.shapeandflow.de/api/frontend`. Nginx limits browser origins to `https://buchung.shapeandflow.de`, `https://stage.buchung.shapeandflow.de`, `https://dev.buchung.shapeandflow.de`, `https://shapeandflow.de`, `https://stage.shapeandflow.de`, `https://dev.shapeandflow.de`, `http://localhost:5173`, and `http://localhost:3000`. Server SDKs use `https://unleash.shapeandflow.de/api/` with backend tokens.
+Browser access uses `https://unleash.shapeandflow.de/api/frontend`. Unleash controls the frontend API origin allowlist through `UNLEASH_FRONTEND_API_ORIGINS`, permitting `https://buchung.shapeandflow.de`, `https://stage.buchung.shapeandflow.de`, `https://dev.buchung.shapeandflow.de`, `https://shapeandflow.de`, `https://stage.shapeandflow.de`, `https://dev.shapeandflow.de`, `http://localhost:5173`, and `http://localhost:3000`. Server SDKs use `https://unleash.shapeandflow.de/api/` with backend tokens.
 
 ## Failure and Security Behavior
 

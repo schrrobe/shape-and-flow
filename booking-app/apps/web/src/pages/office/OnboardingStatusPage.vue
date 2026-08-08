@@ -1,10 +1,16 @@
 <script setup lang="ts">
 import { onMounted, reactive } from 'vue';
+import { useI18n } from 'vue-i18n';
 
 import { api } from '../../api/client.js';
+import { registerOfficeMessages } from '../../office/i18n/index.js';
 import { officeMessage } from '../../office/messages.js';
 
 type Status = 'checking' | 'ready' | 'pending' | 'failed';
+
+registerOfficeMessages();
+
+const { t } = useI18n();
 
 const state = reactive<{ status: Status; error: string | null }>({
   status: 'checking',
@@ -33,16 +39,19 @@ async function retry(): Promise<void> {
 
 <template>
   <div class="mx-auto flex max-w-md flex-col gap-4 p-6">
-    <p v-if="state.status === 'checking'">Checking your Stripe onboarding status…</p>
-    <p v-else-if="state.status === 'ready'">Your account is ready. <a href="/office">Go to the dashboard</a>.</p>
+    <p v-if="state.status === 'checking'">{{ t('office.onboardingStatus.checking') }}</p>
+    <p v-else-if="state.status === 'ready'">
+      {{ t('office.onboardingStatus.ready') }}
+      <a href="/office">{{ t('office.onboardingStatus.dashboardLink') }}</a>
+    </p>
     <div v-else-if="state.status === 'pending'">
-      <p>Stripe is still processing your details. Reload this page in a minute, or retry now.</p>
-      <button type="button" @click="retry">Retry onboarding</button>
+      <p>{{ t('office.onboardingStatus.pending') }}</p>
+      <button type="button" @click="retry">{{ t('office.onboardingStatus.retry') }}</button>
       <p v-if="state.error">{{ state.error }}</p>
     </div>
     <div v-else>
-      <p>Something went wrong finishing your Stripe onboarding.</p>
-      <button type="button" @click="retry">Retry onboarding</button>
+      <p>{{ t('office.onboardingStatus.failed') }}</p>
+      <button type="button" @click="retry">{{ t('office.onboardingStatus.retry') }}</button>
       <p v-if="state.error">{{ state.error }}</p>
     </div>
   </div>

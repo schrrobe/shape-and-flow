@@ -2,8 +2,10 @@
 import { replaceWorkingHoursSchema, weekdaySchema } from '@shape-and-flow/booking-contracts';
 import { SfAlert, SfButton, SfInput, SfSelect } from '@shape-and-flow/booking-ui';
 import { computed, ref, watch } from 'vue';
+import { useI18n } from 'vue-i18n';
 
 import { dateTime, minuteOfDay, parseMinuteOfDay } from '../../office/format.js';
+import { registerOfficeMessages } from '../../office/i18n/index.js';
 
 import type {
   ConflictingBooking,
@@ -32,11 +34,41 @@ const props = defineProps<{
 
 const emit = defineEmits<{ save: [ReplaceWorkingHoursRequest] }>();
 
+registerOfficeMessages();
+const { t } = useI18n();
+
+const WEEKDAY_LABELS: Record<Weekday, string> = {
+  MONDAY: 'office.workingHours.weekdays.monday',
+  TUESDAY: 'office.workingHours.weekdays.tuesday',
+  WEDNESDAY: 'office.workingHours.weekdays.wednesday',
+  THURSDAY: 'office.workingHours.weekdays.thursday',
+  FRIDAY: 'office.workingHours.weekdays.friday',
+  SATURDAY: 'office.workingHours.weekdays.saturday',
+  SUNDAY: 'office.workingHours.weekdays.sunday',
+};
+
+/**
+ * Every fixed English string `replaceWorkingHoursSchema`'s refinements can produce, mapped
+ * to a translation key. The schema's own `issue.message` is what the API and the browser
+ * agree on, so it is the map's key rather than `issue.code`/`issue.path` — several
+ * refinements share the same path and would not be distinguishable otherwise.
+ */
+const VALIDATION_MESSAGE_KEYS: Record<string, string> = {
+  'endMinute must be after startMinute': 'office.workingHours.problemEndAfterStart',
+  'a break must end after it starts': 'office.workingHours.problemBreakEndAfterStart',
+  'a break must lie inside the segment that contains it':
+    'office.workingHours.problemBreakInsideSegment',
+  'breaks must not overlap each other': 'office.workingHours.problemBreaksOverlap',
+  'segments on the same weekday must not overlap': 'office.workingHours.problemSegmentsOverlap',
+};
+
 const WEEKDAYS = weekdaySchema.options;
-const WEEKDAY_OPTIONS = WEEKDAYS.map((day) => ({
-  value: day,
-  label: day.charAt(0) + day.slice(1).toLowerCase(),
-}));
+const WEEKDAY_OPTIONS = computed(() =>
+  WEEKDAYS.map((day) => ({
+    value: day,
+    label: t(WEEKDAY_LABELS[day]),
+  })),
+);
 
 /** The form's own shape: wall-clock strings, because that is what a person types. */
 interface DraftBreak {
@@ -113,14 +145,21 @@ const body = computed<ReplaceWorkingHoursRequest | null>(() => {
  * API cannot disagree about what is wrong or about what to call it.
  */
 const problems = computed<string[]>(() => {
-  if (body.value === null) return ['Every time must be written as HH:MM, for example 09:00.'];
+  if (body.value === null) {
+    return [t('office.workingHours.invalidTimeFormat', { example: '09:00' })];
+  }
 
   const result = replaceWorkingHoursSchema.safeParse(body.value);
   if (result.success) return [];
 
   // De-duplicated: one overlap produces the same message once per affected segment, and
   // an operator does not need to be told three times.
-  return [...new Set(result.error.issues.map((issue) => issue.message))];
+  const messages = result.error.issues.map((issue) => {
+    const key = VALIDATION_MESSAGE_KEYS[issue.message];
+    return key === undefined ? issue.message : t(key);
+  });
+
+  return [...new Set(messages)];
 });
 
 const valid = computed(() => problems.value.length === 0);
@@ -156,12 +195,14 @@ function submit(): void {
       :key="index"
       class="rounded-sf border border-border p-3"
     >
-      <legend class="px-1 text-sm font-medium">Shift {{ index + 1 }}</legend>
+      <legend class="px-1 text-sm font-medium">
+        {{ t('office.workingHours.shiftLabel', { number: index + 1 }) }}
+      </legend>
 
       <div class="grid gap-3 sm:grid-cols-4">
         <SfSelect
           :model-value="segment.weekday"
-          label="Day"
+          :label="t('office.workingHours.dayLabel')"
           :options="WEEKDAY_OPTIONS"
           :data-test="`weekday-${index}`"
           @update:model-value="(value) => (segment.weekday = value as Weekday)"
@@ -169,14 +210,14 @@ function submit(): void {
 
         <SfInput
           v-model="segment.start"
-          label="From"
+          :label="t('office.workingHours.fromLabel')"
           placeholder="09:00"
           :data-test="`start-${index}`"
         />
 
         <SfInput
           v-model="segment.end"
-          label="To (24:00 means midnight)"
+          :label="t('office.workingHours.toLabel')"
           placeholder="18:00"
           :data-test="`end-${index}`"
         />
@@ -187,7 +228,7 @@ function submit(): void {
             :data-test="`remove-segment-${index}`"
             @click="removeSegment(index)"
           >
-            Remove shift
+            {{ t('office.workingHours.removeShift') }}
           </SfButton>
         </div>
       </div>
@@ -199,17 +240,17 @@ function submit(): void {
       >
         <SfInput
           v-model="rest.start"
-          label="Break from"
+          :label="t('office.workingHours.breakFromLabel')"
           :data-test="`break-start-${index}-${breakIndex}`"
         />
         <SfInput
           v-model="rest.end"
-          label="Break to"
+          :label="t('office.workingHours.breakToLabel')"
           :data-test="`break-end-${index}-${breakIndex}`"
         />
         <SfInput
           v-model="rest.label"
-          label="Called"
+          :label="t('office.workingHours.breakNameLabel')"
           :data-test="`break-label-${index}-${breakIndex}`"
         />
         <div class="flex items-end">
@@ -218,7 +259,7 @@ function submit(): void {
             :data-test="`remove-break-${index}-${breakIndex}`"
             @click="removeBreak(index, breakIndex)"
           >
-            Remove break
+            {{ t('office.workingHours.removeBreak') }}
           </SfButton>
         </div>
       </div>
@@ -229,11 +270,13 @@ function submit(): void {
         :data-test="`add-break-${index}`"
         @click="addBreak(index)"
       >
-        Add a break
+        {{ t('office.workingHours.addBreak') }}
       </SfButton>
     </fieldset>
 
-    <SfButton variant="secondary" data-test="add-segment" @click="addSegment">Add a shift</SfButton>
+    <SfButton variant="secondary" data-test="add-segment" @click="addSegment">
+      {{ t('office.workingHours.addShift') }}
+    </SfButton>
 
     <SfAlert v-if="problems.length > 0" tone="warning" data-test="problems">
       <ul class="list-inside list-disc">
@@ -247,7 +290,7 @@ function submit(): void {
       a person.
     -->
     <SfAlert v-if="(conflicts ?? []).length > 0" tone="warning" data-test="conflicts">
-      <p class="font-medium">These appointments are now outside the saved hours:</p>
+      <p class="font-medium">{{ t('office.workingHours.conflictsHeading') }}</p>
       <ul class="mt-1 list-inside list-disc">
         <li v-for="conflict in conflicts" :key="conflict.id">
           {{ conflict.reference }} — {{ dateTime(conflict.startsAt) }} —
@@ -265,11 +308,11 @@ function submit(): void {
     <SfButton
       :disabled="!valid"
       :loading="saving === true"
-      loading-label="Saving"
+      :loading-label="t('office.workingHours.saving')"
       data-test="save"
       @click="submit"
     >
-      Save the week
+      {{ t('office.workingHours.save') }}
     </SfButton>
   </form>
 </template>

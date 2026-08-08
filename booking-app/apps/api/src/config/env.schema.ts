@@ -89,6 +89,13 @@ export const envSchema = z
     PUBLIC_WEB_ORIGIN: httpOrigin,
     PUBLIC_API_ORIGIN: httpOrigin,
 
+    // ── feature flags ────────────────────────────────────────────────────────
+    UNLEASH_URL: z.url().optional(),
+    UNLEASH_BACKEND_TOKEN: nonEmpty.optional(),
+    UNLEASH_FRONTEND_TOKEN: nonEmpty.optional(),
+    UNLEASH_ENVIRONMENT: z.enum(['development', 'production']).optional(),
+    UNLEASH_DEPLOYMENT: z.enum(['dev', 'stage', 'production']).optional(),
+
     // ── payments ─────────────────────────────────────────────────────────────
     PAYMENT_PROVIDER: z.enum(['fake', 'stripe']).default('fake'),
     STRIPE_SECRET_KEY: z.string().optional(),
@@ -156,6 +163,41 @@ export const envSchema = z
         });
       }
     };
+
+    const unleashKeys = [
+      'UNLEASH_URL',
+      'UNLEASH_BACKEND_TOKEN',
+      'UNLEASH_FRONTEND_TOKEN',
+      'UNLEASH_ENVIRONMENT',
+      'UNLEASH_DEPLOYMENT',
+    ] as const;
+    const hasAnyUnleashSetting = unleashKeys.some((key) => !isPlaceholder(env[key]));
+
+    if (hasAnyUnleashSetting || env.NODE_ENV === 'production') {
+      for (const key of unleashKeys) {
+        if (isPlaceholder(env[key])) {
+          ctx.addIssue({
+            code: 'custom',
+            path: [key],
+            message: `${key} is required when Unleash is configured or NODE_ENV is "production"`,
+          });
+        }
+      }
+    }
+
+    if (
+      env.NODE_ENV === 'production' &&
+      !isPlaceholder(env.UNLEASH_BACKEND_TOKEN) &&
+      env.UNLEASH_URL !== undefined &&
+      new URL(env.UNLEASH_URL).protocol === 'http:'
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['UNLEASH_URL'],
+        message:
+          'UNLEASH_URL must use HTTPS when NODE_ENV is "production" and UNLEASH_BACKEND_TOKEN is configured',
+      });
+    }
 
     if (env.PAYMENT_PROVIDER === 'stripe') {
       requireCredential('STRIPE_SECRET_KEY', 'PAYMENT_PROVIDER is "stripe"');
