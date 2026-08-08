@@ -21,7 +21,6 @@ import { connectRedis, redis } from '../redis.harness.js';
 import type { BookingTestApp } from '../booking-app.harness.js';
 import type { SeedContext } from '../factories/index.js';
 import type { RegisterOrganizationResponse, ServiceListResponse } from '@shape-and-flow/booking-contracts';
-import type { RequestHandler } from 'express';
 import type { Server } from 'node:http';
 
 /**
@@ -129,13 +128,6 @@ beforeEach(async () => {
   ctx = await seedOrganization(prisma);
 
   const tenantResolution = new TenantResolutionMiddleware(prisma);
-  const scopedTenantResolution: RequestHandler = (req, res, next) => {
-    if (!req.path.startsWith('/api/public')) {
-      next();
-      return;
-    }
-    void tenantResolution.middleware(req, res, next);
-  };
 
   testApp = await createBookingTestApp({
     organization: await loadOrganization(ctx.organization.id),
@@ -143,7 +135,14 @@ beforeEach(async () => {
     extraImports: [RegistrationProbeModule],
     redis,
     globalPrefix: 'api',
-    middleware: [scopedTenantResolution],
+    // The `[prefix, handler]` form, not a hand-rolled path check: it mounts via
+    // `app.use(prefix, handler)`, the same call `main.ts` makes and the same one
+    // `tenant-rejection.int.spec.ts` relies on for Express 5 to turn a middleware
+    // rejection into `next(err)` on its own. A bare `RequestHandler` wrapping a
+    // `void`-called async middleware — the previous shape here — discarded that
+    // promise instead, so a rejection would have become an unhandled one rather
+    // than reaching the `GlobalExceptionFilter`.
+    middleware: [['/api/public', tenantResolution.middleware]],
   });
   server = testApp.server;
 

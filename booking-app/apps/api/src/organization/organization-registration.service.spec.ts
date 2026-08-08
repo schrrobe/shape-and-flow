@@ -243,6 +243,7 @@ describe('OrganizationRegistrationService', () => {
      */
     async function buildService(): Promise<{
       service: OrganizationRegistrationService;
+      prisma: { $transaction: ReturnType<typeof vi.fn>; organization: { update: ReturnType<typeof vi.fn> } };
       stripeConnect: {
         createExpressAccount: ReturnType<typeof vi.fn>;
         createAccountLink: ReturnType<typeof vi.fn>;
@@ -271,7 +272,7 @@ describe('OrganizationRegistrationService', () => {
         ],
       }).compile();
 
-      return { service: moduleRef.get(OrganizationRegistrationService), stripeConnect };
+      return { service: moduleRef.get(OrganizationRegistrationService), prisma, stripeConnect };
     }
 
     it.each([
@@ -283,12 +284,18 @@ describe('OrganizationRegistrationService', () => {
       ['a userinfo (@) bypass of a naive prefix check', 'https://app.example.com@evil.com/'],
       ['a non-URL string', 'not-a-url'],
     ])('rejects %s', async (_label, returnUrl) => {
-      const { service, stripeConnect } = await buildService();
+      const { service, prisma, stripeConnect } = await buildService();
 
       await expect(service.register({ ...REQUEST, returnUrl })).rejects.toMatchObject({
         code: 'INVALID_RETURN_URL',
       });
 
+      // Pins the placement, not just the outcome: validation runs before the transaction
+      // opens, so a regression that moved it back to run alongside or after the Stripe
+      // call — the bug this suite was written to catch — would still leave
+      // `createExpressAccount`/`createAccountLink` uncalled and pass the two assertions
+      // below on their own.
+      expect(prisma.$transaction).not.toHaveBeenCalled();
       expect(stripeConnect.createExpressAccount).not.toHaveBeenCalled();
       expect(stripeConnect.createAccountLink).not.toHaveBeenCalled();
     });
