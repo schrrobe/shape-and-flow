@@ -1,6 +1,7 @@
+import { createPinia, setActivePinia } from 'pinia';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { resetTenantSlugForTest } from '../api/tenant.js';
+import { resetTenantSlugForTest, tenantSlug } from '../api/tenant.js';
 
 import { router } from './index.js';
 
@@ -67,6 +68,22 @@ describe('the organizer parameter', () => {
       organizer: 'acme',
       session_id: 'cs_123',
     });
+  });
+
+  it('ignores an organizer on an office URL rather than repointing the tab', async () => {
+    // The office session guard reaches for its store on every office navigation, and
+    // `/office/forgot-password` is the one office route that needs no session — so this
+    // exercises the organizer handling without standing up a signed-in session.
+    setActivePinia(createPinia());
+
+    await router.push('/?organizer=acme');
+    await router.push('/office/forgot-password?organizer=other');
+    await router.push('/booking/slot');
+
+    // The office resolves its tenant from the session cookie, so `other` named nothing
+    // there — and must not have replaced the organizer the public pages are booking with.
+    expect(tenantSlug()).toBe('acme');
+    expect(router.currentRoute.value.query.organizer).toBe('acme');
   });
 
   it('adds nothing on the root address', async () => {

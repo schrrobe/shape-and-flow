@@ -211,6 +211,14 @@ export class StripeEventProcessor {
 
     const booking = await this.resolveBooking(sessionId, object.client_reference_id);
 
+    if (!(await this.eventIsFromTheBookingsAccount(booking.id, sessionId, stripeAccountId))) {
+      // Dropped, not retried: nothing about this event will become valid later.
+      this.logger.error(
+        `payment.foreign_account booking=${booking.id} session=${sessionId} account=${stripeAccountId ?? 'platform'} event=${eventId}`,
+      );
+      return;
+    }
+
     const outcome = await this.confirmations.confirmPaid({
       bookingId: booking.id,
       sessionId,
@@ -338,6 +346,47 @@ export class StripeEventProcessor {
       where: { id: bookingId },
       select: { id: true },
     });
+  }
+
+  /**
+   * Whether this event may speak for this booking's money.
+   *
+   * One Connect webhook endpoint receives events from every account connected to the
+   * platform, so `event.account` says which connected merchant sent an event — not that
+   * the event is about them. `client_reference_id` is the fallback the booking is
+   * resolved by, and a connected merchant controls it: they can open a Checkout Session
+   * on their own account carrying somebody else's booking id, pay themselves, and this
+   * path would confirm a stranger's booking — and, since no payment row names their
+   * session id, write one recording their account as where the money is — without a cent
+   * reaching the organizer.
+   *
+   * The payment row is the answer whenever it exists: it was written when the session was
+   * opened and already names the account it was opened on. Without one — the session was
+   * created but the process died before the id was stored — the organization's own
+   * account is the only connected account that may report it, and the platform account
+   * (`undefined`) stays acceptable because only we can send from there, and a booking
+   * opened before the organization moved to Connect is legitimately platform-charged.
+   */
+  private async eventIsFromTheBookingsAccount(
+    bookingId: string,
+    sessionId: string,
+    eventAccountId: string | undefined,
+  ): Promise<boolean> {
+    const account = eventAccountId ?? null;
+
+    const payment = await this.prisma.payment.findUnique({
+      where: { stripeCheckoutSessionId: sessionId },
+      select: { stripeAccountId: true },
+    });
+
+    if (payment !== null) return account === payment.stripeAccountId;
+
+    const booking = await this.prisma.booking.findUnique({
+      where: { id: bookingId },
+      select: { organization: { select: { stripeAccountId: true } } },
+    });
+
+    return account === null || account === booking?.organization.stripeAccountId;
   }
 
   private async resolveBooking(

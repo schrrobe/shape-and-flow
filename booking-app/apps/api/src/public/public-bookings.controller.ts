@@ -68,8 +68,17 @@ export class PublicBookingsController {
     // organization whose Stripe account creation failed, and a null account id there
     // means "not provisioned yet" — reading it as "legacy platform tenant" is what would
     // let a brand-new organizer charge onto our own account.
+    //
+    // Both flags, so this gate refuses exactly what `accountForNewCharge` refuses when
+    // checkout runs a moment later. `stripeChargesEnabled` without an account id should
+    // not happen — the flag only ever arrives on an `account.updated` matched by account
+    // id — but a gate that is narrower than the one behind it fails after the hold rather
+    // than before it, which is the failure this check exists to prevent.
     const organization = this.organizations.get();
-    if (organization.paymentsMode === PaymentsMode.CONNECT && !organization.stripeChargesEnabled) {
+    if (
+      organization.paymentsMode === PaymentsMode.CONNECT &&
+      (!organization.stripeChargesEnabled || organization.stripeAccountId === null)
+    ) {
       throw new AppError('ORGANIZATION_ONBOARDING_INCOMPLETE', {
         message: 'This organizer has not finished setting up payments yet.',
       });

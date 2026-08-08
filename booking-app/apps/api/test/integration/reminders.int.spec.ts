@@ -532,8 +532,12 @@ describe('the reconciler', () => {
       ]);
     }
 
-    expect(byOrganization.get(ctx.organization.id)?.sort()).toEqual([1440]);
-    expect(byOrganization.get(other.organization.id)?.sort()).toEqual([120, 1440]);
+    // Numeric comparator: the default sort compares string forms, so an offset such as
+    // 90 added later would order after 1440 and fail this for the wrong reason.
+    const ascending = (a: number, b: number): number => a - b;
+
+    expect(byOrganization.get(ctx.organization.id)?.sort(ascending)).toEqual([1440]);
+    expect(byOrganization.get(other.organization.id)?.sort(ascending)).toEqual([120, 1440]);
   });
 });
 

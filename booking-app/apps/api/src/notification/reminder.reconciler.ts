@@ -114,12 +114,18 @@ export class ReminderReconciler {
       // more offsets silently lose the extra reminders, and tenants that configured fewer
       // get reminders they never asked for.
       for (const [organizationId, group] of groupByOrganization(bookings)) {
+        // Checked before the scope is opened, and returned from rather than broken out of
+        // below: `runWithOrganization` costs a tenant scope and a settings read per group,
+        // and a `break` in the innermost loop leaves the two loops above it — and every
+        // remaining organization in this page — still running once the budget is spent.
+        if (requeued >= BATCH) break;
+
         await runWithOrganization(organizationId, this.prisma, async () => {
           const offsets = this.reminders.offsets();
 
           for (const booking of group) {
             for (const offsetMinutes of offsets) {
-              if (requeued >= BATCH) break;
+              if (requeued >= BATCH) return;
 
               const delay = booking.startsAt.getTime() - offsetMinutes * 60_000 - now.getTime();
               if (delay <= 0) continue;

@@ -104,6 +104,8 @@ async function seedEvent(
   object: Record<string, unknown>,
   id: string,
   createdAt?: Date,
+  /** The connected account the delivery came from. Omitted means the platform account. */
+  account?: string,
 ): Promise<void> {
   await prisma.stripeWebhookEvent.create({
     data: {
@@ -113,6 +115,7 @@ async function seedEvent(
         id,
         type,
         ...(createdAt === undefined ? {} : { created: Math.floor(createdAt.getTime() / 1000) }),
+        ...(account === undefined ? {} : { account }),
         data: { object },
       } as Prisma.InputJsonValue,
     },
@@ -260,8 +263,9 @@ describe('POST /webhooks/stripe/connect', () => {
  */
 describe('account.updated reaching OrganizationWebhookHandler', () => {
   beforeEach(async () => {
-    // A known starting state, independent of seedOrganization's own defaults: no Stripe
-    // account linked yet, onboarding not yet reported.
+    // A known starting state, independent of seedOrganization's own defaults: the account
+    // is linked — that is what the handler's lookup by `stripeAccountId` resolves — and
+    // onboarding has not been reported on it yet.
     await prisma.organization.update({
       where: { id: ctx.organization.id },
       data: {
@@ -369,6 +373,33 @@ describe('confirming a paid booking', () => {
         where: { aggregateId: bookingId, eventType: JOB.BOOKING_CONFIRMED },
       }),
     ).toBe(1);
+  });
+
+  // The Connect endpoint receives events from every account connected to the platform, so
+  // `event.account` identifies the sender and nothing more. A merchant who opens a session
+  // on their own account naming somebody else's booking must not be able to confirm it.
+  it('ignores a paid session reported by an account this booking never used', async () => {
+    await seedEvent(
+      'checkout.session.completed',
+      {
+        id: 'cs_foreign',
+        client_reference_id: bookingId,
+        payment_status: 'paid',
+        amount_total: ctx.service30.priceCents,
+      },
+      'evt_foreign',
+      undefined,
+      'acct_someone_else',
+    );
+
+    await processor.handle({ stripeEventId: 'evt_foreign' });
+
+    const booking = await prisma.booking.findUniqueOrThrow({ where: { id: bookingId } });
+    expect(booking.status).toBe('PENDING_PAYMENT');
+    expect(await prisma.payment.count({ where: { stripeCheckoutSessionId: 'cs_foreign' } })).toBe(
+      0,
+    );
+    expect(await prisma.managementToken.count({ where: { bookingId } })).toBe(0);
   });
 
   it('puts the plaintext token in the outbox payload and only its hash in the table', async () => {

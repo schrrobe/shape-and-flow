@@ -373,10 +373,12 @@ export class FakePaymentProvider implements PaymentProvider {
     return { refundId: refund.refundId, status: 'succeeded', amountCents: refund.amountCents };
   }
 
+  // No default for `destination`: the port declares it required, and a fake that fills it
+  // in silently lets a test verify a Connect delivery against the platform secret and pass.
   verifyWebhook(
     rawBody: Buffer,
     signature: string,
-    destination: WebhookDestination = 'platform',
+    destination: WebhookDestination,
   ): ProviderEvent {
     const expected = Buffer.from(this.signatureFor(rawBody, destination), 'utf8');
     const provided = Buffer.from(signature, 'utf8');

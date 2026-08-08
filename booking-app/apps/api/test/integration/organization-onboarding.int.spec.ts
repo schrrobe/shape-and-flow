@@ -183,7 +183,14 @@ describe('POST /api/office/organization/onboarding-link', () => {
   });
 
   it('creates one Stripe account when two retries race', async () => {
-    fakeStripe.accounts.create.mockResolvedValue({ id: 'acct_race' });
+    // A distinct id per call, where the real Stripe would answer both with the same
+    // account: with one id for both, the loser of the race returning its own id instead
+    // of the stored one is indistinguishable from the read-back working.
+    let created = 0;
+    fakeStripe.accounts.create.mockImplementation(() => {
+      created += 1;
+      return Promise.resolve({ id: `acct_race_${String(created)}` });
+    });
     fakeStripe.accountLinks.create.mockResolvedValue({
       url: 'https://connect.stripe.com/setup/acct_race',
     });
@@ -212,10 +219,15 @@ describe('POST /api/office/organization/onboarding-link', () => {
       where: { id: ctx.organization.id },
       select: { stripeAccountId: true },
     });
-    expect(stored.stripeAccountId).toBe('acct_race');
+    expect(stored.stripeAccountId).toMatch(/^acct_race_[12]$/);
 
     for (const call of fakeStripe.accounts.create.mock.calls) {
       expect(call[1]).toEqual({ idempotencyKey: `org-${ctx.organization.id}-express-account` });
+    }
+
+    // Both links point at the id the row actually holds, whichever request won.
+    for (const call of fakeStripe.accountLinks.create.mock.calls) {
+      expect(call[0]).toMatchObject({ account: stored.stripeAccountId });
     }
   });
 

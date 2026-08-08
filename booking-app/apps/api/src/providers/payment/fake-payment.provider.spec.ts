@@ -351,7 +351,7 @@ describe('verifyWebhook', () => {
 
   it('accepts a correctly signed body and returns the event', () => {
     const raw = rawEvent();
-    const event = provider.verifyWebhook(raw, provider.signatureFor(raw));
+    const event = provider.verifyWebhook(raw, provider.signatureFor(raw), 'platform');
 
     expect(event.id).toBe('evt_fake_1');
     expect(event.type).toBe('checkout.session.completed');
@@ -360,21 +360,23 @@ describe('verifyWebhook', () => {
 
   it('rejects a wrong signature', () => {
     const raw = rawEvent();
-    expect(() => provider.verifyWebhook(raw, 'deadbeef')).toThrow(/signature/i);
+    expect(() => provider.verifyWebhook(raw, 'deadbeef', 'platform')).toThrow(/signature/i);
   });
 
   it('rejects a signature computed over different bytes', () => {
     // Re-serialising a parsed body changes the bytes, which is exactly why the
     // port takes a Buffer.
     const signature = provider.signatureFor(rawEvent());
-    expect(() => provider.verifyWebhook(rawEvent({ id: 'evt_fake_2' }), signature)).toThrow(
-      /signature/i,
-    );
+    expect(() =>
+      provider.verifyWebhook(rawEvent({ id: 'evt_fake_2' }), signature, 'platform'),
+    ).toThrow(/signature/i);
   });
 
   it('rejects a signed body that is not a recognisable event', () => {
     const raw = Buffer.from(JSON.stringify({ hello: 'world' }));
-    expect(() => provider.verifyWebhook(raw, provider.signatureFor(raw))).toThrow(/id or a type/);
+    expect(() => provider.verifyWebhook(raw, provider.signatureFor(raw), 'platform')).toThrow(
+      /id or a type/,
+    );
   });
 });
 

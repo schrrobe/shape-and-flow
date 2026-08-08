@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   captureTenantSlug,
@@ -44,10 +44,16 @@ describe('captureTenantSlug', () => {
     expect(tenantSlug()).toBeNull();
   });
 
-  it('survives a reload, because it is stored rather than only held', () => {
+  it('survives a reload, because it is stored rather than only held', async () => {
     captureTenantSlug('?organizer=acme');
 
-    // What a fresh page load looks like: module state gone, storage intact.
+    // What a fresh page load looks like: module state gone, storage intact. Asserting on
+    // storage alone would pass even if nothing read it back, so the reloaded module is
+    // the one asked for the slug.
+    vi.resetModules();
+    const reloaded = await import('./tenant.js');
+
+    expect(reloaded.tenantSlug()).toBe('acme');
     expect(sessionStorage.getItem('shape-and-flow:organizer')).toBe('acme');
   });
 });

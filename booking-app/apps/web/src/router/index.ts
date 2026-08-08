@@ -246,10 +246,17 @@ export const router = createRouter({
  * slug on an authenticated URL would be a second way to name a tenant that nothing reads.
  */
 router.beforeEach((to) => {
-  const explicit = readOrganizerParam(to.query[ORGANIZER_PARAM]);
-  if (explicit !== null) rememberTenantSlug(explicit);
+  // Before the parameter is read at all, not just before it is put back: an office URL
+  // that carries `?organizer=` names nothing the office reads, so honouring it would let
+  // `/office?organizer=other` repoint the tab's booking tenant and send a later public
+  // navigation to an organizer the customer never chose.
+  if (to.meta.area === 'office') return true;
 
-  if (explicit !== null || to.meta.area === 'office') return true;
+  const explicit = readOrganizerParam(to.query[ORGANIZER_PARAM]);
+  if (explicit !== null) {
+    rememberTenantSlug(explicit);
+    return true;
+  }
 
   const slug = tenantSlug();
   if (slug === null) return true;
