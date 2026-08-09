@@ -37,4 +37,9 @@ export const NAVIGATION: readonly NavigationEntry[] = [
   { name: 'office-exports', labelKey: 'office.nav.exports', capability: 'export.csv' },
   { name: 'office-users', labelKey: 'office.nav.users', capability: 'users.manage' },
   { name: 'office-settings', labelKey: 'office.nav.settings', capability: 'settings.edit' },
+  // `settings.edit` rather than a capability of its own: it is the one row §10.5 grants to
+  // OWNER alone, which is exactly who the endpoint behind this page admits. A `payment.view`
+  // row would mean amending the §10.5 table the capability tests parse, for a page whose
+  // audience is already spelled out by an existing row.
+  { name: 'office-payments', labelKey: 'office.nav.payments', capability: 'settings.edit' },
 ];

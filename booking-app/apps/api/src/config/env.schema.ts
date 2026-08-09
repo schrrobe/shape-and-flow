@@ -129,6 +129,17 @@ export const envSchema = z
     // ── payments ─────────────────────────────────────────────────────────────
     PAYMENT_PROVIDER: z.enum(['fake', 'stripe']).default('fake'),
     STRIPE_SECRET_KEY: z.string().optional(),
+    /**
+     * The publishable key, which the office area needs to mount Connect embedded
+     * components.
+     *
+     * Not a secret, but still configuration: it is handed to the browser by
+     * `POST /office/organization/account-session` rather than compiled into the web
+     * bundle, so that one image can serve any Stripe mode. Required alongside the secret
+     * key, because a `stripe` deployment without it has a payments page that can only
+     * ever render an error.
+     */
+    STRIPE_PUBLISHABLE_KEY: z.string().optional(),
     STRIPE_WEBHOOK_SECRET: z.string().optional(),
     /**
      * Signing secret of the Stripe *Connect* webhook destination.
@@ -175,6 +186,7 @@ export const envSchema = z
   .superRefine((env, ctx) => {
     type CredentialKey =
       | 'STRIPE_SECRET_KEY'
+      | 'STRIPE_PUBLISHABLE_KEY'
       | 'STRIPE_WEBHOOK_SECRET'
       | 'STRIPE_CONNECT_WEBHOOK_SECRET'
       | 'RESEND_API_KEY'
@@ -231,6 +243,7 @@ export const envSchema = z
 
     if (env.PAYMENT_PROVIDER === 'stripe') {
       requireCredential('STRIPE_SECRET_KEY', 'PAYMENT_PROVIDER is "stripe"');
+      requireCredential('STRIPE_PUBLISHABLE_KEY', 'PAYMENT_PROVIDER is "stripe"');
       requireCredential('STRIPE_WEBHOOK_SECRET', 'PAYMENT_PROVIDER is "stripe"');
       requireCredential('STRIPE_CONNECT_WEBHOOK_SECRET', 'PAYMENT_PROVIDER is "stripe"');
     }

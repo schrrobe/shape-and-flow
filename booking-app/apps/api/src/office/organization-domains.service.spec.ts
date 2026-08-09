@@ -227,9 +227,9 @@ describe('OrganizationDomainsService', () => {
       const { service, create } = build();
       create.mockRejectedValue(primaryKeyViolation());
 
-      await expect(
-        service.add({ hostname: 'studio-muster.de', isPrimary: true }),
-      ).rejects.toThrow(primaryKeyViolation().message);
+      await expect(service.add({ hostname: 'studio-muster.de', isPrimary: true })).rejects.toThrow(
+        primaryKeyViolation().message,
+      );
       expect(create).toHaveBeenCalledTimes(4);
     });
   });

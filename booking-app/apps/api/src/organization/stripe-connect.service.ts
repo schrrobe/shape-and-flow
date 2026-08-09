@@ -48,6 +48,53 @@ export class StripeConnectService {
     return { stripeAccountId: account.id };
   }
 
+  /**
+   * A single-use secret that lets the office area mount Connect embedded components for
+   * this organizer's account.
+   *
+   * The enabled features are a deliberate short list rather than everything on offer:
+   *
+   *  - **`dispute_management`** is on because the organizer is the merchant of record on
+   *    their own account and answers the chargeback either way.
+   *  - **`refund_management`** is off, even though the organizer could in principle refund
+   *    their own charge. A refund issued inside the component is one we cannot ingest: it
+   *    arrives as a `refund.created` for which `RefundService.applyProviderUpdate` finds
+   *    neither a `stripeRefundId` nor an `idempotencyKey` it knows, so it is logged and
+   *    dropped. The booking would keep reading as fully paid, and the office refund flow
+   *    would happily refund it a second time. Until a refund born on Stripe's side can
+   *    create the local row, the office flow stays the only way to issue one.
+   *  - **`capture_payments`** is off: Checkout captures automatically, so there is no
+   *    manual capture flow for the control to act on.
+   *  - **`instant_payouts`** is off: the platform has not enabled it, so the button would
+   *    only ever produce an error.
+   *
+   * What is *not* off, and cannot be: `external_account_collection` defaults to `true` and
+   * Stripe only accepts `false` for accounts where the platform collects requirements
+   * itself, which an Express account is not. The payouts component therefore also lets the
+   * organizer change the bank account payouts land in. That is theirs to change — but it
+   * means an OWNER session is enough to redirect their money, and the only trace on our
+   * side is the `ORGANIZATION_ACCOUNT_SESSION_CREATED` row saying the page was opened.
+   */
+  async createAccountSession(stripeAccountId: string): Promise<{ clientSecret: string }> {
+    const stripe = this.require();
+    const session = await stripe.accountSessions.create({
+      account: stripeAccountId,
+      components: {
+        payments: {
+          enabled: true,
+          features: {
+            refund_management: false,
+            dispute_management: true,
+            capture_payments: false,
+          },
+        },
+        payouts: { enabled: true, features: { instant_payouts: false } },
+      },
+    });
+
+    return { clientSecret: session.client_secret };
+  }
+
   async createAccountLink(stripeAccountId: string, returnUrl: string): Promise<{ url: string }> {
     const stripe = this.require();
     const link = await stripe.accountLinks.create({

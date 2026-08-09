@@ -181,6 +181,7 @@ describe('envSchema', () => {
     expect(paths(result)).toEqual(
       expect.arrayContaining([
         'STRIPE_SECRET_KEY',
+        'STRIPE_PUBLISHABLE_KEY',
         'STRIPE_WEBHOOK_SECRET',
         'STRIPE_CONNECT_WEBHOOK_SECRET',
       ]),
@@ -196,6 +197,7 @@ describe('envSchema', () => {
         ...valid,
         PAYMENT_PROVIDER: 'stripe',
         STRIPE_SECRET_KEY: 'sk_live_abc123',
+        STRIPE_PUBLISHABLE_KEY: 'pk_live_abc123',
         STRIPE_WEBHOOK_SECRET: 'whsec_live_abc123',
         STRIPE_CONNECT_WEBHOOK_SECRET: 'whsec_live_connect123',
       }).success,
@@ -207,6 +209,7 @@ describe('envSchema', () => {
       ...valid,
       PAYMENT_PROVIDER: 'stripe',
       STRIPE_SECRET_KEY: 'sk_live_abc123',
+      STRIPE_PUBLISHABLE_KEY: 'pk_live_abc123',
       STRIPE_WEBHOOK_SECRET: 'whsec_live_abc123',
       STRIPE_CONNECT_WEBHOOK_SECRET: 'whsec_replace_me',
     });
@@ -248,6 +251,7 @@ describe('envSchema', () => {
       NODE_ENV: 'production',
       PAYMENT_PROVIDER: 'stripe',
       STRIPE_SECRET_KEY: 'sk_live_x',
+      STRIPE_PUBLISHABLE_KEY: 'pk_live_x',
       STRIPE_WEBHOOK_SECRET: 'whsec_live_x',
       EMAIL_PROVIDER: 'resend',
       RESEND_API_KEY: 're_live_x',
@@ -284,6 +288,7 @@ describe('envSchema', () => {
       NODE_ENV: 'production',
       PAYMENT_PROVIDER: 'stripe',
       STRIPE_SECRET_KEY: 'sk_live_x',
+      STRIPE_PUBLISHABLE_KEY: 'pk_live_x',
       STRIPE_WEBHOOK_SECRET: 'whsec_live_x',
       EMAIL_PROVIDER: 'resend',
       RESEND_API_KEY: 're_live_x',
@@ -326,6 +331,7 @@ describe('envSchema', () => {
       NODE_ENV: 'production',
       PAYMENT_PROVIDER: 'stripe',
       STRIPE_SECRET_KEY: 'sk_live_x',
+      STRIPE_PUBLISHABLE_KEY: 'pk_live_x',
       STRIPE_WEBHOOK_SECRET: 'whsec_live_x',
       EMAIL_PROVIDER: 'resend',
       RESEND_API_KEY: 're_live_x',
@@ -356,9 +362,9 @@ describe('envSchema', () => {
   });
 
   it('rejects a CENTRAL_HOSTNAMES entry carrying a scheme or a port', () => {
-    expect(paths(parseConfig({ ...valid, CENTRAL_HOSTNAMES: 'https://stage.example.com' }))).toContain(
-      'CENTRAL_HOSTNAMES',
-    );
+    expect(
+      paths(parseConfig({ ...valid, CENTRAL_HOSTNAMES: 'https://stage.example.com' })),
+    ).toContain('CENTRAL_HOSTNAMES');
     expect(paths(parseConfig({ ...valid, CENTRAL_HOSTNAMES: 'stage.example.com:8443' }))).toContain(
       'CENTRAL_HOSTNAMES',
     );

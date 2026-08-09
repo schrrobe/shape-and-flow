@@ -162,6 +162,9 @@ importers:
       '@shape-and-flow/booking-ui':
         specifier: workspace:*
         version: link:../../packages/ui
+      '@stripe/connect-js':
+        specifier: 3.4.6
+        version: 3.4.6
       pinia:
         specifier: 4.0.2
         version: 4.0.2(@vue/devtools-api@8.2.1)(typescript@6.0.3)(vue@3.5.40(typescript@6.0.3))
@@ -1712,6 +1715,9 @@ packages:
 
   '@standard-schema/spec@1.1.0':
     resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==}
+
+  '@stripe/connect-js@3.4.6':
+    resolution: {integrity: sha512-fuC/U/ONDBMKwTBxKAnEBQH+m0x+Tze62/bV1ZDLT7oRnsJgddEnRi7FzdwIxz9pmFZhOJpSaikLIBw9g/1o1w==}
 
   '@swc/core-darwin-arm64@1.15.47':
     resolution: {integrity: sha512-GsoMtan3ojGGMGFbl31mmRu5ctZ56re8grGE8mO/OHJ8O+JRkzod02fe7X6ZQ8JvamA3imkEkx/h3u+vsOgPgA==}
@@ -6226,6 +6232,8 @@ snapshots:
       picomatch: 4.0.5
 
   '@standard-schema/spec@1.1.0': {}
+
+  '@stripe/connect-js@3.4.6': {}
 
   '@swc/core-darwin-arm64@1.15.47':
     optional: true
