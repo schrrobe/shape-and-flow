@@ -143,8 +143,9 @@ describe('POST /api/office/organization/account-session', () => {
 
   // Asserted on the call rather than the response, because the response says nothing about
   // which controls the organizer will actually be handed. Turning `capture_payments` on, or
-  // dropping `refund_management`, would change the page without changing anything a
-  // response-shape assertion can see.
+  // `refund_management` back on, would change the page without changing anything a
+  // response-shape assertion can see — and a refund issued inside the component is one no
+  // webhook of ours can match back to a booking.
   it('asks Stripe for exactly the components the page mounts', async () => {
     await setStripeState({ stripeAccountId: 'acct_components', stripeChargesEnabled: true });
     fakeStripe.accountSessions.create.mockResolvedValue({
@@ -160,7 +161,7 @@ describe('POST /api/office/organization/account-session', () => {
         payments: {
           enabled: true,
           features: {
-            refund_management: true,
+            refund_management: false,
             dispute_management: true,
             capture_payments: false,
           },

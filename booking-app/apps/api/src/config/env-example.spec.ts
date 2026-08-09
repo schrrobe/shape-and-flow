@@ -57,6 +57,34 @@ describe('.env.production.example', () => {
     'utf8',
   );
 
+  const entries = text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => /^[A-Z][A-Z0-9_]*=/.test(line))
+    .map((line) => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)] as const);
+
+  const documented = new Set(entries.map(([key]) => key));
+
+  /**
+   * The file is what an operator copies to `.env.production`, and it picks providers —
+   * `PAYMENT_PROVIDER=stripe` above all. Every credential those choices make mandatory has
+   * to at least appear here, or the first anyone hears of a newly required variable is the
+   * API refusing to start on the deploy that introduced it.
+   *
+   * Values are placeholders, so the parse fails either way; what is asserted is that no
+   * complaint names a variable the file does not mention at all.
+   */
+  it('documents every variable the providers it selects make mandatory', () => {
+    const parsed = envSchema.safeParse(Object.fromEntries(entries));
+    const issues = parsed.success ? [] : parsed.error.issues;
+
+    const undocumented = issues
+      .map((issue) => String(issue.path[0]))
+      .filter((key) => !documented.has(key));
+
+    expect([...new Set(undocumented)].sort()).toEqual([]);
+  });
+
   it('documents production-scoped Unleash placeholders', () => {
     expect(text).toContain('UNLEASH_URL=https://unleash.shapeandflow.de/api/');
     expect(text).toContain('UNLEASH_BACKEND_TOKEN=backend_production_replace_me');

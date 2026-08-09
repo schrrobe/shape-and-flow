@@ -6,6 +6,7 @@ import { useI18n } from 'vue-i18n';
 import { RouterLink } from 'vue-router';
 
 import { api } from '../../api/client.js';
+import { ApiError } from '../../api/errors.js';
 import { registerOfficeMessages } from '../../office/i18n/index.js';
 import { officeMessage } from '../../office/messages.js';
 
@@ -27,26 +28,46 @@ const state = reactive<{ status: Status; error: string | null }>({
 const paymentsSlot = useTemplateRef<HTMLElement>('paymentsSlot');
 const payoutsSlot = useTemplateRef<HTMLElement>('payoutsSlot');
 
+function fail(caught: unknown): void {
+  state.status = 'failed';
+  state.error = officeMessage(caught);
+}
+
 onMounted(async () => {
   try {
-    const organization = await api.office.organization.current();
-
-    if (!organization.stripeChargesEnabled) {
-      state.status = 'onboarding';
-      return;
-    }
-
     // The first secret is fetched here rather than left to Connect.js so that a rejected
-    // call surfaces as our error message instead of a silently blank iframe.
-    const { publishableKey } = await api.office.payments.createAccountSession();
+    // call surfaces as our error message instead of a silently blank iframe. It is also
+    // the one gate on whether this page can work at all: the endpoint refuses with
+    // ORGANIZATION_ONBOARDING_INCOMPLETE until the account is onboarded and charges are
+    // enabled, so asking the organization endpoint the same question first would be a
+    // second round trip and a second copy of the same policy.
+    const { publishableKey, clientSecret } = await api.office.payments.createAccountSession();
+
+    // Connect.js calls `fetchClientSecret` immediately. Handing it the secret above rather
+    // than letting it open its own session is what keeps one page view to one
+    // AccountSession — and to one audit row.
+    let unusedSecret: string | null = clientSecret;
 
     const connect = loadConnectAndInitialize({
       publishableKey,
       // Called again whenever Stripe needs a fresh secret. Deliberately not memoised: an
       // AccountSession secret is single-use, so a cached one fails the second time.
       fetchClientSecret: async () => {
-        const { clientSecret } = await api.office.payments.createAccountSession();
-        return clientSecret;
+        if (unusedSecret !== null) {
+          const secret = unusedSecret;
+          unusedSecret = null;
+          return secret;
+        }
+
+        try {
+          const refreshed = await api.office.payments.createAccountSession();
+          return refreshed.clientSecret;
+        } catch (caught) {
+          // Rejecting alone leaves the component blank: this call happens long after the
+          // `onMounted` try/catch has returned, so nothing else would report it.
+          fail(caught);
+          throw caught;
+        }
       },
     });
 
@@ -54,13 +75,41 @@ onMounted(async () => {
 
     // After the status flip, so the containers the components mount into exist.
     await nextTick();
-    paymentsSlot.value?.append(connect.create('payments'));
-    payoutsSlot.value?.append(connect.create('payouts'));
+    paymentsSlot.value?.append(embed(connect, 'payments'));
+    payoutsSlot.value?.append(embed(connect, 'payouts'));
   } catch (caught) {
-    state.status = 'failed';
-    state.error = officeMessage(caught);
+    // Not an error, and not something a retry fixes: the organizer has to finish with
+    // Stripe first, and the screen for that is one link away.
+    if (caught instanceof ApiError && caught.code === 'ORGANIZATION_ONBOARDING_INCOMPLETE') {
+      state.status = 'onboarding';
+      return;
+    }
+
+    fail(caught);
   }
 });
+
+/**
+ * A Connect element that reports its own load failures.
+ *
+ * `loadConnectAndInitialize` returns synchronously and the components fetch and render
+ * afterwards, so a blocked script, a rejected key or a render error surfaces here and
+ * nowhere else — without this the page would sit at `ready` showing two empty boxes.
+ */
+function embed(
+  connect: ReturnType<typeof loadConnectAndInitialize>,
+  tagName: 'payments' | 'payouts',
+): HTMLElement {
+  const element = connect.create(tagName);
+
+  element.setOnLoadError(() => {
+    state.status = 'failed';
+    // No message from Stripe: theirs is untranslated prose aimed at an integrator.
+    state.error = null;
+  });
+
+  return element;
+}
 
 // Connect.js owns nodes it appended into our containers; emptying them on the way out
 // stops a stale iframe from being adopted by the next mount of this route.

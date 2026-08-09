@@ -54,15 +54,26 @@ export class StripeConnectService {
    *
    * The enabled features are a deliberate short list rather than everything on offer:
    *
-   *  - **`refund_management`** and **`dispute_management`** are on because the organizer
-   *    is the merchant of record on their own account and answers the chargeback either
-   *    way. Note that this is a *second* way to refund, alongside the office refund flow
-   *    in `RefundService` — a refund issued here does not pass our `refund.issue`
-   *    capability check and leaves no `REFUND_ISSUED` audit row.
+   *  - **`dispute_management`** is on because the organizer is the merchant of record on
+   *    their own account and answers the chargeback either way.
+   *  - **`refund_management`** is off, even though the organizer could in principle refund
+   *    their own charge. A refund issued inside the component is one we cannot ingest: it
+   *    arrives as a `refund.created` for which `RefundService.applyProviderUpdate` finds
+   *    neither a `stripeRefundId` nor an `idempotencyKey` it knows, so it is logged and
+   *    dropped. The booking would keep reading as fully paid, and the office refund flow
+   *    would happily refund it a second time. Until a refund born on Stripe's side can
+   *    create the local row, the office flow stays the only way to issue one.
    *  - **`capture_payments`** is off: Checkout captures automatically, so there is no
    *    manual capture flow for the control to act on.
    *  - **`instant_payouts`** is off: the platform has not enabled it, so the button would
    *    only ever produce an error.
+   *
+   * What is *not* off, and cannot be: `external_account_collection` defaults to `true` and
+   * Stripe only accepts `false` for accounts where the platform collects requirements
+   * itself, which an Express account is not. The payouts component therefore also lets the
+   * organizer change the bank account payouts land in. That is theirs to change — but it
+   * means an OWNER session is enough to redirect their money, and the only trace on our
+   * side is the `ORGANIZATION_ACCOUNT_SESSION_CREATED` row saying the page was opened.
    */
   async createAccountSession(stripeAccountId: string): Promise<{ clientSecret: string }> {
     const stripe = this.require();
@@ -72,7 +83,7 @@ export class StripeConnectService {
         payments: {
           enabled: true,
           features: {
-            refund_management: true,
+            refund_management: false,
             dispute_management: true,
             capture_payments: false,
           },
