@@ -1,4 +1,5 @@
 import { ApiError, toApiError } from './errors.js';
+import { ORGANIZER_PARAM, tenantSlug } from './tenant.js';
 
 import type {
   AuditLogQuery,
@@ -65,6 +66,8 @@ import type {
   PasswordResetConfirmRequest,
   PasswordResetRequest,
   RefundListResponse,
+  RegisterOrganizationRequest,
+  RegisterOrganizationResponse,
   ReplaceEmployeeServicesRequest,
   ReplaceWorkingHoursRequest,
   ReplaceWorkingHoursResponse,
@@ -156,11 +159,41 @@ export function setUnauthorizedHandler(handler: UnauthorizedHandler | null): voi
   unauthorizedHandler = handler;
 }
 
+/**
+ * Registration creates a tenant rather than acting inside one.
+ *
+ * A visitor who reached the sign-up form from an organizer's booking page still carries
+ * that organizer's slug, and scoping the request to it would say something the request
+ * does not mean.
+ */
+const TENANT_FREE_PUBLIC_PATHS: readonly string[] = ['/public/organizations'];
+
+/**
+ * The organizer to scope this request to, or null.
+ *
+ * Public routes only. An office route resolves its tenant from the session cookie, and
+ * sending a slug there would offer a second, weaker way to name a tenant on
+ * authenticated endpoints — exactly the thing session-based resolution exists to avoid.
+ */
+function organizerFor(path: string): string | null {
+  if (!path.startsWith('/public')) return null;
+  if (TENANT_FREE_PUBLIC_PATHS.includes(path)) return null;
+
+  return tenantSlug();
+}
+
 function url(path: string, query: RequestOptions['query']): string {
-  if (query === undefined) return `${BASE}${path}`;
+  const organizer = organizerFor(path);
+
+  if (query === undefined && organizer === null) return `${BASE}${path}`;
 
   const params = new URLSearchParams();
-  for (const [key, value] of Object.entries(query)) {
+
+  // First, so an explicit `organizer` in `query` — there is none today — would win rather
+  // than be silently duplicated.
+  if (organizer !== null) params.set(ORGANIZER_PARAM, organizer);
+
+  for (const [key, value] of Object.entries(query ?? {})) {
     if (value === undefined) continue;
     // Appended, not set: `?status=CONFIRMED&status=COMPLETED` is what Express turns into
     // an array and what the API's `z.union([enum, array(enum)])` accepts. Joining them
@@ -325,6 +358,9 @@ export const api = {
         `/public/bookings/by-session/${encodeURIComponent(checkoutSessionId)}`,
         { signal },
       ),
+
+    registerOrganization: (body: RegisterOrganizationRequest) =>
+      request<RegisterOrganizationResponse>('/public/organizations', { method: 'POST', body }),
   },
 
   /**
@@ -370,6 +406,17 @@ export const api = {
   office: {
     dashboard: (signal?: AbortSignal) =>
       request<OfficeDashboardResponse>('/office/dashboard', { session: true, signal }),
+
+    organization: {
+      current: () =>
+        request<{ stripeChargesEnabled: boolean }>('/office/organization', { session: true }),
+
+      requestOnboardingLink: () =>
+        request<{ onboardingLink: string }>('/office/organization/onboarding-link', {
+          method: 'POST',
+          session: true,
+        }),
+    },
 
     calendar: (query: Partial<OfficeCalendarQuery>, signal?: AbortSignal) =>
       request<OfficeCalendarResponse>('/office/calendar', {

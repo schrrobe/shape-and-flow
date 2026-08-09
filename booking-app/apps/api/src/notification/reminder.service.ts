@@ -177,6 +177,18 @@ export class ReminderService {
       return 'SKIPPED';
     }
 
+    // A third guard, on the offset itself. Jobs outlive the setting that created them: a
+    // business that drops its 2-hour reminder still has 2-hour jobs sitting in the delayed
+    // set, and a rebuild that ran against the wrong tenant's offsets can mint jobs for
+    // offsets this business never configured. Sending them anyway is a reminder the
+    // customer was never promised.
+    if (!this.offsets().includes(input.offsetMinutes)) {
+      this.logger.debug(
+        `reminder skipped: ${String(input.offsetMinutes)} minutes is not a configured offset`,
+      );
+      return 'SKIPPED';
+    }
+
     const settings = this.organizations.getSettings();
 
     // Distinct per offset as well as per time. Keying on the time alone — as the plan's

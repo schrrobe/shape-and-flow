@@ -14,6 +14,8 @@ import { StripePaymentProvider } from './payment/stripe-payment.provider.js';
 import { FakeSmsProvider } from './sms/fake-sms.provider.js';
 import { SMS_PROVIDER } from './sms/sms-provider.js';
 
+export const STRIPE_CLIENT = Symbol('STRIPE_CLIENT');
+
 import type { AppConfig } from '../config/env.schema.js';
 import type { EmailProvider } from './email/email-provider.js';
 import type { PaymentProvider } from './payment/payment-provider.js';
@@ -71,11 +73,23 @@ import type { Redis } from 'ioredis';
       useFactory: (config: AppConfig, fake: FakeSmsProvider): SmsProvider =>
         config.SMS_PROVIDER === 'fake' ? fake : notImplemented('SMS_PROVIDER', config.SMS_PROVIDER),
     },
+    {
+      provide: STRIPE_CLIENT,
+      inject: [ENV],
+      useFactory: (config: AppConfig): Stripe | null =>
+        config.PAYMENT_PROVIDER === 'stripe'
+          ? new Stripe(required(config.STRIPE_SECRET_KEY, 'STRIPE_SECRET_KEY'), {
+              apiVersion: Stripe.API_VERSION,
+              maxNetworkRetries: 2,
+              timeout: 15_000,
+            })
+          : null,
+    },
   ],
   // FakePaymentProvider is exported by its concrete type as well as behind the port,
   // because the test-support router needs the affordances — marking a session paid,
   // signing an event — that the port deliberately does not have.
-  exports: [PAYMENT_PROVIDER, EMAIL_PROVIDER, SMS_PROVIDER, FakePaymentProvider],
+  exports: [PAYMENT_PROVIDER, EMAIL_PROVIDER, SMS_PROVIDER, STRIPE_CLIENT, FakePaymentProvider],
 })
 export class ProvidersModule implements OnApplicationBootstrap {
   private readonly logger = new Logger('Providers');
@@ -97,7 +111,14 @@ function buildStripeProvider(config: AppConfig, clock: Clock): StripePaymentProv
   // Re-checking here is cheap and turns a schema regression into a named start-up
   // failure rather than a confusing Stripe authentication error later.
   const secretKey = required(config.STRIPE_SECRET_KEY, 'STRIPE_SECRET_KEY');
-  const webhookSecret = required(config.STRIPE_WEBHOOK_SECRET, 'STRIPE_WEBHOOK_SECRET');
+  const platformWebhookSecret = required(config.STRIPE_WEBHOOK_SECRET, 'STRIPE_WEBHOOK_SECRET');
+  // `required`, same as the two above: self-service organizer registration always routes
+  // a new organizer through Stripe Connect, so there is no longer a "platform-only"
+  // deployment shape for which this destination can be left unconfigured.
+  const connectWebhookSecret = required(
+    config.STRIPE_CONNECT_WEBHOOK_SECRET,
+    'STRIPE_CONNECT_WEBHOOK_SECRET',
+  );
 
   const stripe = new Stripe(secretKey, {
     // Only the SDK's own pinned version typechecks, so this cannot drift by
@@ -109,7 +130,12 @@ function buildStripeProvider(config: AppConfig, clock: Clock): StripePaymentProv
     timeout: 15_000,
   });
 
-  return new StripePaymentProvider(stripe, clock, { webhookSecret });
+  return new StripePaymentProvider(stripe, clock, {
+    webhookSecrets: {
+      platform: platformWebhookSecret,
+      connect: connectWebhookSecret,
+    },
+  });
 }
 
 export function required(value: string | undefined, name: string): string {

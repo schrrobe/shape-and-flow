@@ -11,7 +11,7 @@ import { PAYMENT_PROVIDER } from '../providers/payment/payment-provider.js';
 
 import { rawBodyOf } from './raw-body.js';
 
-import type { PaymentProvider } from '../providers/payment/payment-provider.js';
+import type { PaymentProvider, WebhookDestination } from '../providers/payment/payment-provider.js';
 import type { RawBodyRequest } from '@nestjs/common';
 import type { Request } from 'express';
 
@@ -40,11 +40,40 @@ export class StripeWebhookController {
     @Inject(PAYMENT_PROVIDER) private readonly payments: PaymentProvider,
   ) {}
 
+  /** The platform's own events: Checkout, payment intents, charges, refunds. */
   @Post('stripe')
   @HttpCode(200)
   async stripe(
     @Req() request: RawBodyRequest<Request>,
     @Headers('stripe-signature') signature: string | undefined,
+  ): Promise<{ received: true }> {
+    return await this.ingest(request, signature, 'platform');
+  }
+
+  /**
+   * Events forwarded from connected accounts: `account.updated`, and any direct charge
+   * made on an organizer's own account.
+   *
+   * A route of its own rather than a second secret on the first one. Stripe signs each
+   * destination with its own key, so one endpoint accepting both would have to try keys
+   * until one matched — which turns "this delivery is not signed by anyone we know" into
+   * something indistinguishable from "wrong key first". Two routes keep each stream's
+   * failure honest, and the destination the delivery arrived on is real information the
+   * verifier gets to use.
+   */
+  @Post('stripe/connect')
+  @HttpCode(200)
+  async stripeConnect(
+    @Req() request: RawBodyRequest<Request>,
+    @Headers('stripe-signature') signature: string | undefined,
+  ): Promise<{ received: true }> {
+    return await this.ingest(request, signature, 'connect');
+  }
+
+  private async ingest(
+    request: RawBodyRequest<Request>,
+    signature: string | undefined,
+    destination: WebhookDestination,
   ): Promise<{ received: true }> {
     const rawBody = rawBodyOf(request);
 
@@ -52,7 +81,7 @@ export class StripeWebhookController {
       throw new AppError('VALIDATION_FAILED', { message: 'Missing stripe-signature header.' });
     }
 
-    const event = this.verify(rawBody, signature);
+    const event = this.verify(rawBody, signature, destination);
 
     const recorded = await this.inbox.recordStripe({
       id: event.id,
@@ -73,14 +102,19 @@ export class StripeWebhookController {
     return { received: true };
   }
 
-  private verify(rawBody: Buffer, signature: string): ReturnType<PaymentProvider['verifyWebhook']> {
+  private verify(
+    rawBody: Buffer,
+    signature: string,
+    destination: WebhookDestination,
+  ): ReturnType<PaymentProvider['verifyWebhook']> {
     try {
-      return this.payments.verifyWebhook(rawBody, signature);
+      return this.payments.verifyWebhook(rawBody, signature, destination);
     } catch (error) {
       // A 400 with nothing stored. An unverified body is not evidence of anything, and
       // storing it would let anyone fill the inbox.
       this.logger.warn(
-        `rejected webhook: ${error instanceof Error ? error.message : String(error)}`,
+        `rejected ${destination} webhook: ` +
+          (error instanceof Error ? error.message : String(error)),
       );
 
       // VALIDATION_FAILED rather than a code of its own. The consumer here is Stripe,

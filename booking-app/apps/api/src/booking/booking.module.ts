@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 
 import { ManagementTokenModule } from '../manage/management-token.module.js';
 import { NotificationModule } from '../notification/notification.module.js';
+import { OrganizationWebhookHandler } from '../organization/organization-webhook.handler.js';
 import { PaymentModule } from '../payment/payment.module.js';
 import { PublicBookingsController } from '../public/public-bookings.controller.js';
 import { PublicModule } from '../public/public.module.js';
@@ -57,6 +58,7 @@ import { ReservationService } from './reservation.service.js';
     CancellationService,
     RescheduleService,
     AttendanceService,
+    OrganizationWebhookHandler,
   ],
   exports: [
     AuditWriterModule,

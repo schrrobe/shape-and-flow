@@ -35,11 +35,17 @@
     "CANNOT_MODIFY_SELF": "You cannot change your own account here.",
     "PAYMENT_NOT_REFUNDABLE": "This payment cannot be refunded.",
     "NO_EMPLOYEE_AVAILABLE": "Nobody is available at that time.",
+    "EMAIL_ALREADY_REGISTERED": "An account with this email already exists. Sign in, or reset the password instead.",
     "IDEMPOTENCY_KEY_REUSED": "This was already sent with different details. Start again.",
     "OUTSIDE_BOOKING_WINDOW": "That time is outside the booking window.",
     "INVALID_STATUS_TRANSITION": "That is not possible in the current status.",
+    "INVALID_RETURN_URL": "That link is not valid. Please try again.",
+    "ORGANIZATION_CREATE_ERROR": "The account could not be created. Check the details and try again.",
+    "ORGANIZATION_NOT_FOUND": "That organizer could not be found.",
+    "ORGANIZATION_ONBOARDING_INCOMPLETE": "This organizer has not finished setting up payments yet.",
     "RATE_LIMITED": "Too many attempts. Wait a moment and try again.",
     "INTERNAL_ERROR": "Something went wrong on our side. Try again in a moment.",
+    "ONBOARDING_LINK_ERROR": "Could not reach Stripe. Please try again in a moment.",
     "NETWORK": "No connection to the server. Check your network."
   },
   "status": {
@@ -348,6 +354,14 @@
     "noteHint": "Shown with the appointment. This is the customer's note.",
     "bookingLoading": "Booking",
     "submit": "Book it"
+  },
+  "onboardingStatus": {
+    "checking": "Checking your Stripe onboarding status…",
+    "ready": "Your account is ready.",
+    "dashboardLink": "Go to the dashboard",
+    "pending": "Stripe is still processing your details. Reload this page in a minute, or retry now.",
+    "failed": "Something went wrong finishing your Stripe onboarding.",
+    "retry": "Retry onboarding"
   },
   "requests": {
     "heading": "Requests",

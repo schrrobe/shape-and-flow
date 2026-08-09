@@ -8,6 +8,8 @@ import { correlationMiddleware } from './common/correlation/correlation.middlewa
 import { InFlightRequests } from './common/shutdown/inflight.js';
 import { assertAppRole, loadConfig } from './config/env.schema.js';
 import { loadEnvFile } from './config/load-dotenv.js';
+import { OfficeTenantMiddleware } from './organization/office-tenant.middleware.js';
+import { TenantResolutionMiddleware } from './organization/tenant-resolution.middleware.js';
 import { WEBHOOK_BODY_LIMIT, webhookBodyParser } from './webhooks/raw-body.js';
 
 import type { NestExpressApplication } from '@nestjs/platform-express';
@@ -59,6 +61,9 @@ async function bootstrap(): Promise<void> {
   // Then, and before pino's request logger: everything downstream — including that
   // logger — reads the correlation id from the scope this opens.
   app.use(correlationMiddleware);
+
+  app.use('/api/public', app.get(TenantResolutionMiddleware).middleware);
+  app.use('/api/office', app.get(OfficeTenantMiddleware).middleware);
 
   app.setGlobalPrefix('api');
   app.use(helmet());

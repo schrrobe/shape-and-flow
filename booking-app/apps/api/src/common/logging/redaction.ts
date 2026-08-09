@@ -44,10 +44,15 @@ export const REDACT_PATHS = [
   // match it, and a logged job payload would otherwise hand out the link that
   // cancels or reschedules the booking.
   'managementToken',
+  // The Stripe Account Link. A one-time URL that walks straight into the organizer's
+  // Stripe onboarding without asking who is holding it — so it belongs in a response
+  // body and nowhere else, least of all in an audit row and its backups.
+  'onboardingLink',
   '*.token',
   '*.tokenHash',
   '*.idempotencyKey',
   '*.managementToken',
+  '*.onboardingLink',
 
   // personal data
   'email',

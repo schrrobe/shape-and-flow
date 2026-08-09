@@ -9,6 +9,7 @@ import { Public } from '../common/guards/public.decorator.js';
 import { ENV } from '../config/env.schema.js';
 import { Idempotent } from '../messaging/idempotency/idempotent.decorator.js';
 import { OrganizationContextService } from '../organization/organization-context.service.js';
+import { PaymentsMode } from '../prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
 import type { AppConfig } from '../config/env.schema.js';
@@ -61,6 +62,27 @@ export class PublicBookingsController {
 
     this.assertAllowedRedirect(body.successUrl);
     this.assertAllowedRedirect(body.cancelUrl);
+
+    // Asked before a slot is reserved, so an organizer that cannot take money does not
+    // leave a hold behind. `paymentsMode`, not `stripeAccountId`: registration keeps an
+    // organization whose Stripe account creation failed, and a null account id there
+    // means "not provisioned yet" — reading it as "legacy platform tenant" is what would
+    // let a brand-new organizer charge onto our own account.
+    //
+    // Both flags, so this gate refuses exactly what `accountForNewCharge` refuses when
+    // checkout runs a moment later. `stripeChargesEnabled` without an account id should
+    // not happen — the flag only ever arrives on an `account.updated` matched by account
+    // id — but a gate that is narrower than the one behind it fails after the hold rather
+    // than before it, which is the failure this check exists to prevent.
+    const organization = this.organizations.get();
+    if (
+      organization.paymentsMode === PaymentsMode.CONNECT &&
+      (!organization.stripeChargesEnabled || organization.stripeAccountId === null)
+    ) {
+      throw new AppError('ORGANIZATION_ONBOARDING_INCOMPLETE', {
+        message: 'This organizer has not finished setting up payments yet.',
+      });
+    }
 
     // Resume first. An attempt that reserved and then failed at the provider left a
     // hold this key names; reserving again would ask for a slot the customer is

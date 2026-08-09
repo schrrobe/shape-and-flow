@@ -7,7 +7,10 @@ import { JOB } from '../messaging/queues/job-contracts.js';
 import { OrganizationContextService } from '../organization/organization-context.service.js';
 import { BookingStatus, Prisma } from '../prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
-import { PAYMENT_PROVIDER } from '../providers/payment/payment-provider.js';
+import {
+  accountOfRecordedPayment,
+  PAYMENT_PROVIDER,
+} from '../providers/payment/payment-provider.js';
 
 import { BookingConfirmationService } from './booking-confirmation.service.js';
 import { assertTransition } from './booking-status.machine.js';
@@ -154,7 +157,7 @@ export class ExpiryService {
     const result = await this.payments.expireCheckoutSession(
       {
         organizationId: organization.id,
-        stripeAccountId: organization.stripeAccountId ?? undefined,
+        stripeAccountId: await this.accountOfSession(booking.stripeCheckoutSessionId),
       },
       booking.stripeCheckoutSessionId,
     );
@@ -241,12 +244,10 @@ export class ExpiryService {
     organizationId: string,
   ): Promise<'CONFIRMED'> {
     const organization = this.organizations.require(organizationId);
+    const stripeAccountId = await this.accountOfSession(sessionId);
 
     const session = await this.payments.retrieveCheckoutSession(
-      {
-        organizationId: organization.id,
-        stripeAccountId: organization.stripeAccountId ?? undefined,
-      },
+      { organizationId: organization.id, stripeAccountId },
       sessionId,
     );
 
@@ -255,6 +256,7 @@ export class ExpiryService {
     await this.confirmations.confirmPaid({
       bookingId,
       sessionId,
+      ...(stripeAccountId === undefined ? {} : { stripeAccountId }),
       ...(session.paymentIntentId === undefined
         ? {}
         : { paymentIntentId: session.paymentIntentId }),
@@ -272,5 +274,32 @@ export class ExpiryService {
     });
 
     return 'CONFIRMED';
+  }
+
+  /**
+   * The Stripe account this Checkout Session was opened on.
+   *
+   * Read from the payment row rather than from the organization, because the two can
+   * disagree: an organization that completed Connect onboarding after this session was
+   * created now resolves to its own account, while the session still only exists on the
+   * platform account. Expiring or retrieving it against the wrong account is a 404 from
+   * Stripe and a booking that never gets released.
+   *
+   * A missing row means the session was created but the transaction that records it did
+   * not commit — nothing was ever payable, so the platform account is the only account
+   * it could have been on.
+   */
+  private async accountOfSession(sessionId: string): Promise<string | undefined> {
+    const payment = await this.prisma.payment.findUnique({
+      where: { stripeCheckoutSessionId: sessionId },
+      select: { stripeAccountId: true },
+    });
+
+    if (payment === null) {
+      this.logger.warn(`no payment row for session ${sessionId}; assuming the platform account`);
+      return undefined;
+    }
+
+    return accountOfRecordedPayment(payment);
   }
 }

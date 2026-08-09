@@ -310,6 +310,132 @@ describe('GET /manage/booking', () => {
   });
 });
 
+describe('a booking that belongs to a second organization', () => {
+  it("returns that booking's own organization's timezone and cancellation policy, not the default org's", async () => {
+    const other = await seedOrganization(prisma, { slug: 'other-org' });
+    await prisma.organization.update({
+      where: { id: other.organization.id },
+      data: { timezone: 'America/New_York' },
+    });
+    await prisma.organizationSettings.update({
+      where: { organizationId: other.organization.id },
+      data: { cancellationFeePolicy: 'PERCENTAGE', cancellationFeePercent: 50 },
+    });
+
+    const booking = await prisma.booking.create({
+      data: {
+        ...makeBooking(other, { status: 'CONFIRMED', expiresAt: null }),
+        confirmedAt: NOW,
+      },
+    });
+
+    const { token } = await prisma.$transaction((tx) =>
+      tokens.issue(tx, booking.id, other.organization.id, SLOT_FRIDAY_0900),
+    );
+
+    const response = await get('/manage/booking', token).expect(200);
+    const body = response.body as {
+      timezone: string;
+      cancellationPolicy: { feePolicy: string };
+    };
+
+    // The app was bootstrapped for `ctx.organization` (Europe/Berlin, NONE). If the
+    // controller ever falls back to bootstrap/ALS state instead of the token's own
+    // `organizationId`, this comes back as the default org's values instead.
+    expect(body.timezone).toBe('America/New_York');
+    expect(body.cancellationPolicy.feePolicy).toBe('PERCENTAGE');
+  });
+});
+
+/**
+ * `GET /manage/booking` above is the only cross-tenant coverage this file had before this
+ * pair: it proves the interceptor's scope wins over the bootstrap fallback for a *read*.
+ * `POST /manage/cancel` and `POST /manage/reschedule-requests` are the two routes whose
+ * brokenness prompted `ManagementTenantInterceptor` in the first place, and neither had a
+ * test against any organization but the bootstrap one — where the interceptor's scope and
+ * the ALS fallback resolve to the same organization, so both suites would still pass with
+ * the interceptor deleted. `cancellation.service.ts`'s `loadCancellable` and
+ * `reschedule.service.ts`'s `load` both filter the target booking by
+ * `organizationId: this.organizations.getOrganizationId()` — the ALS-resolved organization,
+ * not the booking's own — so without the interceptor these two would not merely apply the
+ * wrong settings to a second organization's booking, they would not find it at all.
+ */
+describe('POST /manage/cancel against a second organization', () => {
+  it("cancels that organization's own booking, not the bootstrap organization's", async () => {
+    const other = await seedOrganization(prisma, { slug: 'other-org' });
+
+    const booking = await prisma.booking.create({
+      data: {
+        ...makeBooking(other, { status: 'CONFIRMED', expiresAt: null }),
+        confirmedAt: NOW,
+      },
+    });
+    await prisma.payment.create({
+      data: {
+        organizationId: other.organization.id,
+        bookingId: booking.id,
+        stripeCheckoutSessionId: `cs_test_${booking.id}`,
+        amountCents: booking.priceCentsSnapshot,
+        currency: booking.currency,
+        status: 'SUCCEEDED',
+        paidAt: NOW,
+      },
+    });
+
+    const { token } = await prisma.$transaction((tx) =>
+      tokens.issue(tx, booking.id, other.organization.id, SLOT_FRIDAY_0900),
+    );
+
+    const response = await request(server())
+      .post('/manage/cancel')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ reason: 'Termin passt nicht' })
+      .expect(200);
+
+    expect(response.body).toMatchObject({ outcome: 'CANCELED' });
+    expect((await prisma.booking.findUniqueOrThrow({ where: { id: booking.id } })).status).toBe(
+      'CANCELED_BY_CUSTOMER',
+    );
+
+    // The bootstrap organization's own booking, seeded in this file's beforeEach, is
+    // untouched — proving the write landed on the second organization's row, not this one.
+    expect((await prisma.booking.findUniqueOrThrow({ where: { id: bookingId } })).status).toBe(
+      'CONFIRMED',
+    );
+  });
+});
+
+describe('POST /manage/reschedule-requests against a second organization', () => {
+  it("opens a reschedule request against that organization's own booking", async () => {
+    const other = await seedOrganization(prisma, { slug: 'other-org' });
+
+    const booking = await prisma.booking.create({
+      data: {
+        ...makeBooking(other, { status: 'CONFIRMED', expiresAt: null, startsAt: SLOT_FRIDAY_0900 }),
+        confirmedAt: NOW,
+      },
+    });
+
+    const { token } = await prisma.$transaction((tx) =>
+      tokens.issue(tx, booking.id, other.organization.id, SLOT_FRIDAY_0900),
+    );
+
+    const newSlot = new Date(SLOT_FRIDAY_0900.getTime() + 2 * 60 * 60_000);
+
+    const response = await request(server())
+      .post('/manage/reschedule-requests')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ requestedStartsAt: newSlot.toISOString(), reason: 'Termin passt nicht' })
+      .expect(202);
+
+    expect(response.body).toMatchObject({ requestedStartsAt: newSlot.toISOString() });
+    expect(await prisma.rescheduleRequest.count({ where: { bookingId: booking.id } })).toBe(1);
+
+    // The bootstrap organization's own booking is untouched by this request.
+    expect(await prisma.rescheduleRequest.count({ where: { bookingId } })).toBe(0);
+  });
+});
+
 describe('tokens that must not work', () => {
   it('rejects a missing Authorization header', async () => {
     const response = await get('/manage/booking').expect(401);

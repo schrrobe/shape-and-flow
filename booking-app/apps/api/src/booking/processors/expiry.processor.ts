@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 
-import { OrganizationContextService } from '../../organization/organization-context.service.js';
+import { runWithOrganization } from '../../organization/tenant-context.store.js';
+import { PrismaService } from '../../prisma/prisma.service.js';
 import { ExpiryService } from '../expiry.service.js';
 
 import type { JOB, JobPayload } from '../../messaging/queues/job-contracts.js';
@@ -23,30 +24,30 @@ export class ExpiryProcessor {
 
   constructor(
     private readonly expiry: ExpiryService,
-    private readonly organizations: OrganizationContextService,
+    private readonly prisma: PrismaService,
   ) {}
 
   async handle(payload: JobPayload<typeof JOB.BOOKING_EXPIRY_REQUESTED>): Promise<void> {
     const { bookingId } = payload;
 
-    // The payload names the tenant, so it is checked rather than ignored. A worker has no
-    // request to resolve an organization from, and the saga talks to Stripe — so a job
+    // Open the job's own tenant scope before touching anything org-scoped. A worker has
+    // no request to resolve an organization from, and the saga talks to Stripe — so a job
     // running against the wrong organization would expire a session on the wrong account.
-    this.organizations.require(payload.organizationId);
+    await runWithOrganization(payload.organizationId, this.prisma, async () => {
+      // Phase one first. Usually a no-op — the delayed job normally arrives when the
+      // booking is already EXPIRING because phase one ran from the sweeper — but running
+      // it means the delayed job alone is sufficient if the sweeper never fires.
+      const began = await this.expiry.beginExpiry(bookingId);
 
-    // Phase one first. Usually a no-op — the delayed job normally arrives when the
-    // booking is already EXPIRING because phase one ran from the sweeper — but running it
-    // means the delayed job alone is sufficient if the sweeper never fires.
-    const began = await this.expiry.beginExpiry(bookingId);
+      if (began === 'NOT_DUE') {
+        // The job fired early. Nothing to do: the sweeper will pick the booking up once
+        // it really is due, and the reservation is still blocking until then.
+        this.logger.debug(`booking ${bookingId} is not due yet`);
+        return;
+      }
 
-    if (began === 'NOT_DUE') {
-      // The job fired early. Nothing to do: the sweeper will pick the booking up once it
-      // really is due, and the reservation is still blocking until then.
-      this.logger.debug(`booking ${bookingId} is not due yet`);
-      return;
-    }
-
-    const outcome = await this.expiry.completeExpiry(bookingId);
-    this.logger.debug(`booking ${bookingId} expiry settled as ${outcome}`);
+      const outcome = await this.expiry.completeExpiry(bookingId);
+      this.logger.debug(`booking ${bookingId} expiry settled as ${outcome}`);
+    });
   }
 }

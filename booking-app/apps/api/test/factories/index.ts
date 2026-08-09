@@ -1,4 +1,10 @@
-import { BookingOrigin, BookingStatus, Locale, OfficeUserRole } from '../../src/prisma/client.js';
+import {
+  BookingOrigin,
+  BookingStatus,
+  Locale,
+  OfficeUserRole,
+  PaymentsMode,
+} from '../../src/prisma/client.js';
 
 import type { Prisma, PrismaClient } from '../../src/prisma/client.js';
 
@@ -43,9 +49,14 @@ const unique = (prefix: string): string => {
  */
 export async function seedOrganization(
   prisma: PrismaClient,
-  options: { slug?: string } = {},
+  options: { slug?: string; paymentsMode?: PaymentsMode; stripeAccountId?: string } = {},
 ): Promise<SeedContext> {
   const slug = options.slug ?? 'shape-and-flow';
+  // PLATFORM by default. A seeded tenant has no Stripe Express account, and a CONNECT
+  // one without `stripeChargesEnabled` is refused at checkout — which is the intended
+  // production behaviour but would make every unrelated booking test fail. Connect
+  // tests opt in explicitly.
+  const paymentsMode = options.paymentsMode ?? PaymentsMode.PLATFORM;
 
   const organization = await prisma.organization.create({
     data: {
@@ -59,6 +70,10 @@ export async function seedOrganization(
       postalCode: '10115',
       city: 'Berlin',
       defaultLocale: Locale.de,
+      paymentsMode,
+      ...(options.stripeAccountId === undefined
+        ? {}
+        : { stripeAccountId: options.stripeAccountId, stripeChargesEnabled: true }),
     },
   });
 

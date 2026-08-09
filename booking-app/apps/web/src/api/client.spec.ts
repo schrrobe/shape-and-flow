@@ -6,6 +6,7 @@ import en from '../i18n/en.json';
 
 import { api } from './client.js';
 import { ApiError, messageKeyFor, NETWORK_ERROR } from './errors.js';
+import { rememberTenantSlug, resetTenantSlugForTest } from './tenant.js';
 
 interface Call {
   url: string;
@@ -60,6 +61,75 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  resetTenantSlugForTest();
+});
+
+/**
+ * The slug has to reach the server on every public call.
+ *
+ * `fetch` does not inherit the page's query string, so a booking opened at
+ * `/?organizer=acme` would otherwise read the default organizer's catalogue and take the
+ * booking into the default organizer's calendar.
+ */
+describe('the organizer slug', () => {
+  beforeEach(() => {
+    resetTenantSlugForTest();
+    rememberTenantSlug('acme');
+  });
+
+  it('is sent on a public request that has no other query', async () => {
+    queue(() => json([]));
+
+    await api.public.services();
+
+    expect(calls[0]?.url).toBe('/api/public/services?organizer=acme');
+  });
+
+  it('joins the query a public request already has', async () => {
+    queue(() => json({ days: [] }));
+
+    await api.public.availability({ serviceId: 's', from: '2026-08-10', to: '2026-08-17' });
+
+    const url = new URL(calls[0]?.url ?? '', 'http://localhost');
+    expect(url.searchParams.get('organizer')).toBe('acme');
+    expect(url.searchParams.get('serviceId')).toBe('s');
+  });
+
+  it('rides along on a POST', async () => {
+    queue(() => json({ bookingId: 'b' }, 201));
+
+    await api.public.createBooking(bookingBody(), 'key-organizer');
+
+    expect(calls[0]?.url).toContain('organizer=acme');
+  });
+
+  // Office endpoints resolve their tenant from the session cookie. A slug there would be a
+  // second, weaker way to name a tenant on an authenticated route.
+  it('is left off office requests', async () => {
+    queue(() => json([]));
+
+    await api.office.catalog.services({});
+
+    expect(calls[0]?.url).not.toContain('organizer');
+  });
+
+  // Registration creates a tenant rather than acting inside one.
+  it('is left off organizer registration', async () => {
+    queue(() => json({ id: 'o', slug: 's', onboardingLink: null }, 201));
+
+    await api.public.registerOrganization({} as never);
+
+    expect(calls[0]?.url).toBe('/api/public/organizations');
+  });
+
+  it('is absent entirely on the root address', async () => {
+    resetTenantSlugForTest();
+    queue(() => json([]));
+
+    await api.public.services();
+
+    expect(calls[0]?.url).toBe('/api/public/services');
+  });
 });
 
 describe('the api client', () => {

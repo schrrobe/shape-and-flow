@@ -179,8 +179,39 @@ describe('envSchema', () => {
     const result = parseConfig({ ...valid, PAYMENT_PROVIDER: 'stripe' });
     expect(result.success).toBe(false);
     expect(paths(result)).toEqual(
-      expect.arrayContaining(['STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET']),
+      expect.arrayContaining([
+        'STRIPE_SECRET_KEY',
+        'STRIPE_WEBHOOK_SECRET',
+        'STRIPE_CONNECT_WEBHOOK_SECRET',
+      ]),
     );
+  });
+
+  it('accepts stripe once the Connect secret is supplied alongside the other two', () => {
+    // Self-service organizer registration always onboards through Stripe Connect, so a
+    // stripe deployment missing this secret must fail here rather than at the first
+    // organizer's first account.updated event.
+    expect(
+      parseConfig({
+        ...valid,
+        PAYMENT_PROVIDER: 'stripe',
+        STRIPE_SECRET_KEY: 'sk_live_abc123',
+        STRIPE_WEBHOOK_SECRET: 'whsec_live_abc123',
+        STRIPE_CONNECT_WEBHOOK_SECRET: 'whsec_live_connect123',
+      }).success,
+    ).toBe(true);
+  });
+
+  it('treats a replace_me Connect webhook secret as absent', () => {
+    const result = parseConfig({
+      ...valid,
+      PAYMENT_PROVIDER: 'stripe',
+      STRIPE_SECRET_KEY: 'sk_live_abc123',
+      STRIPE_WEBHOOK_SECRET: 'whsec_live_abc123',
+      STRIPE_CONNECT_WEBHOOK_SECRET: 'whsec_replace_me',
+    });
+    expect(result.success).toBe(false);
+    expect(paths(result)).toContain('STRIPE_CONNECT_WEBHOOK_SECRET');
   });
 
   it('writes fatal startup diagnostics synchronously before exiting', () => {

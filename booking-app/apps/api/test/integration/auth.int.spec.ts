@@ -307,6 +307,71 @@ describe('POST /api/auth/login', () => {
   it('matches the address case-insensitively', async () => {
     await login({ email: OWNER_EMAIL.toUpperCase(), password: OWNER_PASSWORD }).expect(200);
   });
+
+  /**
+   * Login is an exact match now (`findUnique` on a lowercased input), not the
+   * case-insensitive `findFirst` this replaced. The test above seeds its row already
+   * lowercase and so cannot tell the two implementations apart — it passes under both.
+   * This one seeds the row the way it would actually sit in production before the
+   * `office_user_email_global_unique` migration ran: written with whatever casing the
+   * owner originally typed. The migration's own `UPDATE ... SET email = lower(email)` is
+   * applied by hand here, because this suite's migrations run once against an empty
+   * database, before any factory has written a row for them to normalize.
+   */
+  it('finds a legacy mixed-case address once the email migration has normalized it', async () => {
+    await prisma.officeUser.update({
+      where: { id: ctx.owner.id },
+      data: { email: 'Owner@Shape-And-Flow.example' },
+    });
+
+    // Before normalization: the exact-match lookup on a lowercased login input misses the
+    // mixed-case row entirely. That silent miss is the lockout this migration exists to fix.
+    await login({ email: 'OWNER@SHAPE-AND-FLOW.EXAMPLE', password: OWNER_PASSWORD }).expect(401);
+
+    await prisma.$executeRawUnsafe(
+      'UPDATE "office_users" SET email = lower(email) WHERE id = $1',
+      ctx.owner.id,
+    );
+
+    await login({ email: 'OWNER@SHAPE-AND-FLOW.EXAMPLE', password: OWNER_PASSWORD }).expect(200);
+  });
+
+  it('logs in an owner belonging to a different organization than the bootstrap default', async () => {
+    const other = await prisma.organization.create({
+      data: {
+        slug: 'second-org',
+        name: 'Second Org',
+        legalName: 'Second Org GmbH',
+        contactEmail: 'owner@second-org.example',
+        contactPhone: '+49301234567',
+        addressLine1: 'Beispielstraße 1',
+        postalCode: '10115',
+        city: 'Berlin',
+      },
+    });
+    await prisma.organizationSettings.create({
+      data: { organizationId: other.id, officeNotificationEmail: 'owner@second-org.example' },
+    });
+    await prisma.officeUser.create({
+      data: {
+        organizationId: other.id,
+        email: 'owner@second-org.example',
+        passwordHash: await new PasswordService().hash('Correct-Horse-Battery-9'),
+        firstName: 'Jane',
+        lastName: 'Doe',
+        role: 'OWNER',
+        canIssueRefunds: true,
+      },
+    });
+
+    const res = await login({
+      email: 'owner@second-org.example',
+      password: 'Correct-Horse-Battery-9',
+    });
+
+    expect(res.status).toBe(200);
+    expect((res.body as { user: { email: string } }).user.email).toBe('owner@second-org.example');
+  });
 });
 
 describe('session and csrf', () => {
@@ -570,5 +635,55 @@ describe('password reset', () => {
     expect(message?.to).toBe(OWNER_EMAIL);
     // The fragment is what keeps the token out of server logs and Referer headers.
     expect(message?.text).toContain('/office/reset-password#');
+  });
+
+  it("queues the reset notification under the requesting user's own organization, not the bootstrap default", async () => {
+    const other = await prisma.organization.create({
+      data: {
+        slug: 'third-org',
+        name: 'Third Org',
+        legalName: 'Third Org GmbH',
+        contactEmail: 'owner@third-org.example',
+        contactPhone: '+49301234567',
+        addressLine1: 'Beispielstraße 1',
+        postalCode: '10115',
+        city: 'Berlin',
+        defaultLocale: 'en',
+      },
+    });
+    await prisma.organizationSettings.create({
+      data: { organizationId: other.id, officeNotificationEmail: 'owner@third-org.example' },
+    });
+    const user = await prisma.officeUser.create({
+      data: {
+        organizationId: other.id,
+        email: 'owner@third-org.example',
+        passwordHash: await new PasswordService().hash('Correct-Horse-Battery-9'),
+        firstName: 'Jane',
+        lastName: 'Doe',
+        role: 'OWNER',
+        canIssueRefunds: true,
+      },
+    });
+
+    await requestResetFor('owner@third-org.example');
+
+    const token = await prisma.passwordResetToken.findFirstOrThrow({
+      where: { officeUserId: user.id },
+    });
+    expect(token.organizationId).toBe(other.id);
+
+    // The row was already scoped correctly before; the mail's *content* was not. The
+    // reset request carries no tenant middleware, so the branding fields fell back to the
+    // bootstrap organization — a member of Third Org read Shape and Flow's name, address
+    // and phone number on a mail about their own account.
+    const notification = await prisma.notification.findFirstOrThrow({
+      where: { officeUserId: user.id, kind: 'OFFICE_PASSWORD_RESET' },
+    });
+
+    expect(notification.payload).toMatchObject({
+      businessName: 'Third Org',
+      businessEmail: 'owner@third-org.example',
+    });
   });
 });

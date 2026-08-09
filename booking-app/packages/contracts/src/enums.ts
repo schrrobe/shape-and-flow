@@ -163,6 +163,7 @@ export const auditActionSchema = z.enum([
   'SERVICE_CATEGORY_ARCHIVED',
   'CUSTOMER_UPDATED',
   'CUSTOMER_ERASED',
+  'ORGANIZATION_ONBOARDING_LINK_REQUESTED',
 ]);
 export type AuditAction = z.infer<typeof auditActionSchema>;
 
@@ -202,3 +203,6 @@ export const notificationStatusSchema = z.enum([
   'FAILED',
 ]);
 export type NotificationStatus = z.infer<typeof notificationStatusSchema>;
+
+export const entityTypeSchema = z.enum(['INDIVIDUAL', 'SOLE_PROPRIETORSHIP', 'ORGANIZATION']);
+export type EntityType = z.infer<typeof entityTypeSchema>;

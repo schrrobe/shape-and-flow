@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { OrganizationContextService } from './organization-context.service.js';
+import { runWithTenant } from './tenant-context.store.js';
 
 import type { OrganizationWithSettings } from './organization-context.service.js';
 import type { AppConfig } from '../config/env.schema.js';
@@ -80,5 +81,93 @@ describe('OrganizationContextService', () => {
     await service.refresh();
 
     expect(service.getSettings().schedulingIntervalMinutes).toBe(30);
+  });
+
+  it('returns bootstrap organization outside any tenant scope', async () => {
+    const { service } = serviceReturning(organization);
+
+    await service.onApplicationBootstrap();
+
+    expect(service.get().id).toBe('org-1');
+  });
+
+  it('returns scoped organization inside runWithTenant', async () => {
+    const { service } = serviceReturning(organization);
+    await service.onApplicationBootstrap();
+
+    const scoped = {
+      ...organization,
+      id: 'org-2',
+      slug: 'acme',
+    } as OrganizationWithSettings;
+
+    runWithTenant(scoped, () => {
+      expect(service.get().id).toBe('org-2');
+      expect(service.getOrganizationId()).toBe('org-2');
+      expect(service.getTimezone()).toBe('Europe/Berlin');
+    });
+
+    expect(service.get().id).toBe('org-1');
+  });
+
+  /**
+   * A request that writes to its own organization has to be able to read the write back.
+   *
+   * The scope's snapshot was taken by the middleware before the handler ran, and
+   * `refresh()` only replaces the bootstrap fallback that a scoped request never
+   * consults — so a settings PATCH would answer with the values from before its own
+   * transaction, and its audit row would record a change from a value to itself.
+   */
+  it('replaces the scoped snapshot on refreshCurrent', async () => {
+    const scoped = { ...organization, id: 'org-2', slug: 'acme' } as OrganizationWithSettings;
+    const updated = {
+      ...scoped,
+      settings: { ...scoped.settings, schedulingIntervalMinutes: 30 },
+    };
+
+    const findUnique = vi
+      .fn()
+      .mockResolvedValueOnce(organization) // bootstrap
+      .mockResolvedValueOnce(updated); // refreshCurrent
+    const service = new OrganizationContextService(config, {
+      organization: { findUnique },
+    } as unknown as PrismaService);
+
+    await service.onApplicationBootstrap();
+
+    await runWithTenant(scoped, async () => {
+      expect(service.getSettings().schedulingIntervalMinutes).toBe(15);
+
+      const reloaded = await service.refreshCurrent('org-2');
+
+      expect(reloaded.settings.schedulingIntervalMinutes).toBe(30);
+      expect(service.getSettings().schedulingIntervalMinutes).toBe(30);
+    });
+
+    // The other tenant's snapshot is untouched: this reloaded org-2, not the default.
+    expect(service.get().id).toBe('org-1');
+    expect(service.getSettings().schedulingIntervalMinutes).toBe(15);
+  });
+
+  it('falls back to the bootstrap snapshot when refreshCurrent runs outside a scope', async () => {
+    const findUnique = vi
+      .fn()
+      .mockResolvedValueOnce(organization)
+      .mockResolvedValueOnce({
+        ...organization,
+        settings: { ...organization.settings, schedulingIntervalMinutes: 45 },
+      })
+      .mockResolvedValue({
+        ...organization,
+        settings: { ...organization.settings, schedulingIntervalMinutes: 45 },
+      });
+    const service = new OrganizationContextService(config, {
+      organization: { findUnique },
+    } as unknown as PrismaService);
+
+    await service.onApplicationBootstrap();
+    await service.refreshCurrent('org-1');
+
+    expect(service.getSettings().schedulingIntervalMinutes).toBe(45);
   });
 });

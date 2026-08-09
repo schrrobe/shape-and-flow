@@ -2,7 +2,7 @@ import { hash } from '@node-rs/argon2';
 import { cuidSchema } from '@shape-and-flow/booking-contracts';
 
 import { ARGON2_OPTIONS } from '../auth/password.options.js';
-import { Locale, OfficeUserRole, Weekday } from '../prisma/client.js';
+import { Locale, OfficeUserRole, PaymentsMode, Weekday } from '../prisma/client.js';
 
 import type { PrismaClient } from '../prisma/client.js';
 
@@ -75,7 +75,11 @@ export async function seedDemoOrganization(
 ): Promise<DemoSeedResult> {
   const organization = await prisma.organization.upsert({
     where: { slug: DEMO_SLUG },
-    update: {},
+    // Only the payments mode, and only because a database seeded before Connect existed
+    // holds the demo organization at the `CONNECT` column default with no Express account
+    // behind it — which refuses every booking. Everything else is left alone: re-seeding
+    // must not undo edits somebody made while demoing.
+    update: { paymentsMode: PaymentsMode.PLATFORM },
     create: {
       id: DEMO_ORGANIZATION_ID,
       slug: DEMO_SLUG,
@@ -91,6 +95,10 @@ export async function seedDemoOrganization(
       timezone: 'Europe/Berlin',
       currency: 'EUR',
       defaultLocale: Locale.de,
+      // The demo tenant is not a Connect organizer and has no Express account to
+      // onboard, so its checkout runs on the platform account. Left at the CONNECT
+      // default it could never take a booking.
+      paymentsMode: PaymentsMode.PLATFORM,
     },
   });
   const organizationId = organization.id;
@@ -342,8 +350,19 @@ async function ensureUser(
   },
 ): Promise<boolean> {
   const existing = await prisma.officeUser.findUnique({
-    where: { organizationId_email: { organizationId: user.organizationId, email: user.email } },
+    where: { email: user.email },
+    select: { organizationId: true },
   });
+
+  // `officeUser.email` is unique across every tenant, so the address this seed wants can
+  // already belong to somebody else's organization. Returning false there would report a
+  // successful seed whose demo login does not exist and cannot be created — the operator
+  // needs to know the address is taken rather than hunt for a password that never worked.
+  if (existing && existing.organizationId !== user.organizationId) {
+    throw new Error(
+      `demo seed: ${user.email} already belongs to organization ${existing.organizationId}; free the address or seed with a different one`,
+    );
+  }
 
   // An existing password is never overwritten: re-seeding a database somebody is
   // already logged into must not silently rotate their credentials.

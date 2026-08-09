@@ -17,6 +17,7 @@ import type {
   ProviderEvent,
   RefundResult,
   RetrievedSession,
+  WebhookDestination,
 } from './payment-provider.js';
 import type { Clock } from '../../domain/time/clock.js';
 
@@ -50,7 +51,15 @@ export const STRIPE_MIN_SESSION_TTL_MINUTES = 30;
 const STRIPE_MAX_SESSION_TTL_MINUTES = 24 * 60;
 
 export interface StripePaymentProviderOptions {
-  webhookSecret: string;
+  /**
+   * One endpoint secret per Stripe webhook destination.
+   *
+   * `connect` is optional: a deployment with no connected organizers has no such
+   * destination to configure, and demanding a secret it cannot obtain would keep it
+   * from starting. A delivery on the Connect route while it is unset is refused
+   * rather than verified against the platform key.
+   */
+  webhookSecrets: { platform: string; connect?: string | undefined };
   /** Signature tolerance in seconds. */
   webhookToleranceSeconds?: number;
 }
@@ -244,14 +253,33 @@ export class StripePaymentProvider implements PaymentProvider {
     };
   }
 
-  verifyWebhook(rawBody: Buffer, signature: string): ProviderEvent {
+  verifyWebhook(
+    rawBody: Buffer,
+    signature: string,
+    destination: WebhookDestination,
+  ): ProviderEvent {
+    const secret =
+      destination === 'connect'
+        ? this.options.webhookSecrets.connect
+        : this.options.webhookSecrets.platform;
+
+    if (secret === undefined) {
+      // Same 400 as a bad signature, deliberately. The caller is Stripe, which reads
+      // only the status, and there is nothing it could do differently — but the log
+      // line names the missing configuration for whoever set the destination up.
+      throw new AppError('UNAUTHENTICATED', {
+        status: 400,
+        message: 'No signing secret is configured for the Stripe Connect webhook endpoint.',
+      });
+    }
+
     let event: Stripe.Event;
 
     try {
       event = this.stripe.webhooks.constructEvent(
         rawBody,
         signature,
-        this.options.webhookSecret,
+        secret,
         this.options.webhookToleranceSeconds ?? DEFAULT_WEBHOOK_TOLERANCE_SECONDS,
       );
     } catch (error) {
@@ -268,6 +296,10 @@ export class StripePaymentProvider implements PaymentProvider {
       id: event.id,
       type: event.type,
       apiVersion: event.api_version ?? undefined,
+      // Set by Stripe on every event forwarded from a connected account, absent on
+      // the platform's own. Carried through so a consumer can address the account the
+      // event's objects actually live on.
+      account: event.account ?? undefined,
       payload: event,
     };
   }

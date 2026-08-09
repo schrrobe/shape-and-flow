@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { BookingCheckoutService } from '../../src/booking/booking-checkout.service.js';
 import { FixedClock } from '../../src/domain/time/clock.js';
 import { JOB } from '../../src/messaging/queues/job-contracts.js';
+import { OrganizationContextService } from '../../src/organization/organization-context.service.js';
 import { PUBLIC_WEB_ORIGIN, createBookingTestApp } from '../booking-app.harness.js';
 import { prisma, resetDatabase } from '../database.harness.js';
 import { SLOT_FRIDAY_0900, seedOrganization } from '../factories/index.js';
@@ -153,6 +154,79 @@ describe('a successful booking', () => {
     // transactions that bracket it are the reservation and the attachment — neither
     // contains it.
     expect(payments.callOrder()).toEqual(['createCheckoutSession']);
+  });
+});
+
+describe('an organization mid-onboarding', () => {
+  it('refuses to start a booking while Stripe Connect onboarding is incomplete', async () => {
+    await prisma.organization.update({
+      where: { id: ctx.organization.id },
+      data: {
+        paymentsMode: 'CONNECT',
+        stripeAccountId: 'acct_incomplete',
+        stripeChargesEnabled: false,
+      },
+    });
+
+    // The booking test harness's OrganizationContextService stub snapshots the
+    // organization once, at app creation, rather than resolving it per request the way
+    // the real service does — so a write straight through Prisma needs an explicit
+    // refresh to become visible to the controller under test.
+    await app.get(OrganizationContextService).refresh();
+
+    const response = await post().expect(422);
+
+    expect(response.body).toMatchObject({ code: 'ORGANIZATION_ONBOARDING_INCOMPLETE' });
+    expect(await prisma.booking.count()).toBe(0);
+  });
+
+  // Registration keeps an organization whose Stripe account creation failed, so a brand
+  // new organizer and a pre-Connect one both have a null account id. Told apart by the
+  // account id alone, the new organizer would be treated as the legacy case and charge
+  // customers onto the platform's own account.
+  it('refuses a connected organizer that has no Stripe account yet', async () => {
+    await prisma.organization.update({
+      where: { id: ctx.organization.id },
+      data: { paymentsMode: 'CONNECT', stripeAccountId: null, stripeChargesEnabled: false },
+    });
+    await app.get(OrganizationContextService).refresh();
+
+    const response = await post().expect(422);
+
+    expect(response.body).toMatchObject({ code: 'ORGANIZATION_ONBOARDING_INCOMPLETE' });
+    expect(await prisma.booking.count()).toBe(0);
+  });
+
+  it('lets a platform organizer book without any Stripe account', async () => {
+    await prisma.organization.update({
+      where: { id: ctx.organization.id },
+      data: { paymentsMode: 'PLATFORM', stripeAccountId: null },
+    });
+    await app.get(OrganizationContextService).refresh();
+
+    await post().expect(201);
+
+    // Null is the platform account, and it is what every later call against this session
+    // reads back rather than re-deriving from the organization.
+    const payment = await prisma.payment.findFirstOrThrow();
+    expect(payment.stripeAccountId).toBeNull();
+  });
+
+  it('records the connected account on the payment it opens', async () => {
+    await prisma.organization.update({
+      where: { id: ctx.organization.id },
+      data: {
+        paymentsMode: 'CONNECT',
+        stripeAccountId: 'acct_ready',
+        stripeChargesEnabled: true,
+      },
+    });
+    await app.get(OrganizationContextService).refresh();
+
+    await post().expect(201);
+
+    const payment = await prisma.payment.findFirstOrThrow();
+    expect(payment.stripeAccountId).toBe('acct_ready');
   });
 });
 

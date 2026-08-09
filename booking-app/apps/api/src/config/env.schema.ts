@@ -100,6 +100,21 @@ export const envSchema = z
     PAYMENT_PROVIDER: z.enum(['fake', 'stripe']).default('fake'),
     STRIPE_SECRET_KEY: z.string().optional(),
     STRIPE_WEBHOOK_SECRET: z.string().optional(),
+    /**
+     * Signing secret of the Stripe *Connect* webhook destination.
+     *
+     * A separate destination with a separate secret, delivered to
+     * `/webhooks/stripe/connect`. Required whenever `PAYMENT_PROVIDER` is `stripe`, not
+     * merely encouraged: public organizer registration (`POST /api/public/organizations`)
+     * always onboards a new organizer through Stripe Connect, so a `stripe` deployment
+     * with no Connect destination configured is not a deployment without organizers on
+     * Connect — it is one where `account.updated` has nowhere valid to verify against,
+     * `stripeChargesEnabled` can never become true, and every booking for that organizer
+     * is refused with 422 forever. Left optional, that failure only shows up the first
+     * time an organizer finishes onboarding, in production, with no way to recover short
+     * of a manual database update. Refusing to start is cheaper than that.
+     */
+    STRIPE_CONNECT_WEBHOOK_SECRET: z.string().optional(),
 
     // ── email ────────────────────────────────────────────────────────────────
     EMAIL_PROVIDER: z.enum(['fake', 'resend']).default('fake'),
@@ -131,6 +146,7 @@ export const envSchema = z
     type CredentialKey =
       | 'STRIPE_SECRET_KEY'
       | 'STRIPE_WEBHOOK_SECRET'
+      | 'STRIPE_CONNECT_WEBHOOK_SECRET'
       | 'RESEND_API_KEY'
       | 'RESEND_WEBHOOK_SECRET'
       | 'TWILIO_ACCOUNT_SID'
@@ -186,6 +202,7 @@ export const envSchema = z
     if (env.PAYMENT_PROVIDER === 'stripe') {
       requireCredential('STRIPE_SECRET_KEY', 'PAYMENT_PROVIDER is "stripe"');
       requireCredential('STRIPE_WEBHOOK_SECRET', 'PAYMENT_PROVIDER is "stripe"');
+      requireCredential('STRIPE_CONNECT_WEBHOOK_SECRET', 'PAYMENT_PROVIDER is "stripe"');
     }
 
     if (env.EMAIL_PROVIDER === 'resend') {

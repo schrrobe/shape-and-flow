@@ -7,7 +7,7 @@ import { ENV } from '../config/env.schema.js';
 import { CLOCK } from '../domain/time/clock.js';
 import { BookingNotificationData } from '../notification/booking-notification-data.service.js';
 import { NotificationService } from '../notification/notification.service.js';
-import { OrganizationContextService } from '../organization/organization-context.service.js';
+import { runWithOrganization } from '../organization/tenant-context.store.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
 import { PasswordService } from './password.service.js';
@@ -55,7 +55,6 @@ export class PasswordResetService {
     private readonly sessions: SessionStore,
     private readonly notifications: NotificationService,
     private readonly notificationData: BookingNotificationData,
-    private readonly organizations: OrganizationContextService,
     @Inject(ENV) private readonly config: AppConfig,
     @Inject(CLOCK) private readonly clock: Clock,
   ) {}
@@ -67,15 +66,12 @@ export class PasswordResetService {
    * branch of this method can become a way to ask "does this address have an account".
    */
   async request(email: string): Promise<void> {
-    const organization = this.organizations.get();
-
+    // Global, not scoped to this deployment's bootstrap organization: an office user's
+    // email is unique across every organization, so the organization is derived below
+    // from the row this finds, rather than assumed from request context.
     const user = await this.prisma.officeUser.findFirst({
-      where: {
-        organizationId: organization.id,
-        email: { equals: email, mode: 'insensitive' },
-        archivedAt: null,
-      },
-      select: { id: true, email: true, firstName: true, lastName: true },
+      where: { email: email.toLowerCase(), archivedAt: null },
+      select: { id: true, email: true, firstName: true, lastName: true, organizationId: true },
     });
 
     // Paid on both branches. The remaining database and in-memory-provider work is small
@@ -89,37 +85,49 @@ export class PasswordResetService {
       return;
     }
 
+    const organization = await this.prisma.organization.findUniqueOrThrow({
+      where: { id: user.organizationId },
+      select: { id: true, defaultLocale: true },
+    });
+
     const token = randomBytes(TOKEN_BYTES).toString('base64url');
     const expiresAt = new Date(this.clock.now().getTime() + RESET_TOKEN_TTL_MINUTES * 60_000);
 
-    await this.prisma.$transaction(async (tx) => {
-      const row = await tx.passwordResetToken.create({
-        data: {
-          organizationId: organization.id,
-          officeUserId: user.id,
-          tokenHash: hashResetToken(token),
-          expiresAt,
-        },
-        select: { id: true },
-      });
+    // Inside the user's own organization, because `commonData()` reads whichever tenant
+    // is in scope — and `/auth/password-reset/request` has no tenant middleware, so
+    // outside a scope it falls back to the bootstrap organization. The mail would then
+    // reach a member of one business carrying another business's name, address and
+    // contact details.
+    await runWithOrganization(organization.id, this.prisma, async () => {
+      await this.prisma.$transaction(async (tx) => {
+        const row = await tx.passwordResetToken.create({
+          data: {
+            organizationId: organization.id,
+            officeUserId: user.id,
+            tokenHash: hashResetToken(token),
+            expiresAt,
+          },
+          select: { id: true },
+        });
 
-      await this.notifications.queue(tx, {
-        organizationId: organization.id,
-        kind: 'OFFICE_PASSWORD_RESET',
-        channel: 'EMAIL',
-        // The office has no per-user locale column; staff read the business's own.
-        locale: organization.defaultLocale,
-        recipient: user.email,
-        officeUserId: user.id,
-        // The token row's id, so asking twice sends twice. A stable discriminator would
-        // make the second request produce a link nobody receives.
-        dedupeDiscriminator: row.id,
-        data: {
-          ...this.notificationData.commonData(),
-          officeUserName: `${user.firstName} ${user.lastName}`,
-          resetUrl: this.resetUrl(token),
-          expiresAt,
-        },
+        await this.notifications.queue(tx, {
+          organizationId: organization.id,
+          kind: 'OFFICE_PASSWORD_RESET',
+          channel: 'EMAIL',
+          // The office has no per-user locale column; staff read the business's own.
+          locale: organization.defaultLocale,
+          recipient: user.email,
+          officeUserId: user.id,
+          // The token row's id, so asking twice sends twice. A stable discriminator would
+          // make the second request produce a link nobody receives.
+          dedupeDiscriminator: row.id,
+          data: {
+            ...this.notificationData.commonData(),
+            officeUserName: `${user.firstName} ${user.lastName}`,
+            resetUrl: this.resetUrl(token),
+            expiresAt,
+          },
+        });
       });
     });
   }

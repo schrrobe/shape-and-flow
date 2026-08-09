@@ -79,6 +79,9 @@ export class ManageController {
   @Get('booking')
   async booking(@ManagedBooking() managed: ResolvedToken): Promise<ManageBookingResponse> {
     const booking = await this.load(managed);
+    // The ordinary, ambient-scoped path: `ManagementTenantInterceptor` has already
+    // opened the tenant scope for this booking's own organization, so this resolves the
+    // same settings a by-id lookup would, with no call-site of its own to keep in sync.
     const settings = this.organizations.getSettings();
     const now = this.clock.now();
 

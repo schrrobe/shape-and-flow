@@ -3,6 +3,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { AppError } from '../../common/errors/app-error.js';
 import { CLOCK } from '../../domain/time/clock.js';
 import { InboxRecorder } from '../../messaging/inbox/inbox.recorder.js';
+import { OrganizationWebhookHandler } from '../../organization/organization-webhook.handler.js';
 import { RefundWebhookHandler } from '../../payment/refund-webhook.handler.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import { BookingConfirmationService } from '../booking-confirmation.service.js';
@@ -32,6 +33,13 @@ const HANDLED = {
 interface StripeEventShape {
   /** Unix seconds. When Stripe generated the event, which is close to when money moved. */
   created?: unknown;
+  /**
+   * The connected account this event was forwarded from, absent on a platform event.
+   *
+   * Read from the stored payload rather than threaded down from the HTTP layer, because
+   * a job re-enqueued by the inbox reconciler has only the row to go on.
+   */
+  account?: unknown;
   data?: {
     object?: {
       id?: unknown;
@@ -80,6 +88,7 @@ export class StripeEventProcessor {
     private readonly inbox: InboxRecorder,
     private readonly confirmations: BookingConfirmationService,
     private readonly refunds: RefundWebhookHandler,
+    private readonly organizations: OrganizationWebhookHandler,
     @Inject(CLOCK) private readonly clock: Clock,
   ) {}
 
@@ -127,10 +136,24 @@ export class StripeEventProcessor {
       return;
     }
 
+    // Same split as refunds: Connect account verification is a concern of the organization,
+    // not the booking, so it is handed off rather than grown into this switch.
+    if (this.organizations.handles(type)) {
+      // The event time goes with it: `account.updated` snapshots are not delivered in
+      // order, and the handler needs it to tell an older snapshot from a newer one.
+      await this.organizations.handle(type, object, eventTime(event.created));
+      return;
+    }
+
     switch (type) {
       case HANDLED.COMPLETED:
       case HANDLED.ASYNC_SUCCEEDED:
-        await this.confirmIfPaid(object, eventId, eventTime(event.created));
+        await this.confirmIfPaid(
+          object,
+          eventId,
+          eventTime(event.created),
+          readString(event.account),
+        );
         return;
 
       case HANDLED.EXPIRED:
@@ -161,6 +184,7 @@ export class StripeEventProcessor {
     object: NonNullable<NonNullable<StripeEventShape['data']>['object']>,
     eventId: string,
     eventCreatedAt: Date | undefined,
+    stripeAccountId: string | undefined,
   ): Promise<void> {
     const sessionId = readString(object.id);
     if (sessionId === undefined) {
@@ -187,9 +211,20 @@ export class StripeEventProcessor {
 
     const booking = await this.resolveBooking(sessionId, object.client_reference_id);
 
+    if (!(await this.eventIsFromTheBookingsAccount(booking.id, sessionId, stripeAccountId))) {
+      // Dropped, not retried: nothing about this event will become valid later.
+      this.logger.error(
+        `payment.foreign_account booking=${booking.id} session=${sessionId} account=${stripeAccountId ?? 'platform'} event=${eventId}`,
+      );
+      return;
+    }
+
     const outcome = await this.confirmations.confirmPaid({
       bookingId: booking.id,
       sessionId,
+      // Only consulted if the payment row still has to be created — the checkout path
+      // normally wrote it, account and all, when it opened the session.
+      ...(stripeAccountId === undefined ? {} : { stripeAccountId }),
       ...(readString(object.payment_intent) === undefined
         ? {}
         : { paymentIntentId: readString(object.payment_intent) }),
@@ -311,6 +346,47 @@ export class StripeEventProcessor {
       where: { id: bookingId },
       select: { id: true },
     });
+  }
+
+  /**
+   * Whether this event may speak for this booking's money.
+   *
+   * One Connect webhook endpoint receives events from every account connected to the
+   * platform, so `event.account` says which connected merchant sent an event — not that
+   * the event is about them. `client_reference_id` is the fallback the booking is
+   * resolved by, and a connected merchant controls it: they can open a Checkout Session
+   * on their own account carrying somebody else's booking id, pay themselves, and this
+   * path would confirm a stranger's booking — and, since no payment row names their
+   * session id, write one recording their account as where the money is — without a cent
+   * reaching the organizer.
+   *
+   * The payment row is the answer whenever it exists: it was written when the session was
+   * opened and already names the account it was opened on. Without one — the session was
+   * created but the process died before the id was stored — the organization's own
+   * account is the only connected account that may report it, and the platform account
+   * (`undefined`) stays acceptable because only we can send from there, and a booking
+   * opened before the organization moved to Connect is legitimately platform-charged.
+   */
+  private async eventIsFromTheBookingsAccount(
+    bookingId: string,
+    sessionId: string,
+    eventAccountId: string | undefined,
+  ): Promise<boolean> {
+    const account = eventAccountId ?? null;
+
+    const payment = await this.prisma.payment.findUnique({
+      where: { stripeCheckoutSessionId: sessionId },
+      select: { stripeAccountId: true },
+    });
+
+    if (payment !== null) return account === payment.stripeAccountId;
+
+    const booking = await this.prisma.booking.findUnique({
+      where: { id: bookingId },
+      select: { organization: { select: { stripeAccountId: true } } },
+    });
+
+    return account === null || account === booking?.organization.stripeAccountId;
   }
 
   private async resolveBooking(

@@ -81,13 +81,43 @@ const postWebhook = (raw: Buffer, signature?: string) => {
   );
 };
 
-/** Store an event directly, for tests that drive the processor rather than the route. */
-async function seedEvent(type: string, object: Record<string, unknown>, id: string): Promise<void> {
+/** The Connect destination, which Stripe signs with a different key. */
+const postConnectWebhook = (raw: Buffer, signature?: string) => {
+  const req = request(server())
+    .post('/webhooks/stripe/connect')
+    .set('content-type', 'application/json');
+
+  return (signature === undefined ? req : req.set('stripe-signature', signature)).send(
+    raw.toString('utf8'),
+  );
+};
+
+/**
+ * Store an event directly, for tests that drive the processor rather than the route.
+ *
+ * `createdAt`, when given, becomes the event's `created` (Stripe's own unix-seconds
+ * timestamp) — the field `OrganizationWebhookHandler`'s staleness guard orders on. Omitted
+ * by default because most events seeded this way don't care about ordering.
+ */
+async function seedEvent(
+  type: string,
+  object: Record<string, unknown>,
+  id: string,
+  createdAt?: Date,
+  /** The connected account the delivery came from. Omitted means the platform account. */
+  account?: string,
+): Promise<void> {
   await prisma.stripeWebhookEvent.create({
     data: {
       stripeEventId: id,
       type,
-      payload: { id, type, data: { object } } as Prisma.InputJsonValue,
+      payload: {
+        id,
+        type,
+        ...(createdAt === undefined ? {} : { created: Math.floor(createdAt.getTime() / 1000) }),
+        ...(account === undefined ? {} : { account }),
+        data: { object },
+      } as Prisma.InputJsonValue,
     },
   });
 }
@@ -181,6 +211,125 @@ describe('POST /webhooks/stripe', () => {
   });
 });
 
+/**
+ * Two destinations, two secrets.
+ *
+ * Stripe delivers a connected account's events through a Connect destination with its own
+ * signing key. Pointed at one endpoint verifying one secret, whichever stream is not the
+ * one that secret belongs to is rejected in full — either every `account.updated` is lost
+ * and organizers never become ready, or every payment event is.
+ */
+describe('POST /webhooks/stripe/connect', () => {
+  const connectEvent = () =>
+    rawEvent('account.updated', { id: 'acct_123', charges_enabled: true }, 'evt_connect_1');
+
+  it('accepts a delivery signed with the Connect secret', async () => {
+    const { raw } = connectEvent();
+
+    await postConnectWebhook(raw, payments.signatureFor(raw, 'connect')).expect(200);
+
+    expect(await prisma.stripeWebhookEvent.count()).toBe(1);
+  });
+
+  it('refuses a Connect delivery signed with the platform secret', async () => {
+    const { raw } = connectEvent();
+
+    await postConnectWebhook(raw, payments.signatureFor(raw, 'platform')).expect(400);
+
+    expect(await prisma.stripeWebhookEvent.count()).toBe(0);
+  });
+
+  it('refuses a platform delivery signed with the Connect secret', async () => {
+    const { raw } = rawEvent('checkout.session.completed', { id: 'cs_x' });
+
+    await postWebhook(raw, payments.signatureFor(raw, 'connect')).expect(400);
+
+    expect(await prisma.stripeWebhookEvent.count()).toBe(0);
+  });
+
+  it('requires a signature like the platform route does', async () => {
+    const { raw } = connectEvent();
+
+    await postConnectWebhook(raw).expect(400);
+  });
+});
+
+/**
+ * The Connect route above only proves the event is verified and stored — nothing exercised
+ * the path from there to `OrganizationWebhookHandler` actually updating the organization row.
+ * These drive that path for real: a signed HTTP delivery through to `processor.handle`
+ * through to the database, and the same-second staleness case that used to drop a
+ * legitimate event permanently (see `OrganizationWebhookHandler`'s `lte` comment).
+ */
+describe('account.updated reaching OrganizationWebhookHandler', () => {
+  beforeEach(async () => {
+    // A known starting state, independent of seedOrganization's own defaults: the account
+    // is linked — that is what the handler's lookup by `stripeAccountId` resolves — and
+    // onboarding has not been reported on it yet.
+    await prisma.organization.update({
+      where: { id: ctx.organization.id },
+      data: {
+        stripeAccountId: 'acct_123',
+        stripeChargesEnabled: false,
+        stripeDetailsSubmitted: false,
+        stripeAccountUpdatedAt: null,
+      },
+    });
+  });
+
+  it('updates the organization row from a real signed delivery, end to end', async () => {
+    const { raw, id } = rawEvent(
+      'account.updated',
+      { id: 'acct_123', details_submitted: true, charges_enabled: true },
+      'evt_connect_e2e',
+    );
+
+    await postConnectWebhook(raw, payments.signatureFor(raw, 'connect')).expect(200);
+    await processor.handle({ stripeEventId: id });
+
+    const organization = await prisma.organization.findUniqueOrThrow({
+      where: { id: ctx.organization.id },
+    });
+    expect(organization.stripeChargesEnabled).toBe(true);
+    expect(organization.stripeDetailsSubmitted).toBe(true);
+  });
+
+  it('applies a second account.updated sharing the same created second, rather than dropping it', async () => {
+    const sameSecond = new Date('2026-08-10T06:00:00.000Z');
+
+    // Event A: details submitted, capabilities not all active yet.
+    await seedEvent(
+      'account.updated',
+      { id: 'acct_123', details_submitted: true, charges_enabled: false },
+      'evt_connect_a',
+      sameSecond,
+    );
+    await processor.handle({ stripeEventId: 'evt_connect_a' });
+
+    let organization = await prisma.organization.findUniqueOrThrow({
+      where: { id: ctx.organization.id },
+    });
+    expect(organization.stripeChargesEnabled).toBe(false);
+
+    // Event B: same `created` second (Stripe's created has one-second resolution — this is
+    // what card_payments and transfers activating together at the end of Express onboarding
+    // looks like). Must be applied, not dropped as "not newer".
+    await seedEvent(
+      'account.updated',
+      { id: 'acct_123', details_submitted: true, charges_enabled: true },
+      'evt_connect_b',
+      sameSecond,
+    );
+    await processor.handle({ stripeEventId: 'evt_connect_b' });
+
+    organization = await prisma.organization.findUniqueOrThrow({
+      where: { id: ctx.organization.id },
+    });
+    expect(organization.stripeChargesEnabled).toBe(true);
+    expect(organization.stripeAccountUpdatedAt).toEqual(sameSecond);
+  });
+});
+
 describe('confirming a paid booking', () => {
   let bookingId: string;
   let sessionId: string;
@@ -224,6 +373,33 @@ describe('confirming a paid booking', () => {
         where: { aggregateId: bookingId, eventType: JOB.BOOKING_CONFIRMED },
       }),
     ).toBe(1);
+  });
+
+  // The Connect endpoint receives events from every account connected to the platform, so
+  // `event.account` identifies the sender and nothing more. A merchant who opens a session
+  // on their own account naming somebody else's booking must not be able to confirm it.
+  it('ignores a paid session reported by an account this booking never used', async () => {
+    await seedEvent(
+      'checkout.session.completed',
+      {
+        id: 'cs_foreign',
+        client_reference_id: bookingId,
+        payment_status: 'paid',
+        amount_total: ctx.service30.priceCents,
+      },
+      'evt_foreign',
+      undefined,
+      'acct_someone_else',
+    );
+
+    await processor.handle({ stripeEventId: 'evt_foreign' });
+
+    const booking = await prisma.booking.findUniqueOrThrow({ where: { id: bookingId } });
+    expect(booking.status).toBe('PENDING_PAYMENT');
+    expect(await prisma.payment.count({ where: { stripeCheckoutSessionId: 'cs_foreign' } })).toBe(
+      0,
+    );
+    expect(await prisma.managementToken.count({ where: { bookingId } })).toBe(0);
   });
 
   it('puts the plaintext token in the outbox payload and only its hash in the table', async () => {

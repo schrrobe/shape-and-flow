@@ -11,6 +11,7 @@ import { ExpiryProcessor } from '../../src/booking/processors/expiry.processor.j
 import { ReservationService } from '../../src/booking/reservation.service.js';
 import { FixedClock } from '../../src/domain/time/clock.js';
 import { JOB } from '../../src/messaging/queues/job-contracts.js';
+import { OrganizationContextService } from '../../src/organization/organization-context.service.js';
 import { PUBLIC_WEB_ORIGIN, createBookingTestApp, enqueued } from '../booking-app.harness.js';
 import { prisma, resetDatabase } from '../database.harness.js';
 import { SLOT_FRIDAY_0900, seedOrganization } from '../factories/index.js';
@@ -234,6 +235,37 @@ describe('phase two', () => {
     expect(
       await prisma.payment.count({ where: { bookingId: booking.id, status: 'SUCCEEDED' } }),
     ).toBe(1);
+  });
+
+  /**
+   * The session lives on whichever account opened it, whatever the organization looks
+   * like by the time the expiry job runs. Expiring it against the other account is a 404
+   * from Stripe, and the slot stays blocked with a session nobody can pay into.
+   */
+  it('expires the session on the account it was opened on, not the current one', async () => {
+    const booking = await overdue();
+
+    // Opened on the platform account, the way a pre-Connect booking was.
+    await prisma.payment.updateMany({
+      where: { bookingId: booking.id },
+      data: { stripeAccountId: null },
+    });
+
+    // The organizer has since finished onboarding.
+    await prisma.organization.update({
+      where: { id: ctx.organization.id },
+      data: {
+        paymentsMode: 'CONNECT',
+        stripeAccountId: 'acct_connected',
+        stripeChargesEnabled: true,
+      },
+    });
+    await testApp.app.get(OrganizationContextService).refresh();
+
+    await expiry.beginExpiry(booking.id);
+    expect(await expiry.completeExpiry(booking.id)).toBe('EXPIRED');
+
+    expect(payments.lastAccountFor('expireCheckoutSession')).toBeUndefined();
   });
 
   it('keeps the slot blocked when Stripe is unreachable', async () => {

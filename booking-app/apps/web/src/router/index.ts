@@ -1,5 +1,12 @@
 import { createRouter, createWebHistory } from 'vue-router';
 
+import {
+  ORGANIZER_PARAM,
+  readOrganizerParam,
+  rememberTenantSlug,
+  tenantSlug,
+} from '../api/tenant.js';
+
 import { installOfficeSessionHandling } from './office-guard.js';
 
 import type { RouteRecordRaw } from 'vue-router';
@@ -55,6 +62,12 @@ const routes: RouteRecordRaw[] = [
     path: '/booking/canceled',
     name: 'booking-canceled',
     component: () => import('../pages/public/BookingCanceled.vue'),
+  },
+
+  {
+    path: '/organizer/registrieren',
+    name: 'register-organizer',
+    component: () => import('../pages/public/RegisterOrganizerPage.vue'),
   },
 
   {
@@ -173,6 +186,11 @@ const routes: RouteRecordRaw[] = [
         name: 'office-settings',
         component: () => import('../pages/office/SettingsPage.vue'),
       },
+      {
+        path: 'onboarding-status',
+        name: 'onboarding-status',
+        component: () => import('../pages/office/OnboardingStatusPage.vue'),
+      },
     ],
   },
 
@@ -213,6 +231,40 @@ export const router = createRouter({
 
     return { top: 0 };
   },
+});
+
+/**
+ * Keep `?organizer=` on every public URL.
+ *
+ * The customer arrives on `/?organizer=acme` and the first `router.push` — to a wizard
+ * step, or back to the slot list after a taken slot — would drop the parameter. The page
+ * would still work, because the API client remembers the slug, but the address bar would
+ * stop naming the organizer: a reloaded, bookmarked or shared link would land on the
+ * default tenant instead. Putting it back makes the URL mean what the session means.
+ *
+ * Office routes are left alone. They resolve their tenant from the session cookie, and a
+ * slug on an authenticated URL would be a second way to name a tenant that nothing reads.
+ */
+router.beforeEach((to) => {
+  // Before the parameter is read at all, not just before it is put back: an office URL
+  // that carries `?organizer=` names nothing the office reads, so honouring it would let
+  // `/office?organizer=other` repoint the tab's booking tenant and send a later public
+  // navigation to an organizer the customer never chose.
+  if (to.meta.area === 'office') return true;
+
+  const explicit = readOrganizerParam(to.query[ORGANIZER_PARAM]);
+  if (explicit !== null) {
+    rememberTenantSlug(explicit);
+    return true;
+  }
+
+  const slug = tenantSlug();
+  if (slug === null) return true;
+
+  // Covers the absent case and the malformed ones — `?organizer=` and repeated values,
+  // both of which the API rejects — by replacing whatever was there with the slug this
+  // visit is actually for.
+  return { ...to, query: { ...to.query, [ORGANIZER_PARAM]: slug } };
 });
 
 installOfficeSessionHandling(router);

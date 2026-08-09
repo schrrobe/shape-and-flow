@@ -80,10 +80,15 @@ export class SettingsService {
       }
     });
 
-    await this.organizations.refresh();
+    // `refreshCurrent`, not `refresh`: an office request runs inside a tenant scope, and
+    // `refresh` only replaces the bootstrap fallback that a scoped request never reads.
+    // Left at that, this method would return the values from before the transaction — the
+    // form would be overwritten with the user's old input and the audit row would record
+    // a change from a value to itself.
+    const reloaded = await this.organizations.refreshCurrent(organization.id);
     this.logger.log('organization settings updated; cached context refreshed');
 
-    return this.read();
+    return toDto(reloaded);
   }
 }
 

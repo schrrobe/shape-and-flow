@@ -15,6 +15,7 @@ import { EnqueueService, QUEUE_REGISTRY } from '../src/messaging/queues/enqueue.
 import { QUEUES } from '../src/messaging/queues/job-contracts.js';
 import { REDIS } from '../src/messaging/queues/redis.provider.js';
 import { OrganizationContextService } from '../src/organization/organization-context.service.js';
+import { currentTenant, setCurrentTenant } from '../src/organization/tenant-context.store.js';
 import { PrismaService } from '../src/prisma/prisma.service.js';
 import { EMAIL_PROVIDER } from '../src/providers/email/email-provider.js';
 import { FakeEmailProvider } from '../src/providers/email/fake-email.provider.js';
@@ -70,6 +71,13 @@ let currentClock: FixedClock | null = null;
 
 function organizationStub(): Partial<OrganizationContextService> {
   const read = (): OrganizationWithSettings => {
+    // Mirrors the real OrganizationContextService.get(): a suite that wires
+    // TenantResolutionMiddleware and opens a runWithTenant() scope (public routes
+    // resolved by ?organizer=<slug>) gets that organization; everything else falls
+    // back to the snapshot set by createBookingTestApp.
+    const scoped = currentTenant();
+    if (scoped) return scoped;
+
     if (currentOrganization === null) {
       throw new Error('Organization not set. Call createBookingTestApp from a beforeEach.');
     }
@@ -91,6 +99,23 @@ function organizationStub(): Partial<OrganizationContextService> {
      */
     refresh: async () => {
       currentOrganization = await loadOrganization(read().id);
+    },
+    /**
+     * Implemented for real too, and for a sharper reason.
+     *
+     * `refresh()` alone cannot fix a scoped request: the ALS snapshot the middleware took
+     * before the handler ran is what `get()` returns, so a settings PATCH would keep
+     * answering from before its own write. A stub that only updated the fallback would let
+     * that bug pass here.
+     */
+    refreshCurrent: async (organizationId: string) => {
+      const reloaded = await loadOrganization(organizationId);
+
+      if (!setCurrentTenant(reloaded) || currentOrganization?.id === reloaded.id) {
+        currentOrganization = reloaded;
+      }
+
+      return reloaded;
     },
     // Worker paths pass the organization the job names and expect a mismatch to be rejected,
     // so the stub enforces that rather than waving it through: a test that queued a job for
@@ -270,8 +295,13 @@ export async function createBookingTestApp(options: {
    * The correlation middleware is registered with `app.use()` in production rather than
    * as Nest middleware, so a suite that asserts on correlation ids has to mount it the
    * same way or it would be proving something about a different wiring.
+   *
+   * A `[prefix, handler]` pair mounts as `app.use(prefix, handler)` — the same call
+   * `main.ts` makes for `TenantResolutionMiddleware` and `OfficeTenantMiddleware` — so a
+   * suite exercising either one gets Express's own path scoping rather than a hand-rolled
+   * reimplementation of it.
    */
-  middleware?: RequestHandler[];
+  middleware?: (RequestHandler | readonly [string, RequestHandler])[];
   /**
    * Count Prisma operations, so a suite can assert an N+1 has not appeared.
    *
@@ -300,7 +330,14 @@ export async function createBookingTestApp(options: {
   // `rawBody: true` for the same reason production sets it: the webhook verifies a
   // signature over the bytes as sent.
   const app = moduleRef.createNestApplication({ rawBody: true });
-  for (const handler of options.middleware ?? []) app.use(handler);
+  for (const entry of options.middleware ?? []) {
+    if (Array.isArray(entry)) {
+      const [prefix, handler] = entry;
+      app.use(prefix, handler);
+    } else {
+      app.use(entry);
+    }
+  }
   if (options.globalPrefix !== undefined) app.setGlobalPrefix(options.globalPrefix);
   app.use(
     `${options.globalPrefix === undefined ? '' : `/${options.globalPrefix}`}/webhooks`,

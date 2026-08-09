@@ -400,6 +400,38 @@ describe('one booking.confirmed event', () => {
     expect(kinds).toEqual(['BOOKING_CONFIRMATION', 'OFFICE_NEW_BOOKING']);
   });
 
+  /**
+   * The harness's bootstrap organization is `ctx.organization` — the one `build()` hands
+   * to `createBookingTestApp`. Every other case in this file books through `ctx`, so a
+   * processor that silently ignored `payload.organizationId` and fell back to the
+   * bootstrap default would still pass every one of them: the fallback and the intended
+   * scope are the same organization. This booking belongs to a second, unrelated one, so
+   * it can tell the two apart. Without `BookingEventProcessor` opening its own
+   * `runWithOrganization` scope first, `data.load` and `getSettings()` would resolve the
+   * bootstrap default instead, find no such booking there, log "no longer exists" at warn,
+   * and return with nothing queued — money taken, customer told nothing.
+   */
+  it('produces notifications for a booking in an organization other than the process bootstrap default', async () => {
+    const foreign = await seedOrganization(prisma, { slug: 'foreign-studio' });
+    const foreignBooking = await prisma.booking.create({
+      data: {
+        ...makeBooking(foreign, { status: 'CONFIRMED', expiresAt: null }),
+        confirmedAt: NOW,
+      },
+    });
+
+    await bookingEvents.confirmed({
+      organizationId: foreign.organization.id,
+      bookingId: foreignBooking.id,
+    });
+
+    const kinds = (await prisma.notification.findMany({ where: { bookingId: foreignBooking.id } }))
+      .map((row) => row.kind)
+      .sort();
+
+    expect(kinds).toEqual(['BOOKING_CONFIRMATION', 'OFFICE_NEW_BOOKING']);
+  });
+
   it('puts the management link in the customer email and not the office one', async () => {
     await bookingEvents.confirmed({
       organizationId: ctx.organization.id,

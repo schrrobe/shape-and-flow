@@ -2,35 +2,41 @@ import {
   Injectable,
   SetMetadata,
   UseGuards,
+  UseInterceptors,
   applyDecorators,
   createParamDecorator,
 } from '@nestjs/common';
 
 import { AppError } from '../common/errors/app-error.js';
 
+import { MANAGED_BOOKING, requireManagedBooking } from './managed-booking.request.js';
+import { ManagementTenantInterceptor } from './management-tenant.interceptor.js';
 import { MANAGEMENT_TOKEN_ROUTE } from './management-token.metadata.js';
 import { ManagementTokenService } from './management-token.service.js';
 
+import type { WithManagedBooking } from './managed-booking.request.js';
 import type { ResolvedToken } from './management-token.service.js';
 import type { CanActivate, ExecutionContext } from '@nestjs/common';
 import type { Request } from 'express';
 
 /**
- * Marks a route as reachable with a management token, and binds the guard that checks one.
+ * Marks a route as reachable with a management token, and binds the guard that checks
+ * one and the interceptor that opens the tenant scope for it.
  *
- * Both in one decorator, deliberately. The metadata alone tells the global `AuthGuard` "this
- * route has a way in" — so a route that set the metadata and forgot `@UseGuards` would be
- * open to anyone. Composing them makes that combination unexpressible.
+ * All three in one decorator, deliberately. The metadata alone tells the global `AuthGuard`
+ * "this route has a way in" — so a route that set the metadata and forgot `@UseGuards`
+ * would be open to anyone. Composing them makes that combination unexpressible. The
+ * interceptor rides along for the same reason: a `/manage` route that forgot to open the
+ * tenant scope would silently serve the bootstrap default organization's data, which is
+ * exactly the bug this exists to close — see `ManagementTenantInterceptor` for why it has
+ * to be an interceptor and not more guard logic.
  */
 export const ManagementToken = (): MethodDecorator & ClassDecorator =>
-  applyDecorators(SetMetadata(MANAGEMENT_TOKEN_ROUTE, true), UseGuards(ManagementTokenGuard));
-
-/** Where the guard leaves what it resolved. */
-const MANAGED_BOOKING = 'managedBooking';
-
-interface WithManagedBooking {
-  [MANAGED_BOOKING]?: ResolvedToken;
-}
+  applyDecorators(
+    SetMetadata(MANAGEMENT_TOKEN_ROUTE, true),
+    UseGuards(ManagementTokenGuard),
+    UseInterceptors(ManagementTenantInterceptor),
+  );
 
 /**
  * The booking the presented token identified.
@@ -41,17 +47,7 @@ interface WithManagedBooking {
 export const ManagedBooking = createParamDecorator(
   (_data: unknown, context: ExecutionContext): ResolvedToken => {
     const request = context.switchToHttp().getRequest<Request & WithManagedBooking>();
-    const managed = request[MANAGED_BOOKING];
-
-    if (managed === undefined) {
-      // Only reachable if a route used this decorator without the guard, which is a
-      // wiring mistake rather than a client error.
-      throw new AppError('INTERNAL_ERROR', {
-        message: 'ManagedBooking used on a route without ManagementTokenGuard.',
-      });
-    }
-
-    return managed;
+    return requireManagedBooking(request);
   },
 );
 

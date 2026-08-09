@@ -209,6 +209,26 @@ enum AuditAction {
   // happened.
   CUSTOMER_UPDATED
   CUSTOMER_ERASED
+  ORGANIZATION_ONBOARDING_LINK_REQUESTED
+}
+
+enum EntityType {
+  INDIVIDUAL
+  SOLE_PROPRIETORSHIP
+  ORGANIZATION
+}
+
+/// Which Stripe account an organization's *new* charges are created on.
+///
+/// `PLATFORM` is the pre-Connect arrangement: money lands on our own account and
+/// there is nothing to onboard. `CONNECT` means the organization pays through its
+/// own Express account and must not take money before Stripe says the account can.
+/// The distinction cannot be inferred from `stripeAccountId`: registration
+/// deliberately keeps an organization whose Stripe account creation failed, and a
+/// null account id there means "not provisioned yet", not "legacy".
+enum PaymentsMode {
+  PLATFORM
+  CONNECT
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -231,9 +251,30 @@ model Organization {
   timezone        String   @default("Europe/Berlin")
   currency        String   @default("EUR")
   defaultLocale   Locale   @default(de) @map("default_locale")
-  /// Always null in Phase 1. Present so the Stripe Connect migration is a
-  /// backfill rather than a schema change.
-  stripeAccountId String?  @map("stripe_account_id")
+  /// The organization's own Stripe Express account, once one has been created.
+  ///
+  /// Null means one of two different things, which is why `paymentsMode` exists:
+  /// a `PLATFORM` organization never gets one, while a `CONNECT` organization
+  /// whose account creation failed during registration is waiting for the
+  /// onboarding-link retry to provision it.
+  stripeAccountId String?  @unique @map("stripe_account_id")
+
+  entityType             EntityType?
+  taxId                  String?
+  vatId                  String?
+  isSmallBusiness        Boolean      @default(false)
+  ownerFirstName         String?
+  ownerLastName          String?
+  paymentsMode           PaymentsMode @default(CONNECT) @map("payments_mode")
+  stripeDetailsSubmitted Boolean      @default(false)
+  stripeChargesEnabled   Boolean      @default(false)
+  /// `created` of the newest `account.updated` event applied to the two flags above.
+  ///
+  /// Stripe does not order webhook deliveries and the webhook queue runs several
+  /// jobs at once, so an older snapshot can arrive last. Readiness is only written
+  /// when the event is newer than what is already stored.
+  stripeAccountUpdatedAt DateTime?    @map("stripe_account_updated_at") @db.Timestamptz(3)
+
   createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
@@ -318,7 +359,7 @@ model ClosedDay {
 model OfficeUser {
   id                  String         @id @default(cuid())
   organizationId      String         @map("organization_id")
-  email               String
+  email               String         @unique
   passwordHash        String         @map("password_hash")
   firstName           String         @map("first_name")
   lastName            String         @map("last_name")
@@ -347,7 +388,6 @@ model OfficeUser {
   bookingStatusHistory   BookingStatusHistory[]
   notifications          Notification[]
 
-  @@unique([organizationId, email])
   @@index([organizationId, role])
   @@index([organizationId, archivedAt])
   @@map("office_users")
@@ -775,6 +815,15 @@ model Payment {
   stripePaymentIntentId   String?       @unique @map("stripe_payment_intent_id")
   stripeCheckoutSessionId String?       @unique @map("stripe_checkout_session_id")
   stripeChargeId          String?       @unique @map("stripe_charge_id")
+  /// The Stripe account the session, intent and charge above live on, or null for
+  /// the platform account.
+  ///
+  /// Written once, when the Checkout Session is created, and never recomputed: a
+  /// Stripe object belongs to its creating account forever, so expiring,
+  /// retrieving or refunding it has to address that account even after the
+  /// organization's readiness changed. Deriving it from the organization instead
+  /// is how a refund ends up aimed at an account the charge was never on.
+  stripeAccountId         String?       @map("stripe_account_id")
   amountCents             Int           @map("amount_cents")
   currency                String
   status                  PaymentStatus

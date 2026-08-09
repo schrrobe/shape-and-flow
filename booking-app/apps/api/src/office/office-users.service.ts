@@ -86,7 +86,7 @@ export class OfficeUsersService {
       user = await this.prisma.officeUser.create({
         data: {
           organizationId,
-          email: input.email,
+          email: input.email.toLowerCase(),
           passwordHash,
           firstName: input.firstName,
           lastName: input.lastName,

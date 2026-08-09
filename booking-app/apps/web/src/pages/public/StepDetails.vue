@@ -8,6 +8,7 @@ import { useRouter } from 'vue-router';
 import { api } from '../../api/client.js';
 import { ApiError } from '../../api/errors.js';
 import { messageKeyFor } from '../../api/errors.js';
+import { withOrganizer } from '../../api/tenant.js';
 import { useFocusStep } from '../../composables/useFocusStep.js';
 import { useMoney } from '../../i18n/money.js';
 import { useBookingDraft } from '../../stores/booking-draft.js';
@@ -69,8 +70,14 @@ async function submit(): Promise<void> {
         // Absolute, because Stripe redirects the browser to them. The placeholder is Stripe's
         // own: it substitutes the real session id, which is how the landing page knows which
         // payment to resolve. The API validates only the origin, so the braces survive.
-        successUrl: `${window.location.origin}/booking/success?session_id={CHECKOUT_SESSION_ID}`,
-        cancelUrl: `${window.location.origin}/booking/canceled`,
+        //
+        // The organizer rides along because Stripe returns the browser to a fresh page load
+        // in a tab that may not be the one that started the booking. Without it, the landing
+        // page resolves the payment against the default tenant and never finds the booking.
+        successUrl: withOrganizer(
+          `${window.location.origin}/booking/success?session_id={CHECKOUT_SESSION_ID}`,
+        ),
+        cancelUrl: withOrganizer(`${window.location.origin}/booking/canceled`),
       },
       draft.idempotencyKey ?? '',
     );

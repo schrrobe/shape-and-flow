@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 
 import { Money } from '../../src/domain/money/money.js';
 import { FixedClock } from '../../src/domain/time/clock.js';
+import { OrganizationContextService } from '../../src/organization/organization-context.service.js';
 import { PaymentModule } from '../../src/payment/payment.module.js';
 import { RefundService } from '../../src/payment/refund.service.js';
 import { createBookingTestApp } from '../booking-app.harness.js';
@@ -465,5 +466,69 @@ describe('webhooks arriving out of order', () => {
     await service.execute(refundId);
 
     expect(await prisma.outboxEvent.count({ where: { eventType: 'refund.succeeded' } })).toBe(0);
+  });
+});
+
+/**
+ * A Stripe object belongs to the account that created it, forever.
+ *
+ * Readiness moves — an organizer finishes Connect onboarding, or Stripe disables an
+ * account — and a refund routed from the organization's *current* state then addresses an
+ * account the charge was never on. Stripe answers "no such charge", the refund fails, and
+ * the customer's money stays put with nothing in the office to explain why.
+ */
+describe('the account a refund is routed to', () => {
+  async function refundAndReadAccount(): Promise<string | undefined> {
+    const { refundId } = await service.request({
+      bookingId,
+      amountCents: 2000,
+      reason: 'GOODWILL',
+      officeUserId: ctx.owner.id,
+    });
+
+    await service.execute(refundId);
+
+    return payments.lastAccountFor('createRefund');
+  }
+
+  it('stays on the platform account after the organizer connects one', async () => {
+    // The payment was taken before Connect: its row records the platform account.
+    await prisma.payment.updateMany({
+      where: { bookingId },
+      data: { stripeAccountId: null },
+    });
+
+    await prisma.organization.update({
+      where: { id: ctx.organization.id },
+      data: {
+        paymentsMode: 'CONNECT',
+        stripeAccountId: 'acct_connected',
+        stripeChargesEnabled: true,
+      },
+    });
+    await testApp.app.get(OrganizationContextService).refresh();
+
+    expect(await refundAndReadAccount()).toBeUndefined();
+  });
+
+  it('stays on the connected account after it stops taking charges', async () => {
+    await prisma.payment.updateMany({
+      where: { bookingId },
+      data: { stripeAccountId: 'acct_connected' },
+    });
+
+    // Stripe has since disabled the account. The charge is still on it, so the refund has
+    // to go there — the platform account has never seen this money.
+    await prisma.organization.update({
+      where: { id: ctx.organization.id },
+      data: {
+        paymentsMode: 'CONNECT',
+        stripeAccountId: 'acct_connected',
+        stripeChargesEnabled: false,
+      },
+    });
+    await testApp.app.get(OrganizationContextService).refresh();
+
+    expect(await refundAndReadAccount()).toBe('acct_connected');
   });
 });

@@ -16,6 +16,7 @@ import { z } from 'zod';
 export const errorCodeSchema = z.enum([
   // 400
   'VALIDATION_FAILED',
+  'INVALID_RETURN_URL',
   // 401
   'UNAUTHENTICATED',
   // 403
@@ -24,6 +25,7 @@ export const errorCodeSchema = z.enum([
   // 404 — also returned for a resource owned by another organization, because a
   // 403 would confirm the id exists.
   'NOT_FOUND',
+  'ORGANIZATION_NOT_FOUND',
   // 409
   'SLOT_UNAVAILABLE',
   'IDEMPOTENT_REQUEST_IN_PROGRESS',
@@ -36,14 +38,18 @@ export const errorCodeSchema = z.enum([
   'CANNOT_MODIFY_SELF',
   'PAYMENT_NOT_REFUNDABLE',
   'NO_EMPLOYEE_AVAILABLE',
+  'EMAIL_ALREADY_REGISTERED',
   // 422
   'IDEMPOTENCY_KEY_REUSED',
   'OUTSIDE_BOOKING_WINDOW',
   'INVALID_STATUS_TRANSITION',
+  'ORGANIZATION_CREATE_ERROR',
+  'ORGANIZATION_ONBOARDING_INCOMPLETE',
   // 429
   'RATE_LIMITED',
   // 500
   'INTERNAL_ERROR',
+  'ONBOARDING_LINK_ERROR',
 ]);
 
 export type ErrorCode = z.infer<typeof errorCodeSchema>;
@@ -56,6 +62,7 @@ export type ErrorCode = z.infer<typeof errorCodeSchema>;
  */
 export const ERROR_STATUS: Record<ErrorCode, number> = {
   VALIDATION_FAILED: 400,
+  INVALID_RETURN_URL: 400,
 
   UNAUTHENTICATED: 401,
 
@@ -63,6 +70,7 @@ export const ERROR_STATUS: Record<ErrorCode, number> = {
   FORBIDDEN_ROLE: 403,
 
   NOT_FOUND: 404,
+  ORGANIZATION_NOT_FOUND: 404,
 
   SLOT_UNAVAILABLE: 409,
   IDEMPOTENT_REQUEST_IN_PROGRESS: 409,
@@ -79,14 +87,21 @@ export const ERROR_STATUS: Record<ErrorCode, number> = {
   CANNOT_MODIFY_SELF: 409,
   PAYMENT_NOT_REFUNDABLE: 409,
   NO_EMPLOYEE_AVAILABLE: 409,
+  // A second registration with an email that already has an office_users row. 409, not
+  // 422: the request is well-formed and nothing about it can be corrected by resubmitting
+  // — the right next step is signing in or resetting the existing account's password.
+  EMAIL_ALREADY_REGISTERED: 409,
 
   IDEMPOTENCY_KEY_REUSED: 422,
   OUTSIDE_BOOKING_WINDOW: 422,
   INVALID_STATUS_TRANSITION: 422,
+  ORGANIZATION_CREATE_ERROR: 422,
+  ORGANIZATION_ONBOARDING_INCOMPLETE: 422,
 
   RATE_LIMITED: 429,
 
   INTERNAL_ERROR: 500,
+  ONBOARDING_LINK_ERROR: 500,
 };
 
 /** True when a code is safe to return to a client. */
