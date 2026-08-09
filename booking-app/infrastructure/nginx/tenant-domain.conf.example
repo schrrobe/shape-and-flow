@@ -1,0 +1,124 @@
+# One organizer's own domain.
+#
+# Copy this file per organizer, replace `studio-muster.de` throughout, then:
+#
+#     sudo cp studio-muster.conf /etc/nginx/sites-available/
+#     sudo ln -s /etc/nginx/sites-available/studio-muster.conf /etc/nginx/sites-enabled/
+#     sudo nginx -t && sudo systemctl reload nginx
+#
+# The full runbook — DNS, certificate, and registering the hostname with the API — is in
+# docs/operations.md under "Organizer domains". Adding this file alone does nothing
+# useful: until the hostname exists in `organization_domains`, requests arriving here
+# resolve to the deployment's default organizer.
+#
+# ── What is deliberately identical to booking.conf ──────────────────────────
+#
+# The upstreams, the one-hop rule, and the proxy headers. In particular `Host` and
+# `X-Forwarded-Host` are set from `$host` rather than passed through, which overwrites
+# whatever the client sent — the API resolves the tenant from that value, so a
+# client-controlled header would be a client-controlled tenant.
+#
+# `upstream` blocks are NOT repeated here: they are defined once in booking.conf, which
+# sits at the same `http` level, and declaring them twice makes nginx refuse to start
+# with `duplicate upstream "sf_booking_api"`.
+#
+# The `$sf_request_id` map is likewise defined once in booking.conf.
+
+server {
+  listen 80;
+  listen [::]:80;
+  server_name studio-muster.de www.studio-muster.de;
+
+  location /.well-known/acme-challenge/ {
+    root /var/www/certbot;
+  }
+
+  location / {
+    return 308 https://$host$request_uri;
+  }
+}
+
+server {
+  # No `http2` parameter: it is per-socket and booking.conf already carries it for :443.
+  # Repeating it warns `protocol options redefined` on every reload.
+  listen 443 ssl;
+  listen [::]:443 ssl;
+  server_name studio-muster.de www.studio-muster.de;
+
+  ssl_certificate     /etc/letsencrypt/live/studio-muster.de/fullchain.pem;
+  ssl_certificate_key /etc/letsencrypt/live/studio-muster.de/privkey.pem;
+  ssl_protocols TLSv1.2 TLSv1.3;
+  ssl_prefer_server_ciphers off;
+  ssl_session_cache shared:SSL:10m;
+  ssl_session_timeout 1d;
+
+  # Same reasoning as the main vhost: the office session cookie is `Secure` in
+  # production, so plain HTTP would make every login appear to succeed and then fail.
+  add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+
+  server_tokens off;
+
+  client_max_body_size 1m;
+  client_body_timeout 15s;
+
+  access_log /var/log/nginx/studio-muster.access.log;
+  error_log  /var/log/nginx/studio-muster.error.log warn;
+
+  # ── API ───────────────────────────────────────────────────────────────────
+
+  location /api/ {
+    proxy_pass http://sf_booking_api;
+
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";
+
+    # The two headers tenant resolution depends on. `$host` is the name the client asked
+    # for, and setting these overwrites anything the client sent under the same names.
+    proxy_set_header Host              $host;
+    proxy_set_header X-Forwarded-Host  $host;
+
+    proxy_set_header X-Real-IP         $remote_addr;
+    proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Request-Id      $sf_request_id;
+
+    proxy_hide_header X-Request-Id;
+    add_header X-Request-Id $sf_request_id always;
+    # Re-declared because this level declares an `add_header` of its own, which otherwise
+    # drops the server-level HSTS header from every response under /api/.
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+
+    # Stripe signs the exact bytes of a webhook body and the API verifies against the raw
+    # buffer. Nothing in this location may modify a request body.
+    proxy_request_buffering on;
+
+    proxy_connect_timeout 5s;
+    proxy_send_timeout 30s;
+    proxy_read_timeout 30s;
+
+    # A silent retry on a non-idempotent POST is how one payment becomes two.
+    proxy_next_upstream off;
+  }
+
+  # ── Everything else: the built bundle ─────────────────────────────────────
+  #
+  # The same SPA bundle every organizer is served. It carries no tenant identity of its
+  # own — it makes same-origin relative calls to /api, and the API resolves the organizer
+  # from the hostname the browser already sent.
+
+  location / {
+    proxy_pass http://sf_booking_web;
+
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";
+
+    proxy_set_header Host              $host;
+    proxy_set_header X-Real-IP         $remote_addr;
+    proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Request-Id      $sf_request_id;
+
+    proxy_connect_timeout 5s;
+    proxy_read_timeout 15s;
+  }
+}

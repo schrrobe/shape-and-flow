@@ -14,6 +14,7 @@ const schema = readFileSync(new URL('../../prisma/schema.prisma', import.meta.ur
 const EXPECTED_MODELS = [
   'Organization',
   'OrganizationSettings',
+  'OrganizationDomain',
   'ClosedDay',
   'OfficeUser',
   'PasswordResetToken',
@@ -72,12 +73,12 @@ function fieldLines(body: string): string[] {
 }
 
 describe('schema.prisma models', () => {
-  it('declares exactly the twenty-nine planned models', () => {
+  it('declares exactly the thirty planned models', () => {
     expect([...modelNames].sort()).toEqual([...EXPECTED_MODELS].sort());
   });
 
-  it('declares twenty-nine models, not merely the right names', () => {
-    expect(modelNames).toHaveLength(29);
+  it('declares thirty models, not merely the right names', () => {
+    expect(modelNames).toHaveLength(30);
   });
 });
 

@@ -39,6 +39,7 @@ export const errorCodeSchema = z.enum([
   'PAYMENT_NOT_REFUNDABLE',
   'NO_EMPLOYEE_AVAILABLE',
   'EMAIL_ALREADY_REGISTERED',
+  'ORGANIZATION_DOMAIN_TAKEN',
   // 422
   'IDEMPOTENCY_KEY_REUSED',
   'OUTSIDE_BOOKING_WINDOW',
@@ -91,6 +92,10 @@ export const ERROR_STATUS: Record<ErrorCode, number> = {
   // 422: the request is well-formed and nothing about it can be corrected by resubmitting
   // — the right next step is signing in or resetting the existing account's password.
   EMAIL_ALREADY_REGISTERED: 409,
+  // A hostname that already belongs to an organization. Returned whether or not that
+  // organization is the caller's own: telling the two apart would let anybody with an
+  // office account enumerate which domains their competitors have registered.
+  ORGANIZATION_DOMAIN_TAKEN: 409,
 
   IDEMPOTENCY_KEY_REUSED: 422,
   OUTSIDE_BOOKING_WINDOW: 422,

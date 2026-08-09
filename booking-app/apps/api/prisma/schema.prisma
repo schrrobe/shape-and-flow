@@ -210,6 +210,12 @@ enum AuditAction {
   CUSTOMER_UPDATED
   CUSTOMER_ERASED
   ORGANIZATION_ONBOARDING_LINK_REQUESTED
+  // A domain decides which organization an unauthenticated visitor is served, so
+  // adding or removing one is a change to who the public booking flow answers as.
+  // Without a trace, a mistyped hostname that quietly stopped resolving — or one
+  // added to the wrong organization — has nobody to ask.
+  ORGANIZATION_DOMAIN_ADDED
+  ORGANIZATION_DOMAIN_REMOVED
 }
 
 enum EntityType {
@@ -279,6 +285,7 @@ model Organization {
   updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   settings               OrganizationSettings?
+  domains                OrganizationDomain[]
   closedDays             ClosedDay[]
   officeUsers            OfficeUser[]
   passwordResetTokens    PasswordResetToken[]
@@ -336,6 +343,38 @@ model OrganizationSettings {
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   @@map("organization_settings")
+}
+
+/// A hostname the public booking flow answers under, on behalf of one organization.
+///
+/// This is the primary tenant identity for public traffic: a request arriving at
+/// `kunde-a.de` is resolved here before `?organizer=<slug>` is even looked at, so a
+/// customer's own domain needs no query parameter and a link that carries a
+/// contradicting one cannot redirect the visit to somebody else's calendar.
+///
+/// `hostname` is globally unique rather than unique per organization, which is what
+/// makes "the same domain pointed at two organizations" unrepresentable instead of a
+/// race the resolver would have to break arbitrarily. Stored normalized — lowercase,
+/// punycode, no scheme, no port, no trailing dot — because a lookup that had to try
+/// spelling variants would eventually miss one.
+model OrganizationDomain {
+  id             String @id @default(cuid())
+  hostname       String @unique
+  organizationId String @map("organization_id")
+  /// The domain to prefer when one has to be chosen, e.g. `studio-muster.de` over
+  /// `www.studio-muster.de`. A partial unique index keeps it to at most one per
+  /// organization. Resolution does not read it — every domain resolves equally.
+  isPrimary      Boolean @default(false) @map("is_primary")
+  /// Reserved for a later DNS/ACME ownership check. Resolution deliberately does NOT
+  /// gate on it today: a domain only reaches this table through an authenticated
+  /// owner, and DNS already has to point here for a request to arrive at all.
+  verifiedAt     DateTime? @map("verified_at") @db.Timestamptz(3)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@map("organization_domains")
 }
 
 model ClosedDay {

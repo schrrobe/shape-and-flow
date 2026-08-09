@@ -26,6 +26,21 @@ const TEST_CONFIG = {
   REDIS_QUEUE_PREFIX: process.env.REDIS_QUEUE_PREFIX,
 } as unknown as AppConfig;
 
+/**
+ * The slice of configuration TenantResolutionMiddleware reads, for the specs that
+ * construct it directly rather than resolving it from a container.
+ *
+ * `NODE_ENV: 'test'` is load-bearing: it is what makes `127.0.0.1` — the host supertest
+ * actually connects to — a central host, and so what keeps `?organizer=` working in the
+ * suite. A spec that wants to prove the production gate must say `NODE_ENV: 'production'`
+ * itself.
+ */
+export const TENANT_RESOLUTION_CONFIG = {
+  NODE_ENV: 'test',
+  PUBLIC_WEB_ORIGIN: 'http://localhost:5173',
+  PUBLIC_API_ORIGIN: 'http://localhost:3000',
+} as unknown as AppConfig;
+
 @Global()
 @Module({
   providers: [{ provide: ENV, useValue: TEST_CONFIG }],

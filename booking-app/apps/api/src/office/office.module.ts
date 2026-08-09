@@ -27,6 +27,8 @@ import { OfficeBookingsController } from './office-bookings.controller.js';
 import { OfficeBookingsService } from './office-bookings.service.js';
 import { OfficeUsersController } from './office-users.controller.js';
 import { OfficeUsersService } from './office-users.service.js';
+import { OrganizationDomainsController } from './organization-domains.controller.js';
+import { OrganizationDomainsService } from './organization-domains.service.js';
 import { RequestsController } from './requests.controller.js';
 import { RequestsService } from './requests.service.js';
 import { SettingsController } from './settings.controller.js';
@@ -67,6 +69,7 @@ import { SettingsService } from './settings.service.js';
     CatalogController,
     SettingsController,
     OfficeUsersController,
+    OrganizationDomainsController,
     // Before the two `office` controllers that declare `:id` segments of their own:
     // `office/bookings` and `office/exports` are literal prefixes, and Express resolves
     // by registration order rather than specificity.
@@ -83,6 +86,7 @@ import { SettingsService } from './settings.service.js';
     CatalogService,
     SettingsService,
     OfficeUsersService,
+    OrganizationDomainsService,
     OfficeBookingsService,
     RequestsService,
     CustomersService,

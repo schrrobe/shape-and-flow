@@ -17,6 +17,7 @@ import { prisma, resetDatabase } from '../database.harness.js';
 import { seedOrganization } from '../factories/index.js';
 import { loadOrganization } from '../public-app.harness.js';
 import { connectRedis, redis } from '../redis.harness.js';
+import { TENANT_RESOLUTION_CONFIG } from '../test-config.module.js';
 
 import type { BookingTestApp } from '../booking-app.harness.js';
 import type { SeedContext } from '../factories/index.js';
@@ -130,7 +131,7 @@ beforeEach(async () => {
 
   ctx = await seedOrganization(prisma);
 
-  const tenantResolution = new TenantResolutionMiddleware(prisma);
+  const tenantResolution = new TenantResolutionMiddleware(prisma, TENANT_RESOLUTION_CONFIG);
 
   testApp = await createBookingTestApp({
     organization: await loadOrganization(ctx.organization.id),

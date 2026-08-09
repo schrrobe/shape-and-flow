@@ -84,6 +84,19 @@ export const envSchema = z
 
     // ── tenancy ──────────────────────────────────────────────────────────────
     DEFAULT_ORGANIZATION_SLUG: nonEmpty,
+    /**
+     * Extra hostnames on which `?organizer=<slug>` may choose the tenant.
+     *
+     * Comma-separated, and additive: the hosts of PUBLIC_WEB_ORIGIN and
+     * PUBLIC_API_ORIGIN are always central, so a deployment that answers under one
+     * name needs nothing here. Set it when the central address has aliases — a stage
+     * host reachable under two names, say.
+     *
+     * An organizer's own domain must NOT be listed. Those resolve from
+     * `organization_domains`, and a domain that is also central would let a link with
+     * a foreign `?organizer=` pick a different tenant on that organizer's address.
+     */
+    CENTRAL_HOSTNAMES: z.string().trim().optional(),
 
     // ── web origins ──────────────────────────────────────────────────────────
     PUBLIC_WEB_ORIGIN: httpOrigin,

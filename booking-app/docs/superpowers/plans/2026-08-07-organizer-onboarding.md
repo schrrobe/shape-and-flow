@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - No separate Promoter table or microservice — everything lives in `Organization` and the existing `apps/api` app.
-- Tenant resolution for public routes is `?organizer=<slug>` only — no subdomain routing, root domain keeps resolving to `DEFAULT_ORGANIZATION_SLUG`.
+- ~~Tenant resolution for public routes is `?organizer=<slug>` only — no subdomain routing, root domain keeps resolving to `DEFAULT_ORGANIZATION_SLUG`.~~ **Superseded.** Public routes now resolve the hostname against `organization_domains` first and fall back to `?organizer=<slug>`, which is accepted only on a central host. The root domain still resolves to `DEFAULT_ORGANIZATION_SLUG`. See "Runbook: giving an organizer its own domain" in `docs/operations.md`.
 - Stripe Connect (Express accounts), not Adyen.
 - First Owner sets their password directly in the registration form — no reset-link flow.
 - No cross-organization email uniqueness — `@@unique([organizationId, email])` on `OfficeUser` stays as-is (confirmed YAGNI).

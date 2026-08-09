@@ -208,6 +208,16 @@ sudo systemctl start nginx
 sudo ln -s /etc/nginx/sites-available/booking.conf /etc/nginx/sites-enabled/
 sudo nginx -t && sudo systemctl reload nginx
 
+# The catch-all, so a hostname no vhost claims gets a closed connection rather than the
+# booking app. Without it nginx serves an unmatched host from the first vhost it parsed,
+# and anybody who points a domain at this IP gets a working booking front end under their
+# own name. Ubuntu's packaged default already claims `default_server` on :80, and nginx
+# refuses to start with two.
+sudo rm -f /etc/nginx/sites-enabled/default
+sudo cp booking-app/infrastructure/nginx/default-server.conf /etc/nginx/sites-available/
+sudo ln -s /etc/nginx/sites-available/default-server.conf /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
+
 # Renewals go back through the webroot, which this vhost now serves on port 80, so nginx
 # keeps running for every renewal after the first. Certbot rewrites the stored authenticator
 # only when it actually issues, which is what `--force-renewal` is for here — leave it out
@@ -246,6 +256,104 @@ nothing is at stake:
 ```bash
 booking-app/infrastructure/scripts/backup.sh
 ```
+
+---
+
+## Runbook: giving an organizer its own domain
+
+An organizer can run the booking flow under its own address — `https://studio-muster.de/booking`
+— instead of the central one with `?organizer=studio-muster`. The API decides the tenant from
+the hostname the request arrived on, so this is three separate systems that have to agree: DNS,
+nginx, and a row in `organization_domains`. Doing two of the three leaves a domain that looks
+live and serves the wrong organizer.
+
+**How the API resolves a tenant**, in order, for every `/api/public/*` request:
+
+1. The hostname, looked up in `organization_domains`. A match wins outright — a
+   `?organizer=` in the URL is not even read, so an old link from the central address
+   cannot redirect a customer into a different organizer's calendar.
+2. Otherwise `?organizer=<slug>`, but **only** on a central host: the hostnames of
+   `PUBLIC_WEB_ORIGIN` and `PUBLIC_API_ORIGIN`, plus anything in `CENTRAL_HOSTNAMES`. A
+   slug arriving on any other hostname is refused with 404 `ORGANIZATION_NOT_FOUND`,
+   because otherwise every unclaimed domain pointed at this server would be a working
+   front end for any tenant.
+3. Otherwise nothing, and the request is served as `DEFAULT_ORGANIZATION_SLUG`. This is the
+   single-organizer deployment and the central landing page.
+
+**1. DNS.** An `A` record, and an `AAAA` if the machine has IPv6, for both the apex and `www`,
+pointing at this server's address. Wait for it to resolve before going further — certbot's
+first check is a real DNS lookup, and a failed issuance leaves rate-limit budget spent.
+
+```bash
+dig +short studio-muster.de A
+dig +short www.studio-muster.de A
+```
+
+**2. The certificate.** Webroot mode works from the second domain onward because the catch-all
+vhost serves `/.well-known/acme-challenge/` for hostnames no vhost claims yet — which is exactly
+the state this domain is in right now. nginx keeps running.
+
+```bash
+sudo certbot certonly --webroot -w /var/www/certbot \
+                      -d studio-muster.de -d www.studio-muster.de \
+                      --cert-name studio-muster.de
+```
+
+Both names go on one certificate, and `--cert-name` pins the lineage so a later `www`-only
+renewal does not silently create a second one.
+
+**3. The vhost.**
+
+```bash
+sed 's/studio-muster\.de/<their domain>/g' \
+    booking-app/infrastructure/nginx/tenant-domain.conf.example > /tmp/<their domain>.conf
+sudo cp /tmp/<their domain>.conf /etc/nginx/sites-available/
+sudo ln -s /etc/nginx/sites-available/<their domain>.conf /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+The template repeats no `upstream` block and no `map` — both live in `booking.conf` at the same
+`http` level, and duplicating either makes nginx refuse to start.
+
+**4. Register the hostname.** As an `OWNER` of that organization, signed in to the office:
+
+```
+POST /api/office/domains   { "hostname": "studio-muster.de", "isPrimary": true }
+POST /api/office/domains   { "hostname": "www.studio-muster.de" }
+DELETE /api/office/domains/:id
+GET  /api/office/domains
+```
+
+The API normalizes what it stores — lowercase, punycode, no scheme, no port, no trailing dot —
+so `https://Studio-Muster.DE/` and `studio-muster.de.` both become `studio-muster.de`. A
+hostname belongs to exactly one organization, enforced by a unique index; a second claim is
+refused with 409 `ORGANIZATION_DOMAIN_TAKEN` whether the holder is the caller's own
+organization or somebody else's. The central address cannot be claimed at all. Both the
+addition and the removal are written to the audit log.
+
+**5. Check it.** The first call must answer with that organizer's services and no query
+parameter anywhere; the second must be refused.
+
+```bash
+curl -s https://studio-muster.de/api/public/organizations/current | jq .slug
+curl -s -o /dev/null -w '%{http_code}\n' \
+     'https://studio-muster.de/api/public/services?organizer=some-other-slug'   # 200, still theirs
+curl -s -H 'Host: not-registered.example' \
+     'https://<central hostname>/api/public/services?organizer=studio-muster'   # 404
+```
+
+**What still points at the central address.** Manage links in confirmation emails, password
+reset links, and the URLs Stripe returns a customer to after checkout are all built from
+`PUBLIC_WEB_ORIGIN`, which is one origin for the whole deployment. A customer who booked on
+`studio-muster.de` therefore lands back on the central hostname with `?organizer=` appended.
+That works, and it is deliberate — carrying per-organizer origins through the mail templates
+and the Stripe return-URL allow-list is a separate change.
+
+**Removing a domain.** Delete the row first (`DELETE /api/office/domains/:id`), then the vhost,
+then let the certificate lapse. In that order: a vhost still serving a hostname whose row is
+gone falls through to the default organizer, which is wrong but harmless, whereas a row still
+present for a hostname somebody else has since taken is a domain we resolve to a tenant on
+behalf of a stranger.
 
 ---
 
