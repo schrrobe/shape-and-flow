@@ -362,9 +362,9 @@ describe('envSchema', () => {
   });
 
   it('rejects a CENTRAL_HOSTNAMES entry carrying a scheme or a port', () => {
-    expect(paths(parseConfig({ ...valid, CENTRAL_HOSTNAMES: 'https://stage.example.com' }))).toContain(
-      'CENTRAL_HOSTNAMES',
-    );
+    expect(
+      paths(parseConfig({ ...valid, CENTRAL_HOSTNAMES: 'https://stage.example.com' })),
+    ).toContain('CENTRAL_HOSTNAMES');
     expect(paths(parseConfig({ ...valid, CENTRAL_HOSTNAMES: 'stage.example.com:8443' }))).toContain(
       'CENTRAL_HOSTNAMES',
     );
