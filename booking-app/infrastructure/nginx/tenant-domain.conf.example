@@ -54,7 +54,12 @@ server {
 
   # Same reasoning as the main vhost: the office session cookie is `Secure` in
   # production, so plain HTTP would make every login appear to succeed and then fail.
-  add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+  #
+  # No `includeSubDomains` here, unlike booking.conf. This domain belongs to the
+  # organizer, not the platform: pinning every subdomain to HTTPS for a year would break
+  # a service the organizer runs there that we don't and can't fix. Add it only after the
+  # organizer confirms every subdomain they use actually serves HTTPS.
+  add_header Strict-Transport-Security "max-age=31536000" always;
 
   server_tokens off;
 
@@ -85,8 +90,9 @@ server {
     proxy_hide_header X-Request-Id;
     add_header X-Request-Id $sf_request_id always;
     # Re-declared because this level declares an `add_header` of its own, which otherwise
-    # drops the server-level HSTS header from every response under /api/.
-    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    # drops the server-level HSTS header from every response under /api/. No
+    # `includeSubDomains`, for the same reason as the server-level header above.
+    add_header Strict-Transport-Security "max-age=31536000" always;
 
     # Stripe signs the exact bytes of a webhook body and the API verifies against the raw
     # buffer. Nothing in this location may modify a request body.

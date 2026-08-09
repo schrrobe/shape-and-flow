@@ -80,6 +80,32 @@ const uniqueViolation = (): Prisma.PrismaClientKnownRequestError =>
     },
   });
 
+/**
+ * The shape a real 23505 on the partial `organization_domains_primary_key` index
+ * arrives in — the race two concurrent primary-domain promotions for the same
+ * organization produce. Unlike the hostname violation, Postgres reports this one by
+ * index name rather than a column list, so the fixture leaves `fields` empty and puts
+ * the name in the message the way the driver adapter actually does.
+ */
+const primaryKeyViolation = (): Prisma.PrismaClientKnownRequestError =>
+  new Prisma.PrismaClientKnownRequestError('Database error.', {
+    code: 'P2002',
+    clientVersion: '7.9.1',
+    meta: {
+      modelName: 'OrganizationDomain',
+      driverAdapterError: {
+        name: 'DriverAdapterError',
+        cause: {
+          originalCode: '23505',
+          originalMessage:
+            'duplicate key value violates unique constraint "organization_domains_primary_key"',
+          kind: 'UniqueConstraintViolation',
+          constraint: { fields: [], index: 'organization_domains_primary_key' },
+        },
+      },
+    },
+  });
+
 describe('OrganizationDomainsService', () => {
   describe('list', () => {
     it('reads only this organization, primary first', async () => {
@@ -178,6 +204,33 @@ describe('OrganizationDomainsService', () => {
       await expect(service.add({ hostname: 'studio-muster.de', isPrimary: false })).rejects.toThrow(
         'connection terminated',
       );
+    });
+
+    // Two requests promoting different domains of the same organization race the
+    // partial unique index: both `updateMany`s step the old primary down, then both
+    // inserts try to be the one true primary and the loser gets a 23505 that has
+    // nothing to do with the hostname. Retrying re-runs the `updateMany` against
+    // whichever row won, which is why the retry succeeds rather than looping forever.
+    it('retries a primary-index race instead of surfacing it as an internal error', async () => {
+      const { service, create } = build();
+      create
+        .mockRejectedValueOnce(primaryKeyViolation())
+        .mockResolvedValueOnce(row({ isPrimary: true }));
+
+      const result = await service.add({ hostname: 'studio-muster.de', isPrimary: true });
+
+      expect(create).toHaveBeenCalledTimes(2);
+      expect(result.domain.hostname).toBe('studio-muster.de');
+    });
+
+    it('gives up on a primary-index race that never clears', async () => {
+      const { service, create } = build();
+      create.mockRejectedValue(primaryKeyViolation());
+
+      await expect(
+        service.add({ hostname: 'studio-muster.de', isPrimary: true }),
+      ).rejects.toThrow(primaryKeyViolation().message);
+      expect(create).toHaveBeenCalledTimes(4);
     });
   });
 

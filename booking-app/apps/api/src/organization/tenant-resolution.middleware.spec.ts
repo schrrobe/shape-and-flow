@@ -57,13 +57,14 @@ describe('TenantResolutionMiddleware', () => {
     it('falls through to the default organization when no ?organizer= param is present', async () => {
       const { prisma, findOrganization } = fakePrisma();
       const middleware = new TenantResolutionMiddleware(prisma, config());
-      const next = vi.fn();
+      const next = vi.fn(() => {
+        expect(hasTenant()).toBe(false);
+      });
 
       await middleware.middleware(fakeRequest({}), {} as Response, next as NextFunction);
 
       expect(findOrganization).not.toHaveBeenCalled();
-      expect(next).toHaveBeenCalledWith();
-      expect(hasTenant()).toBe(false);
+      expect(next).toHaveBeenCalledTimes(1);
     });
 
     // An unregistered hostname with no slug is a deployment that simply has one
@@ -72,7 +73,9 @@ describe('TenantResolutionMiddleware', () => {
     it('falls through on an unregistered host that offers no slug', async () => {
       const { prisma } = fakePrisma();
       const middleware = new TenantResolutionMiddleware(prisma, config());
-      const next = vi.fn();
+      const next = vi.fn(() => {
+        expect(hasTenant()).toBe(false);
+      });
 
       await middleware.middleware(
         fakeRequest({}, 'unregistered.example'),
@@ -80,8 +83,7 @@ describe('TenantResolutionMiddleware', () => {
         next as NextFunction,
       );
 
-      expect(next).toHaveBeenCalledWith();
-      expect(hasTenant()).toBe(false);
+      expect(next).toHaveBeenCalledTimes(1);
     });
   });
 

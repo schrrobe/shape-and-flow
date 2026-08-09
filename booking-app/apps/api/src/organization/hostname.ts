@@ -42,8 +42,14 @@ function stripDecorations(value: string): string {
   return host;
 }
 
-/** A syntactically valid DNS name, or null. IP literals are not names and fail here. */
-function validDnsName(host: string): string | null {
+/**
+ * A syntactically valid DNS name, or null. IP literals are not names and fail here.
+ *
+ * Expects `host` already lowercased and stripped of brackets/trailing dot — a scheme,
+ * port, or path survives into a label and fails `LABEL_PATTERN` there, so callers get
+ * that rejection for free rather than having to check for those separately.
+ */
+export function validDnsName(host: string): string | null {
   if (host === '' || host.length > MAX_HOSTNAME_LENGTH) return null;
   if (isIP(host) !== 0) return null;
 

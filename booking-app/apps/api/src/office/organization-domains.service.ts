@@ -85,40 +85,55 @@ export class OrganizationDomainsService {
       });
     }
 
-    try {
-      const domain = await this.prisma.$transaction(async (tx) => {
-        if (input.isPrimary) {
-          // The partial unique index permits one primary per organization, so the
-          // previous holder has to step down in the same transaction that promotes the
-          // new one — otherwise the insert fails against a constraint the caller never
-          // asked about.
-          await tx.organizationDomain.updateMany({
-            where: { organizationId, isPrimary: true },
-            data: { isPrimary: false },
+    // Two requests promoting different domains of the same organization to primary can
+    // both pass the `updateMany` that steps the old primary down, then both insert with
+    // `isPrimary: true` and race the partial unique index. Retrying re-runs the
+    // `updateMany` against whichever row won, so the second attempt always clears it.
+    const MAX_PRIMARY_RACE_RETRIES = 3;
+
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const domain = await this.prisma.$transaction(async (tx) => {
+          if (input.isPrimary) {
+            // The partial unique index permits one primary per organization, so the
+            // previous holder has to step down in the same transaction that promotes the
+            // new one — otherwise the insert fails against a constraint the caller never
+            // asked about.
+            await tx.organizationDomain.updateMany({
+              where: { organizationId, isPrimary: true },
+              data: { isPrimary: false },
+            });
+          }
+
+          return await tx.organizationDomain.create({
+            data: { hostname, organizationId, isPrimary: input.isPrimary },
+            select: DOMAIN_SELECT,
+          });
+        });
+
+        this.logger.log(`domain registered: ${hostname}`);
+
+        return { domain: toDto(domain) };
+      } catch (error) {
+        if (isUniqueViolation(error, 'hostname')) {
+          // Identical answer whether the row belongs to this organization or another
+          // one. The alternative leaks which domains the platform's other customers have
+          // registered to anybody with an office account and a word list.
+          throw new AppError('ORGANIZATION_DOMAIN_TAKEN', {
+            message: 'That hostname is already registered.',
+            details: { field: 'hostname' },
           });
         }
 
-        return await tx.organizationDomain.create({
-          data: { hostname, organizationId, isPrimary: input.isPrimary },
-          select: DOMAIN_SELECT,
-        });
-      });
+        if (
+          isUniqueViolation(error, 'organization_domains_primary_key') &&
+          attempt < MAX_PRIMARY_RACE_RETRIES
+        ) {
+          continue;
+        }
 
-      this.logger.log(`domain registered: ${hostname}`);
-
-      return { domain: toDto(domain) };
-    } catch (error) {
-      if (isUniqueViolation(error, 'hostname')) {
-        // Identical answer whether the row belongs to this organization or another
-        // one. The alternative leaks which domains the platform's other customers have
-        // registered to anybody with an office account and a word list.
-        throw new AppError('ORGANIZATION_DOMAIN_TAKEN', {
-          message: 'That hostname is already registered.',
-          details: { field: 'hostname' },
-        });
+        throw error;
       }
-
-      throw error;
     }
   }
 

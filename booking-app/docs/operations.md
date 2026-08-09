@@ -317,7 +317,7 @@ The template repeats no `upstream` block and no `map` — both live in `booking.
 
 **4. Register the hostname.** As an `OWNER` of that organization, signed in to the office:
 
-```
+```http
 POST /api/office/domains   { "hostname": "studio-muster.de", "isPrimary": true }
 POST /api/office/domains   { "hostname": "www.studio-muster.de" }
 DELETE /api/office/domains/:id
@@ -336,11 +336,16 @@ parameter anywhere; the second must be refused.
 
 ```bash
 curl -s https://studio-muster.de/api/public/organizations/current | jq .slug
-curl -s -o /dev/null -w '%{http_code}\n' \
-     'https://studio-muster.de/api/public/services?organizer=some-other-slug'   # 200, still theirs
-curl -s -H 'Host: not-registered.example' \
-     'https://<central hostname>/api/public/services?organizer=studio-muster'   # 404
+curl -s -w '\n%{http_code}\n' \
+     'https://studio-muster.de/api/public/services?organizer=some-other-slug'   # still theirs, 200
+curl -s -w '\n%{http_code}\n' \
+     'https://<central hostname>/api/public/services?organizer=not-a-real-organizer'   # 404
 ```
+
+The last command has to run against the central address rather than a spoofed `Host` header: a
+hostname nginx has no vhost for never reaches the API at all — `default-server.conf` drops it at
+the TLS layer — so the only way to exercise the "no organizer matches" branch over HTTPS is a real
+request that resolves to a host nginx does serve, carrying a slug that resolves to nothing.
 
 **What still points at the central address.** Manage links in confirmation emails, password
 reset links, and the URLs Stripe returns a customer to after checkout are all built from

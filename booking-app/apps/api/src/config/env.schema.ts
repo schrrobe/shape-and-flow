@@ -2,6 +2,8 @@ import { writeSync } from 'node:fs';
 
 import { z } from 'zod';
 
+import { validDnsName } from '../organization/hostname.js';
+
 /**
  * The single source of truth for this application's configuration.
  *
@@ -96,7 +98,22 @@ export const envSchema = z
      * `organization_domains`, and a domain that is also central would let a link with
      * a foreign `?organizer=` pick a different tenant on that organizer's address.
      */
-    CENTRAL_HOSTNAMES: z.string().trim().optional(),
+    CENTRAL_HOSTNAMES: z
+      .string()
+      .trim()
+      .refine(
+        (value) =>
+          value
+            .split(',')
+            .map((entry) => entry.trim())
+            .filter((entry) => entry !== '')
+            .every((entry) => validDnsName(entry.toLowerCase()) !== null),
+        {
+          message:
+            'CENTRAL_HOSTNAMES must be a comma-separated list of bare hostnames, without scheme or port',
+        },
+      )
+      .optional(),
 
     // ── web origins ──────────────────────────────────────────────────────────
     PUBLIC_WEB_ORIGIN: httpOrigin,
