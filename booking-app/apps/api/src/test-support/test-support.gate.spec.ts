@@ -29,6 +29,7 @@ const baseEnv = {
   UNLEASH_DEPLOYMENT: 'production',
   PAYMENT_PROVIDER: 'stripe',
   STRIPE_SECRET_KEY: 'sk_live_x',
+  STRIPE_PUBLISHABLE_KEY: 'pk_live_x',
   STRIPE_WEBHOOK_SECRET: 'whsec_x',
   STRIPE_CONNECT_WEBHOOK_SECRET: 'whsec_connect_x',
   EMAIL_PROVIDER: 'resend',

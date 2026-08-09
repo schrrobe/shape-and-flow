@@ -10,7 +10,8 @@
     "customers": "Kunden",
     "exports": "Exporte",
     "users": "Benutzer",
-    "settings": "Einstellungen"
+    "settings": "Einstellungen",
+    "payments": "Zahlungen"
   },
   "layout": {
     "officeLabel": "Verwaltung",
@@ -363,6 +364,15 @@
     "pending": "Stripe prüft Ihre Angaben noch. Bitte laden Sie die Seite in einer Minute neu oder versuchen Sie es jetzt erneut.",
     "failed": "Beim Abschluss Ihres Stripe-Onboardings ist etwas schiefgegangen.",
     "retry": "Onboarding erneut starten"
+  },
+  "payments": {
+    "heading": "Zahlungen und Auszahlungen",
+    "intro": "Diese Ansichten kommen direkt von Stripe und zeigen den Stand Ihres eigenen Kontos.",
+    "payoutsHeading": "Auszahlungen",
+    "paymentsHeading": "Eingegangene Zahlungen",
+    "onboardingRequired": "Solange Ihr Stripe-Onboarding nicht abgeschlossen ist, liegen hier noch keine Daten vor.",
+    "onboardingLink": "Onboarding fortsetzen",
+    "failed": "Die Stripe-Ansicht konnte nicht geladen werden."
   },
   "requests": {
     "heading": "Anfragen",

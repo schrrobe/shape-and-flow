@@ -187,6 +187,11 @@ const routes: RouteRecordRaw[] = [
         component: () => import('../pages/office/SettingsPage.vue'),
       },
       {
+        path: 'payments',
+        name: 'office-payments',
+        component: () => import('../pages/office/PaymentsPage.vue'),
+      },
+      {
         path: 'onboarding-status',
         name: 'onboarding-status',
         component: () => import('../pages/office/OnboardingStatusPage.vue'),

@@ -66,6 +66,15 @@ export const PUBLIC_API_ORIGIN = 'http://localhost:3000';
 export const RESEND_WEBHOOK_SECRET = 'whsec_dGVzdC1yZXNlbmQtc2VjcmV0';
 export const TWILIO_AUTH_TOKEN = 'test-twilio-token';
 
+/**
+ * The Stripe publishable key the Connect embedded-components endpoint hands back.
+ *
+ * Not a credential — it is meant for browsers — so a fixed value in the harness is fine,
+ * and exporting it lets a suite assert on what the response carried without repeating the
+ * literal.
+ */
+export const STRIPE_PUBLISHABLE_KEY = 'pk_test_harness';
+
 let currentOrganization: OrganizationWithSettings | null = null;
 let currentClock: FixedClock | null = null;
 
@@ -146,6 +155,9 @@ const testConfig = {
   PUBLIC_WEB_ORIGIN,
   PUBLIC_API_ORIGIN,
   PAYMENT_PROVIDER: 'fake',
+  // Set even though the provider is `fake`: the Connect endpoints run against a stubbed
+  // Stripe client rather than the fake payment provider, and read this from config.
+  STRIPE_PUBLISHABLE_KEY,
   EMAIL_PROVIDER: 'fake',
   SMS_PROVIDER: 'fake',
   RESEND_WEBHOOK_SECRET,

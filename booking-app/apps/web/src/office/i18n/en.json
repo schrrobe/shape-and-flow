@@ -10,7 +10,8 @@
     "customers": "Customers",
     "exports": "Exports",
     "users": "Users",
-    "settings": "Settings"
+    "settings": "Settings",
+    "payments": "Payments"
   },
   "layout": {
     "officeLabel": "Office",
@@ -363,6 +364,15 @@
     "pending": "Stripe is still processing your details. Reload this page in a minute, or retry now.",
     "failed": "Something went wrong finishing your Stripe onboarding.",
     "retry": "Retry onboarding"
+  },
+  "payments": {
+    "heading": "Payments and payouts",
+    "intro": "These views come straight from Stripe and show the state of your own account.",
+    "payoutsHeading": "Payouts",
+    "paymentsHeading": "Payments received",
+    "onboardingRequired": "There is nothing to show here until your Stripe onboarding is finished.",
+    "onboardingLink": "Continue onboarding",
+    "failed": "The Stripe view could not be loaded."
   },
   "requests": {
     "heading": "Requests",

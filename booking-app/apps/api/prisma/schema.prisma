@@ -210,6 +210,11 @@ enum AuditAction {
   CUSTOMER_UPDATED
   CUSTOMER_ERASED
   ORGANIZATION_ONBOARDING_LINK_REQUESTED
+  // Opening the embedded payments view is worth a row even though the request itself only
+  // reads: the components it mounts can refund a charge, and a refund taken there leaves
+  // no REFUND_ISSUED row of its own. This is the only trace that an owner had that
+  // surface open at all.
+  ORGANIZATION_ACCOUNT_SESSION_CREATED
   // A domain decides which organization an unauthenticated visitor is served, so
   // adding or removing one is a change to who the public booking flow answers as.
   // Without a trace, a mistyped hostname that quietly stopped resolving — or one

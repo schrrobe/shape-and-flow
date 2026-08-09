@@ -2,6 +2,7 @@ import { ApiError, toApiError } from './errors.js';
 import { ORGANIZER_PARAM, tenantSlug } from './tenant.js';
 
 import type {
+  AccountSessionResponse,
   AuditLogQuery,
   AuditLogResponse,
   AvailabilityQuery,
@@ -413,6 +414,18 @@ export const api = {
 
       requestOnboardingLink: () =>
         request<{ onboardingLink: string }>('/office/organization/onboarding-link', {
+          method: 'POST',
+          session: true,
+        }),
+    },
+
+    payments: {
+      /**
+       * Called on every mount and again on every refresh Stripe asks for: an
+       * AccountSession secret is single-use, so a cached one fails the second time.
+       */
+      createAccountSession: () =>
+        request<AccountSessionResponse>('/office/organization/account-session', {
           method: 'POST',
           session: true,
         }),

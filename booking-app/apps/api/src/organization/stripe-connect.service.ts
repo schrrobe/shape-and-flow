@@ -48,6 +48,42 @@ export class StripeConnectService {
     return { stripeAccountId: account.id };
   }
 
+  /**
+   * A single-use secret that lets the office area mount Connect embedded components for
+   * this organizer's account.
+   *
+   * The enabled features are a deliberate short list rather than everything on offer:
+   *
+   *  - **`refund_management`** and **`dispute_management`** are on because the organizer
+   *    is the merchant of record on their own account and answers the chargeback either
+   *    way. Note that this is a *second* way to refund, alongside the office refund flow
+   *    in `RefundService` — a refund issued here does not pass our `refund.issue`
+   *    capability check and leaves no `REFUND_ISSUED` audit row.
+   *  - **`capture_payments`** is off: Checkout captures automatically, so there is no
+   *    manual capture flow for the control to act on.
+   *  - **`instant_payouts`** is off: the platform has not enabled it, so the button would
+   *    only ever produce an error.
+   */
+  async createAccountSession(stripeAccountId: string): Promise<{ clientSecret: string }> {
+    const stripe = this.require();
+    const session = await stripe.accountSessions.create({
+      account: stripeAccountId,
+      components: {
+        payments: {
+          enabled: true,
+          features: {
+            refund_management: true,
+            dispute_management: true,
+            capture_payments: false,
+          },
+        },
+        payouts: { enabled: true, features: { instant_payouts: false } },
+      },
+    });
+
+    return { clientSecret: session.client_secret };
+  }
+
   async createAccountLink(stripeAccountId: string, returnUrl: string): Promise<{ url: string }> {
     const stripe = this.require();
     const link = await stripe.accountLinks.create({
