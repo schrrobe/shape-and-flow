@@ -110,7 +110,7 @@ const ROLES_ALL: OfficeUserRole[] = ['OWNER', 'ADMIN', 'EMPLOYEE'];
 
 /** One representative route per row of §6.5, with who §6.5 says may reach it. */
 const MATRIX: {
-  method: 'get' | 'post' | 'patch' | 'put';
+  method: 'get' | 'post' | 'patch' | 'put' | 'delete';
   path: string;
   allow: OfficeUserRole[];
 }[] = [
@@ -137,6 +137,12 @@ const MATRIX: {
   { method: 'patch', path: '/api/office/settings', allow: ['OWNER'] },
   { method: 'get', path: '/api/office/settings', allow: ['OWNER'] },
   { method: 'post', path: '/api/office/users', allow: ['OWNER'] },
+  // Which organization the public booking flow answers as — owner-only for the same
+  // reason user management is, and not something an ADMIN configuring opening hours
+  // should be able to reassign.
+  { method: 'get', path: '/api/office/domains', allow: ['OWNER'] },
+  { method: 'post', path: '/api/office/domains', allow: ['OWNER'] },
+  { method: 'delete', path: '/api/office/domains/x', allow: ['OWNER'] },
   { method: 'get', path: '/api/office/audit-log', allow: ['OWNER'] },
 ];
 

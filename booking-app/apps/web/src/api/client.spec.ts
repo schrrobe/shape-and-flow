@@ -6,7 +6,12 @@ import en from '../i18n/en.json';
 
 import { api } from './client.js';
 import { ApiError, messageKeyFor, NETWORK_ERROR } from './errors.js';
-import { rememberTenantSlug, resetTenantSlugForTest } from './tenant.js';
+import {
+  captureTenantSlug,
+  rememberTenantSlug,
+  resetTenantSlugForTest,
+  tenantSlug,
+} from './tenant.js';
 
 interface Call {
   url: string;
@@ -122,13 +127,27 @@ describe('the organizer slug', () => {
     expect(calls[0]?.url).toBe('/api/public/organizations');
   });
 
-  it('is absent entirely on the root address', async () => {
+  // Two cases, one behaviour: the central landing page, and an organizer's own domain.
+  // On a customer domain the API resolves the tenant from the hostname, and every
+  // request is same-origin and relative — so the browser sends the right `Host` without
+  // the client doing anything. `sessionStorage` is per-origin, so a slug remembered
+  // while visiting the central address cannot follow the customer onto that domain and
+  // append a parameter that would be ignored at best and rejected at worst.
+  it('is absent entirely when no slug was captured, as on an organizer domain', async () => {
     resetTenantSlugForTest();
     queue(() => json([]));
 
     await api.public.services();
 
     expect(calls[0]?.url).toBe('/api/public/services');
+  });
+
+  it('captures nothing from a domain URL that carries no query', () => {
+    resetTenantSlugForTest();
+
+    captureTenantSlug(new URL('https://studio-muster.de/booking').search);
+
+    expect(tenantSlug()).toBeNull();
   });
 });
 

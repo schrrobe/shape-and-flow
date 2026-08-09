@@ -49,7 +49,13 @@ const unique = (prefix: string): string => {
  */
 export async function seedOrganization(
   prisma: PrismaClient,
-  options: { slug?: string; paymentsMode?: PaymentsMode; stripeAccountId?: string } = {},
+  options: {
+    slug?: string;
+    paymentsMode?: PaymentsMode;
+    stripeAccountId?: string;
+    /** Already-normalized hostnames. The first one becomes the primary domain. */
+    domains?: readonly string[];
+  } = {},
 ): Promise<SeedContext> {
   const slug = options.slug ?? 'shape-and-flow';
   // PLATFORM by default. A seeded tenant has no Stripe Express account, and a CONNECT
@@ -188,6 +194,16 @@ export async function seedOrganization(
       locale: Locale.de,
     },
   });
+
+  // Hostnames the public flow answers under, for the tests that resolve a tenant from
+  // the Host header instead of `?organizer=`. Stored exactly as normalized, because
+  // that is what the resolver looks up — a factory that stored a friendlier spelling
+  // would make a passing test prove nothing.
+  for (const [index, hostname] of (options.domains ?? []).entries()) {
+    await prisma.organizationDomain.create({
+      data: { organizationId: organization.id, hostname, isPrimary: index === 0 },
+    });
+  }
 
   return {
     organization,

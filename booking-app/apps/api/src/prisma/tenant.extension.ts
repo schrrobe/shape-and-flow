@@ -36,6 +36,7 @@ import type { PrismaClient } from './client.js';
  */
 export const ORG_SCOPED_MODELS: readonly Prisma.ModelName[] = [
   'OrganizationSettings',
+  'OrganizationDomain',
   'ClosedDay',
   'OfficeUser',
   'PasswordResetToken',

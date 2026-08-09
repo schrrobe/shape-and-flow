@@ -10,6 +10,7 @@ import { prisma, resetDatabase } from '../database.harness.js';
 import { seedOrganization } from '../factories/index.js';
 import { loadOrganization } from '../public-app.harness.js';
 import { connectRedis, redis } from '../redis.harness.js';
+import { TENANT_RESOLUTION_CONFIG } from '../test-config.module.js';
 
 import type { AppConfig } from '../../src/config/env.schema.js';
 import type { BookingTestApp } from '../booking-app.harness.js';
@@ -79,7 +80,7 @@ beforeEach(async () => {
   // directly in organization-registration.int.spec.ts.
   sessions = new SessionStore(redis, officeConfig, new FixedClock(NOW));
 
-  const tenantResolution = new TenantResolutionMiddleware(prisma);
+  const tenantResolution = new TenantResolutionMiddleware(prisma, TENANT_RESOLUTION_CONFIG);
   const officeTenant = new OfficeTenantMiddleware(sessions, prisma, officeConfig);
 
   testApp = await createBookingTestApp({

@@ -164,6 +164,8 @@ export const auditActionSchema = z.enum([
   'CUSTOMER_UPDATED',
   'CUSTOMER_ERASED',
   'ORGANIZATION_ONBOARDING_LINK_REQUESTED',
+  'ORGANIZATION_DOMAIN_ADDED',
+  'ORGANIZATION_DOMAIN_REMOVED',
 ]);
 export type AuditAction = z.infer<typeof auditActionSchema>;
 
